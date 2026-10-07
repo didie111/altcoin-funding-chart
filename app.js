@@ -55,7 +55,7 @@ const rulerHost=$('unified-chart');
 const paneScaleSeries=[candles,volume,funding,settlementCycle];
 function paneAtY(y){let bottom=0;for(let i=0;i<chart.panes().length;i++){bottom+=chart.panes()[i].getHeight()+(i?1:0);if(y<bottom)return i;}return -1;}
 
-/* 🎯 커스텀 가격축 범위(Price Range) 관리 */
+/* 커스텀 가격축 범위 관리 */
 const customPriceRanges = new Map();
 
 function applyCustomPriceRange(series, minVal, maxVal) {
@@ -80,11 +80,7 @@ rulerHost.addEventListener('wheel', e => {
   if (rulerEnabled || shiftHeld || rulerDragging) return;
   const box = rulerHost.getBoundingClientRect(),
         x = e.clientX - box.left,
-        y = e.clientY - box.top,
-        timeWidth = chart.timeScale().width();
-  
-  // Requirement 2 & 3: 오른쪽 가격축 영역이 아닌 본문 영역 스크롤 시 완전히 무시 (시간축 고정)
-  if (x < timeWidth) return;
+        y = e.clientY - box.top;
 
   const pane = paneAtY(y);
   const series = paneScaleSeries[pane];
@@ -93,7 +89,6 @@ rulerHost.addEventListener('wheel', e => {
   e.preventDefault();
   e.stopImmediatePropagation();
 
-  // 해당 패널 내 Y 좌표 위치 계산
   let accumulatedHeight = 0;
   const panes = chart.panes();
   for (let i = 0; i < pane; i++) {
@@ -102,7 +97,6 @@ rulerHost.addEventListener('wheel', e => {
   const paneTop = y - accumulatedHeight;
   const paneHeight = panes[pane].getHeight();
 
-  // 패널의 현재 최상단 / 최하단 가격 추출
   const topPrice = series.coordinateToPrice(0);
   const bottomPrice = series.coordinateToPrice(paneHeight);
   if (topPrice === null || bottomPrice === null || !Number.isFinite(topPrice) || !Number.isFinite(bottomPrice)) return;
@@ -111,18 +105,14 @@ rulerHost.addEventListener('wheel', e => {
   const currentMin = Math.min(topPrice, bottomPrice);
   if (currentMax <= currentMin) return;
 
-  // Requirement 6: 마우스 커서 위치의 가격을 고정점으로 설정
   const cursorPrice = series.coordinateToPrice(paneTop);
   if (cursorPrice === null || !Number.isFinite(cursorPrice)) return;
 
-  // Requirement 5: 마우스 휠 축소/확대 비율
   const factor = e.deltaY < 0 ? 0.85 : 1.18;
 
-  // 커서 가격 기준 상/하단 가격 범위 계산
   const newMin = cursorPrice - (cursorPrice - currentMin) * factor;
   const newMax = cursorPrice + (currentMax - cursorPrice) * factor;
 
-  // Requirement 1, 4, 7: 해당 패널의 가격축만 독립적으로 변경
   applyCustomPriceRange(series, newMin, newMax);
   schedule();
 }, { capture: true, passive: false });
