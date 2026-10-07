@@ -213,7 +213,7 @@ function navigationRange(range,action){const span=Math.max(8,range.to-range.from
 function navigateChart(action){if(!all.length)return;
  if(action==='reset'){resetScales();const span=Math.min(180,Math.max(20,all.length*1.2)),end=all.length-1;moveChartRange({from:end-span+5-windowStart,to:end+5-windowStart});}
  else {const range=chart.timeScale().getVisibleLogicalRange();if(range)moveChartRange(navigationRange(range,action));}}
-for(const [action,label,title] of [['out','−','축소'],['in','+','확대'],['left','‹','이전 구간으로 이동'],['right','›','다음 구간으로 이동'],['reset','↺','최근 차트로 이동 및 화면 초기화']]){
+for(const [action,label,title] of [['out','-','축소'],['in','+','확대'],['left','<','이전 구간으로 이동'],['right','>','다음 구간으로 이동'],['reset','R','최근 차트로 이동 및 화면 초기화']]){
  const button=document.createElement('button');button.type='button';button.textContent=label;button.title=title;button.setAttribute('aria-label',title);button.style.cssText='width:30px;height:28px;padding:0;background:#263244;border:1px solid #475569;color:#e2e8f0;border-radius:4px;font-size:20px;line-height:24px';
  button.onclick=e=>{e.stopPropagation();navigateChart(action);};button.onmouseenter=()=>button.style.background='#475569';button.onmouseleave=()=>button.style.background='#263244';chartNavigation.append(button);
 }
@@ -237,7 +237,7 @@ $('unified-chart').addEventListener('mousemove',e=>{
 new ResizeObserver(placeChartNavigation).observe($('unified-chart'));
 
 function lowerBound(a,t){let l=0,r=a.length;while(l<r){const m=(l+r)>>>1;if(a[m].time<t)l=m+1;else r=m;}return l;}
-function thresholds(){const warn=Number($('warnThresh').value),ext=Number($('extThresh').value);if(!$('warnThresh').value\vert{}\vert{}!$('extThresh').value||!Number.isFinite(warn)||!Number.isFinite(ext)||ext>warn)throw Error('극단 경고는 1차 경고 이하의 숫자로 입력하세요.');return {warn,ext};}
+function thresholds(){const warn=Number($('warnThresh').value),ext=Number($('extThresh').value);if(!$('warnThresh').value||!$('extThresh').value||!Number.isFinite(warn)||!Number.isFinite(ext)||ext>warn)throw Error('극단 경고는 1차 경고 이하의 숫자로 입력하세요.');return {warn,ext};}
 function rebuild(){const {warn,ext}=thresholds();mapped=new Map();signals=[];
  let i=0;for(const f of rates){while(i+1<all.length&&all[i+1].time<=f.time)i++;const c=all[i];if(!c||f.time<c.time||f.time>=c.time+duration[$('intervalSelect').value])continue;
  const old=mapped.get(c.time);if(!old||f.rate<old.rate)mapped.set(c.time,{time:c.time,rate:f.rate,events:(old?.events||0)+1});else old.events++;
