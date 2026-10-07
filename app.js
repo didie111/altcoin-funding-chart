@@ -14,6 +14,7 @@ chart.panes()[0].setStretchFactor(6);chart.panes()[1].setStretchFactor(1.5);char
 funding.createPriceLine({price:0,color:'#6b7280',lineWidth:1,lineStyle:LC.LineStyle.Dotted,axisLabelVisible:false});
 const markers=LC.createSeriesMarkers(candles,[]);
 let all=[],rates=[],signals=[],mapped=new Map(),controller,run=0,windowStart=0,windowEnd=0,showLines=true,log=false,busy=false,selectedSignal=null,changingWindow=false;
+let selectedGuideVisible=false, selectedGuideTimer;
 const WINDOW=10000, duration={'15m':900,'1h':3600,'4h':14400,'1d':86400};
 const overlay=document.createElement('canvas');overlay.style.cssText='position:absolute;inset:0;pointer-events:none;z-index:4';$('unified-chart').append(overlay);
 const ctx=overlay.getContext('2d');let frame=0;
@@ -23,7 +24,7 @@ function schedule(){if(!frame)frame=requestAnimationFrame(()=>{frame=0;draw();})
 function draw(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clientHeight,dpr=devicePixelRatio||1;
  if(overlay.width!==Math.round(w*dpr)||overlay.height!==Math.round(h*dpr)){overlay.width=Math.round(w*dpr);overlay.height=Math.round(h*dpr);overlay.style.width=w+'px';overlay.style.height=h+'px';}
  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
- if(selectedSignal){const x=chart.timeScale().timeToCoordinate(selectedSignal.time);if(x!==null){ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
+ if(selectedSignal&&selectedGuideVisible){const x=chart.timeScale().timeToCoordinate(selectedSignal.time);if(x!==null){ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
  if(!showLines)return;
  const range=chart.timeScale().getVisibleRange();if(!range)return;
  // At most one guide per screen pixel, only within the visible time interval.
@@ -40,7 +41,7 @@ function rebuild(){const {warn,ext}=thresholds();mapped=new Map();signals=[];
  renderList();}
 function resetScales(){for(const series of [candles,volume,funding])series.priceScale().applyOptions({autoScale:true,scaleMargins:{top:0.12,bottom:0.12}});$('btnAutoFit').classList.add('active');}
 function centeredRange(index,span=240){return {from:index-span/2,to:index+span/2};}
-function focusSignal(s,element){selectedSignal=s;for(const el of $('signalListContainer').querySelectorAll('.signal-item')){el.style.outline='';el.setAttribute('aria-current','false');}element.style.outline='2px solid #fbbf24';element.setAttribute('aria-current','true');
+function focusSignal(s,element){selectedSignal=s;selectedGuideVisible=true;clearTimeout(selectedGuideTimer);selectedGuideTimer=setTimeout(()=>{selectedGuideVisible=false;schedule();},5000);for(const el of $('signalListContainer').querySelectorAll('.signal-item')){el.style.outline='';el.setAttribute('aria-current','false');}element.style.outline='2px solid #fbbf24';element.setAttribute('aria-current','true');
  const old=chart.timeScale().getVisibleLogicalRange();const span=old?Math.max(80,Math.min(600,old.to-old.from)):240;
  renderWindow(lowerBound(all,s.time),true,span);
  chart.clearCrosshairPosition();
