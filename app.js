@@ -13,7 +13,7 @@ const funding=chart.addSeries(LC.HistogramSeries,{priceFormat:{type:'custom',min
 chart.panes()[0].setStretchFactor(6);chart.panes()[1].setStretchFactor(1.5);chart.panes()[2].setStretchFactor(2.5);
 funding.createPriceLine({price:0,color:'#6b7280',lineWidth:1,lineStyle:LC.LineStyle.Dotted,axisLabelVisible:false});
 const markers=LC.createSeriesMarkers(candles,[]);
-let all=[],rates=[],signals=[],mapped=new Map(),controller,run=0,windowStart=0,windowEnd=0,showLines=true,log=false,busy=false;
+let all=[],rates=[],signals=[],mapped=new Map(),controller,run=0,windowStart=0,windowEnd=0,showLines=true,log=false,busy=false,selectedSignal=null,changingWindow=false;
 const WINDOW=10000, duration={'15m':900,'1h':3600,'4h':14400,'1d':86400};
 const overlay=document.createElement('canvas');overlay.style.cssText='position:absolute;inset:0;pointer-events:none;z-index:4';$('unified-chart').append(overlay);
 const ctx=overlay.getContext('2d');let frame=0;
@@ -22,7 +22,9 @@ const status=(s,error=false)=>{$('status-msg').textContent=s;$('status-msg').cla
 function schedule(){if(!frame)frame=requestAnimationFrame(()=>{frame=0;draw();});}
 function draw(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clientHeight,dpr=devicePixelRatio||1;
  if(overlay.width!==Math.round(w*dpr)||overlay.height!==Math.round(h*dpr)){overlay.width=Math.round(w*dpr);overlay.height=Math.round(h*dpr);overlay.style.width=w+'px';overlay.style.height=h+'px';}
- ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);if(!showLines)return;
+ ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);
+ if(selectedSignal){const x=chart.timeScale().timeToCoordinate(selectedSignal.time);if(x!==null){ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
+ if(!showLines)return;
  const range=chart.timeScale().getVisibleRange();if(!range)return;
  // At most one guide per screen pixel, only within the visible time interval.
  let last=-100;let i=lowerBound(signals,Number(range.from));
@@ -36,7 +38,15 @@ function rebuild(){const {warn,ext}=thresholds();mapped=new Map();signals=[];
  const old=mapped.get(c.time);if(!old||f.rate<old.rate)mapped.set(c.time,{time:c.time,rate:f.rate,events:(old?.events||0)+1});else old.events++;
  const type=f.rate<=ext?'EXTREME':f.rate<=warn?'WARN':null;if(type)signals.push({time:c.time,eventTime:f.time,rate:f.rate,type});}
  renderList();}
-function renderWindow(center,focus=true){if(!all.length)return;windowStart=Math.max(0,Math.min(all.length-WINDOW,Math.floor(center-WINDOW/2)));windowEnd=Math.min(all.length,windowStart+WINDOW);const part=all.slice(windowStart,windowEnd),{warn,ext}=thresholds();
+function resetScales(){for(const series of [candles,volume,funding])series.priceScale().applyOptions({autoScale:true,scaleMargins:{top:0.12,bottom:0.12}});$('btnAutoFit').classList.add('active');}
+function centeredRange(index,span=240){return {from:index-span/2,to:index+span/2};}
+function focusSignal(s,element){selectedSignal=s;for(const el of $('signalListContainer').querySelectorAll('.signal-item')){el.style.outline='';el.setAttribute('aria-current','false');}element.style.outline='2px solid #fbbf24';element.setAttribute('aria-current','true');
+ const old=chart.timeScale().getVisibleLogicalRange();const span=old?Math.max(80,Math.min(600,old.to-old.from)):240;
+ renderWindow(lowerBound(all,s.time),true,span);
+ const index=lowerBound(all,s.time),c=all[index];if(c)chart.setCrosshairPosition(c.close,c.time,candles);
+ $('chart-key').textContent=`선택 신호: ${date(s.eventTime)} · ${s.rate.toFixed(6)}% · 노란선: 해당 ${$('intervalSelect').selectedOptions[0].text} 캔들 (${date(s.time)})`;
+ status(`신호 이동 완료 · ${date(s.eventTime)} · ${s.rate.toFixed(6)}%`);schedule();}
+function renderWindow(center,focus=true,span=240,preservedRange=null){if(!all.length)return;changingWindow=true;clearTimeout(navTimer);windowStart=Math.max(0,Math.min(all.length-WINDOW,Math.floor(center-WINDOW/2)));windowEnd=Math.min(all.length,windowStart+WINDOW);const part=all.slice(windowStart,windowEnd),{warn,ext}=thresholds();
  candles.setData(part.map(({time,open,high,low,close})=>({time,open,high,low,close})));
  volume.setData(part.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'#22c55e80':'#ef444480'})));
  funding.setData(part.map(c=>{const f=mapped.get(c.time);return f?{time:c.time,value:f.rate,color:f.rate<=ext?'#a855f7':f.rate<=warn?'#ef4444':'#3b82f6'}:{time:c.time};}));
@@ -46,11 +56,11 @@ function renderWindow(center,focus=true){if(!all.length)return;windowStart=Math.
  markers.setMarkers(unique.size<=300?[...unique.values()].map(s=>({time:s.time,position:'aboveBar',color:s.type==='EXTREME'?'#a855f7':'#ef4444',shape:'arrowDown',text:s.rate.toFixed(3)+'%'})):[]);
  $('historyPosition').max=Math.max(0,all.length-1);$('historyPosition').value=Math.max(0,Math.min(all.length-1,center));
  $('historyInfo').textContent=`${all.length.toLocaleString()}봉 · 화면 구간 ${date(part[0].time)} ~ ${date(part.at(-1).time)}`;
- if(focus){const ix=Math.max(0,Math.min(part.length-1,center-windowStart));chart.timeScale().setVisibleLogicalRange({from:Math.max(-3,ix-200),to:Math.min(part.length+3,ix+80)});}schedule();}
+ if(focus){const ix=Math.max(0,Math.min(part.length-1,center-windowStart));resetScales();chart.timeScale().setVisibleLogicalRange(centeredRange(ix,span));}else if(preservedRange){chart.timeScale().setVisibleLogicalRange({from:preservedRange.from-windowStart,to:preservedRange.to-windowStart});}requestAnimationFrame(()=>{changingWindow=false;schedule();});}
 let listOffset=0;function renderList(){listOffset=0;$('signalListContainer').replaceChildren();$('signalCountTag').textContent=signals.length+'개';appendList();}
-function appendList(){const container=$('signalListContainer');container.querySelector('.more')?.remove();const end=Math.min(signals.length,listOffset+100);const fragment=document.createDocumentFragment();for(;listOffset<end;listOffset++){const s=signals[signals.length-1-listOffset],el=document.createElement('div');el.className='signal-item '+s.type;const text=document.createElement('div');text.textContent=`${date(s.eventTime)} · ${s.rate.toFixed(6)}%`;el.append(text);el.onclick=()=>renderWindow(lowerBound(all,s.time));fragment.append(el);}container.append(fragment);if(listOffset<signals.length){const b=document.createElement('button');b.className='more';b.textContent='신호 100개 더 보기';b.onclick=appendList;container.append(b);}if(!signals.length)container.textContent='설정 조건에 해당하는 펀딩비 신호 없음';}
+function appendList(){const container=$('signalListContainer');container.querySelector('.more')?.remove();const end=Math.min(signals.length,listOffset+100);const fragment=document.createDocumentFragment();for(;listOffset<end;listOffset++){const s=signals[signals.length-1-listOffset],el=document.createElement('div');el.className='signal-item '+s.type;const text=document.createElement('div');text.textContent=`${date(s.eventTime)} · ${s.rate.toFixed(6)}%`;el.append(text);el.onclick=()=>focusSignal(s,el);fragment.append(el);}container.append(fragment);if(listOffset<signals.length){const b=document.createElement('button');b.className='more';b.textContent='신호 100개 더 보기';b.onclick=appendList;container.append(b);}if(!signals.length)container.textContent='설정 조건에 해당하는 펀딩비 신호 없음';}
 chart.subscribeCrosshairMove(p=>{if(!p.time)return;const c=p.seriesData.get(candles),v=p.seriesData.get(volume),f=p.seriesData.get(funding);$('chart-key').textContent=`${date(Number(p.time))} · 종가 ${c?.close??'—'} · 거래량 ${v?.value??'—'} · 펀딩비 ${f?.value!==undefined?f.value.toFixed(6)+'%':'기록 없음'} (봉 내 최저 실현율)`;});
-let navTimer;chart.timeScale().subscribeVisibleLogicalRangeChange(r=>{schedule();if(!r||busy)return;clearTimeout(navTimer);navTimer=setTimeout(()=>{if(r.from<20&&windowStart>0)renderWindow(windowStart+Math.max(0,Math.round(r.from+100)));else if(r.to>windowEnd-windowStart-20&&windowEnd<all.length)renderWindow(windowEnd-100);},180);});
+let navTimer;chart.timeScale().subscribeVisibleLogicalRangeChange(r=>{schedule();if(!r||busy||changingWindow)return;clearTimeout(navTimer);navTimer=setTimeout(()=>{const absolute={from:r.from+windowStart,to:r.to+windowStart};const middle=(absolute.from+absolute.to)/2;if((r.from<20&&windowStart>0)||(r.to>windowEnd-windowStart-20&&windowEnd<all.length))renderWindow(middle,false,240,absolute);},180);});
 new ResizeObserver(schedule).observe($('unified-chart'));
 const pause=(ms,signal)=>new Promise((resolve,reject)=>{if(signal.aborted)return reject(new DOMException('중지','AbortError'));const onAbort=()=>{clearTimeout(timer);reject(new DOMException('중지','AbortError'));};const timer=setTimeout(()=>{signal.removeEventListener('abort',onAbort);resolve();},ms);signal.addEventListener('abort',onAbort,{once:true});});
 function url(base,params){return base+'?'+new URLSearchParams(Object.entries(params).filter(([,v])=>v!==undefined));}
@@ -77,7 +87,7 @@ async function fundingPage(ex,s,cursor,page,signal){const b=baseSymbol(s);let j,
  case 'OKX':j=await json('https://www.okx.com/api/v5/public/funding-rate-history',{instId:b+'-USDT-SWAP',limit:400,after:cursor},signal);rows=j.data;break;
  }if(!Array.isArray(rows))throw Error('펀딩비 응답 형식 오류');return uniqueSorted(rows.map(r=>({time:Math.floor(Number(r.fundingRateTimestamp??r.fundingTime??r.settleTime)/1000),rate:Number(ex==='OKX'&&r.realizedRate!==undefined&&r.realizedRate!==''?r.realizedRate:r.fundingRate)*100})).filter(r=>Number.isFinite(r.rate)));}
 async function loadData(){try{thresholds();}catch(e){return status(e.message,true);}const symbol=$('symbolInput').value.trim().toUpperCase();if(!/^[A-Z0-9_-]+$/.test(symbol))return status('유효한 심볼을 입력하세요.',true);
- controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;busy=true;all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume.setData([]);funding.setData([]);markers.setMarkers([]);renderList();
+ controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;busy=true;selectedSignal=null;all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume.setData([]);funding.setData([]);markers.setMarkers([]);renderList();
  $('coverage').textContent='선택 거래소 USDT 무기한 선물 · 제공 가능한 이력 끝까지 수집 · 오래된 구간은 하단 슬라이더/최초 데이터로 이동';
  status(`${ex} ${symbol} · 과거 이력 수집 시작`);
  let candleEnd=Date.now(),chunks=[],count=0,candleNote='',fundNote='';
@@ -97,6 +107,6 @@ $('oldestBtn').onclick=()=>renderWindow(0);$('latestBtn').onclick=()=>renderWind
 let sliderTimer;$('historyPosition').oninput=()=>{clearTimeout(sliderTimer);sliderTimer=setTimeout(()=>renderWindow(+$('historyPosition').value),100);};
 $('btnToggleLines').onclick=function(){showLines=!showLines;this.classList.toggle('active',showLines);schedule();};
 $('btnLogScale').onclick=function(){log=!log;candles.priceScale().applyOptions({mode:log?LC.PriceScaleMode.Logarithmic:LC.PriceScaleMode.Normal});this.classList.toggle('active',log);};
-$('btnAutoFit').onclick=()=>{chart.timeScale().fitContent();};
+$('btnAutoFit').onclick=()=>{resetScales();chart.timeScale().fitContent();schedule();};
 for(const id of ['warnThresh','extThresh'])$(id).onchange=()=>{try{rebuild();renderWindow(+$('historyPosition').value);}catch(e){status(e.message,true);}};
 loadData();
