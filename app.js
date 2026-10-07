@@ -34,11 +34,9 @@ function draw(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clie
  if(selectedSignal&&selectedGuideVisible){const x=chart.timeScale().timeToCoordinate(selectedSignal.time);if(x!==null&&x>=0&&x<=w-100){guideCountdown.hidden=false;guideCountdown.style.left=Math.max(65,Math.min(w-165,x))+'px';ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
  if(!showLines)return;
  const range=chart.timeScale().getVisibleRange();if(!range)return;
- // At most one guide per screen pixel, only within the visible time interval.
  let last=-100;let i=lowerBound(signals,Number(range.from));
  for(;i<signals.length&&signals[i].time<=Number(range.to);i++){const s=signals[i],x=chart.timeScale().timeToCoordinate(s.time);if(x===null||x-last<2)continue;last=x;ctx.strokeStyle=s.type==='EXTREME'?'#a855f780':'#ef444480';ctx.setLineDash([3,4]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();}
 }
-
 
 let rulerEnabled=false,rulerStart=null,rulerEnd=null,rulerLocked=false,shiftHeld=false,rulerTemporary=false,rulerDragging=false,rulerPointer=null;
 const rulerBtn=$('btnRuler');rulerBtn.className='btn-toggle';rulerBtn.textContent='📏 줄자';rulerBtn.title='드래그로 측정 · Shift+드래그: 임시 줄자 · Esc 종료';rulerBtn.setAttribute('aria-pressed','false');
@@ -56,7 +54,79 @@ window.addEventListener('blur',()=>{shiftHeld=false;if(rulerDragging){endRulerDr
 const rulerHost=$('unified-chart');
 const paneScaleSeries=[candles,volume,funding,settlementCycle];
 function paneAtY(y){let bottom=0;for(let i=0;i<chart.panes().length;i++){bottom+=chart.panes()[i].getHeight()+(i?1:0);if(y<bottom)return i;}return -1;}
-rulerHost.addEventListener('wheel',e=>{if(rulerEnabled||shiftHeld||rulerDragging)return;const box=rulerHost.getBoundingClientRect(),x=e.clientX-box.left,y=e.clientY-box.top,timeWidth=chart.timeScale().width();if(x<timeWidth)return;const pane=paneAtY(y),series=paneScaleSeries[pane];if(!series)return;const paneTop=y-(chart.panes().slice(0,pane).reduce((n,p,i)=>n+p.getHeight()+(i?1:0),0)),price=series.coordinateToPrice(paneTop),scale=series.priceScale(),range=scale.getVisibleRange();if(price===null||!range||!Number.isFinite(price)||!Number.isFinite(range.from)||!Number.isFinite(range.to)||range.to<=range.from)return;e.preventDefault();e.stopImmediatePropagation();scale.setAutoScale(false);const factor=e.deltaY<0?.82:1.22,from=price-(price-range.from)*factor,to=price+(range.to-price)*factor;scale.setVisibleRange({from,to});schedule();},{capture:true,passive:false});
+
+/* 🎯 커스텀 가격축 범위(Price Range) 관리 */
+const customPriceRanges = new Map();
+
+function applyCustomPriceRange(series, minVal, maxVal) {
+  customPriceRanges.set(series, { minValue: minVal, maxValue: maxVal });
+  series.applyOptions({
+    autoscaleInfoProvider: (original) => {
+      const custom = customPriceRanges.get(series);
+      if (custom) return { priceRange: custom };
+      return original();
+    }
+  });
+}
+
+function resetCustomPriceRange(series) {
+  customPriceRanges.delete(series);
+  series.applyOptions({
+    autoscaleInfoProvider: undefined
+  });
+}
+
+rulerHost.addEventListener('wheel', e => {
+  if (rulerEnabled || shiftHeld || rulerDragging) return;
+  const box = rulerHost.getBoundingClientRect(),
+        x = e.clientX - box.left,
+        y = e.clientY - box.top,
+        timeWidth = chart.timeScale().width();
+  
+  // Requirement 2 & 3: 오른쪽 가격축 영역이 아닌 본문 영역 스크롤 시 완전히 무시 (시간축 고정)
+  if (x < timeWidth) return;
+
+  const pane = paneAtY(y);
+  const series = paneScaleSeries[pane];
+  if (!series) return;
+
+  e.preventDefault();
+  e.stopImmediatePropagation();
+
+  // 해당 패널 내 Y 좌표 위치 계산
+  let accumulatedHeight = 0;
+  const panes = chart.panes();
+  for (let i = 0; i < pane; i++) {
+    accumulatedHeight += panes[i].getHeight() + (i ? 1 : 0);
+  }
+  const paneTop = y - accumulatedHeight;
+  const paneHeight = panes[pane].getHeight();
+
+  // 패널의 현재 최상단 / 최하단 가격 추출
+  const topPrice = series.coordinateToPrice(0);
+  const bottomPrice = series.coordinateToPrice(paneHeight);
+  if (topPrice === null || bottomPrice === null || !Number.isFinite(topPrice) || !Number.isFinite(bottomPrice)) return;
+
+  const currentMax = Math.max(topPrice, bottomPrice);
+  const currentMin = Math.min(topPrice, bottomPrice);
+  if (currentMax <= currentMin) return;
+
+  // Requirement 6: 마우스 커서 위치의 가격을 고정점으로 설정
+  const cursorPrice = series.coordinateToPrice(paneTop);
+  if (cursorPrice === null || !Number.isFinite(cursorPrice)) return;
+
+  // Requirement 5: 마우스 휠 축소/확대 비율
+  const factor = e.deltaY < 0 ? 0.85 : 1.18;
+
+  // 커서 가격 기준 상/하단 가격 범위 계산
+  const newMin = cursorPrice - (cursorPrice - currentMin) * factor;
+  const newMax = cursorPrice + (currentMax - cursorPrice) * factor;
+
+  // Requirement 1, 4, 7: 해당 패널의 가격축만 독립적으로 변경
+  applyCustomPriceRange(series, newMin, newMax);
+  schedule();
+}, { capture: true, passive: false });
+
 function pointerPrice(e,clamp=false){const box=rulerHost.getBoundingClientRect();let x=e.clientX-box.left,y=e.clientY-box.top;const width=chart.timeScale().width(),height=chart.panes()[0].getHeight();
  if(clamp){x=Math.max(0,Math.min(width-1,x));y=Math.max(0,Math.min(height-1,y));}else if(x<0||x>=width||y<0||y>=height)return null;
  const logical=chart.timeScale().coordinateToLogical(x),price=candles.coordinateToPrice(y);if(logical===null||price===null||price<=0)return null;return {index:Math.round(logical)+windowStart,price};}
@@ -76,9 +146,7 @@ function drawRuler(w,h){rulerLabel.hidden=true;if(!(rulerEnabled||rulerTemporary
  const details=measureDetails(rulerStart,rulerEnd),sign=change.percent>=0?'+':'';rulerLabel.textContent=`${change.difference>=0?'+':''}${change.difference.toPrecision(6)} (${sign}${change.percent.toFixed(2)}%)\n${details.bars}봉 · ${details.period}\n거래량 ${new Intl.NumberFormat('ko-KR',{notation:'compact',maximumFractionDigits:2}).format(details.volume)}`;
  rulerLabel.style.background=color;rulerLabel.style.borderColor=color;rulerLabel.style.left=Math.max(8,Math.min(w-370,(x1+x2)/2-100))+'px';rulerLabel.style.top=Math.max(8,Math.min(ph-85,Math.min(y1,y2)-85))+'px';rulerLabel.hidden=false;
  ctx.save();ctx.setLineDash([]);ctx.font='bold 11px sans-serif';ctx.textAlign='left';for(const [price,y] of [[rulerStart.price,y1],[rulerEnd.price,y2]]){if(y<0||y>ph)continue;ctx.fillStyle=color;ctx.fillRect(w-100,y-9,100,18);ctx.fillStyle='#fff';ctx.fillText(price.toPrecision(7),w-96,y+4);}ctx.restore();
-
 }
-
 
 let navigationPane=3;
 const chartNavigation=document.createElement('div');chartNavigation.dataset.chartNav='true';chartNavigation.setAttribute('role','toolbar');chartNavigation.setAttribute('aria-label','차트 확대 및 좌우 이동');chartNavigation.style.cssText='position:absolute;z-index:9;display:flex;gap:4px;transform:translateX(-50%);padding:3px;border-radius:6px;background:#111827dd;box-shadow:0 1px 8px #0006;pointer-events:auto';
@@ -101,21 +169,18 @@ $('unified-chart').addEventListener('mousemove',e=>{if(rulerDragging)return;cons
 new ResizeObserver(placeChartNavigation).observe($('unified-chart'));
 
 function lowerBound(a,t){let l=0,r=a.length;while(l<r){const m=(l+r)>>>1;if(a[m].time<t)l=m+1;else r=m;}return l;}
-function thresholds(){const warn=Number($('warnThresh').value),ext=Number($('extThresh').value);if(!$('warnThresh').value||!$('extThresh').value||!Number.isFinite(warn)||!Number.isFinite(ext)||ext>warn)throw Error('극단 경고는 1차 경고 이하의 숫자로 입력하세요.');return {warn,ext};}
+function thresholds(){const warn=Number($('warnThresh').value),ext=Number($('extThresh').value);if(!$('warnThresh').value\vert{}\vert{}!$('extThresh').value||!Number.isFinite(warn)||!Number.isFinite(ext)||ext>warn)throw Error('극단 경고는 1차 경고 이하의 숫자로 입력하세요.');return {warn,ext};}
 function rebuild(){const {warn,ext}=thresholds();mapped=new Map();signals=[];
- // Merge in O(candles + funding records); keep missing data as missing, never fabricated zero.
  let i=0;for(const f of rates){while(i+1<all.length&&all[i+1].time<=f.time)i++;const c=all[i];if(!c||f.time<c.time||f.time>=c.time+duration[$('intervalSelect').value])continue;
  const old=mapped.get(c.time);if(!old||f.rate<old.rate)mapped.set(c.time,{time:c.time,rate:f.rate,events:(old?.events||0)+1});else old.events++;
  const type=f.rate<=ext?'EXTREME':f.rate<=warn?'WARN':null;if(type)signals.push({time:c.time,eventTime:f.time,rate:f.rate,type});}
  rebuildCycles();renderList();}
 
 function observedCycles(records){const periods=[];const allowed=[1,2,4,8,12,24];for(let i=1;i<records.length;i++){const seconds=records[i].time-records[i-1].time;const hours=allowed.find(h=>Math.abs(seconds-h*3600)<=60);periods.push({start:records[i-1].time,end:records[i].time,hours:hours??null});}
- // An isolated larger gap surrounded by a shorter cadence can be missing records.
  for(let i=0;i<periods.length;i++){const p=periods[i],before=periods[i-1],after=periods[i+1];if(before&&after&&before.hours===after.hours&&before.hours&&p.hours>before.hours){p.hours=null;p.gap=true;}}
  return periods;}
 function rebuildCycles(){cycleHistory=observedCycles(rates);cycleTransitions=[];cycleValues=new Map();let previous=null;
  for(const p of cycleHistory){if(p.hours===null){previous=null;continue;}if(previous!==null&&previous!==p.hours)cycleTransitions.push({time:p.end,from:previous,to:p.hours});previous=p.hours;}
- // Intersect actual settlement-to-settlement periods with candle intervals, linear scan.
  let i=0;const seconds=duration[$('intervalSelect').value];for(const c of all){while(i<cycleHistory.length&&cycleHistory[i].end<=c.time)i++;let value=null,unknown=false;for(let j=i;j<cycleHistory.length&&cycleHistory[j].start<c.time+seconds;j++){const p=cycleHistory[j];if(p.end<=c.time)continue;if(p.hours===null)unknown=true;else value=value===null?p.hours:Math.min(value,p.hours);}
  if(value!==null)cycleValues.set(c.time,{hours:value,mixed:unknown});}
  const latest=cycleHistory.at(-1);cycleCaption.textContent=`정산 주기(기록 간격 관측): ${latest?.hours?latest.hours+'시간':'확인 불가'} · 전환 ${cycleTransitions.length}회 · 8h 파랑 / 4h 주황 / 1h 빨강 · 일봉 등은 봉 내 최소 간격 · 데이터 누락 시 실제 정책과 다를 수 있음`;}
@@ -124,7 +189,13 @@ function renderCycles(part){settlementCycle.setData(part.map(c=>{const p=cycleVa
  const map=new Map();for(const t of cycleTransitions){const i=lowerBound(all,t.time);const k=all[i]?.time===t.time?all[i]:all[i-1];if(k&&k.time>=part[0].time&&k.time<=part.at(-1).time)map.set(k.time,{time:k.time,position:'aboveBar',color:cycleColor(t.to),shape:'arrowDown',text:t.from+'h → '+t.to+'h'});}
  cycleMarkers.setMarkers(map.size<=150?[...map.values()]:[]);}
 
-function resetScales(){for(const series of [candles,volume,funding,settlementCycle])series.priceScale().applyOptions({autoScale:true,scaleMargins:{top:0.12,bottom:0.12}});$('btnAutoFit').classList.add('active');}
+function resetScales(){
+ for(const series of paneScaleSeries){
+  resetCustomPriceRange(series);
+  series.priceScale().applyOptions({autoScale:true,scaleMargins:{top:0.12,bottom:0.12}});
+ }
+ $('btnAutoFit').classList.add('active');
+}
 function centeredRange(index,span=240){return {from:index-span/2,to:index+span/2};}
 function focusSignal(s,element){selectedSignal=s;selectedGuideVisible=true;clearTimeout(selectedGuideTimer);clearInterval(selectedCountdownTimer);selectedGuideDeadline=performance.now()+5000;updateGuideCountdown();selectedCountdownTimer=setInterval(updateGuideCountdown,100);selectedGuideTimer=setTimeout(()=>{selectedGuideVisible=false;clearInterval(selectedCountdownTimer);guideCountdown.hidden=true;schedule();},5000);for(const el of $('signalListContainer').querySelectorAll('.signal-item')){el.style.outline='';el.setAttribute('aria-current','false');}element.style.outline='2px solid #fbbf24';element.setAttribute('aria-current','true');
  const old=chart.timeScale().getVisibleLogicalRange();const span=old?Math.max(80,Math.min(600,old.to-old.from)):240;
@@ -138,11 +209,9 @@ function renderWindow(center,focus=true,span=240,preservedRange=null){if(!all.le
  funding.setData(part.map(c=>{const f=mapped.get(c.time);return f?{time:c.time,value:f.rate,color:f.rate<=ext?'#a855f7':f.rate<=warn?'#ef4444':'#3b82f6'}:{time:c.time};}));
  renderCycles(part);
  const visible=signals.slice(lowerBound(signals,part[0].time),lowerBound(signals,part.at(-1).time+1));
- // Dense signal histories use guides/sidebar instead of thousands of label objects.
  const unique=new Map();for(const s of visible){const old=unique.get(s.time);if(!old||s.rate<old.rate)unique.set(s.time,s);}
  markers.setMarkers(unique.size<=300?[...unique.values()].map(s=>({time:s.time,position:'aboveBar',color:s.type==='EXTREME'?'#a855f7':'#ef4444',shape:'arrowDown',text:s.rate.toFixed(3)+'%'})):[]);
- $('historyPosition').max=Math.max(0,all.length-1);$('historyPosition').value=Math.max(0,Math.min(all.length-1,center));
- $('historyInfo').textContent=`${all.length.toLocaleString()}봉 · 화면 구간 ${date(part[0].time)} ~ ${date(part.at(-1).time)}`;
+ $('historyPosition').max=Math.max(0,all.length-1);$('historyPosition').value=Math.max(0,Math.min(all.length-1,center));$('historyInfo').textContent=`${all.length.toLocaleString()}봉 · 화면 구간 ${date(part[0].time)} ~ ${date(part.at(-1).time)}`;
  if(focus){const ix=Math.max(0,Math.min(part.length-1,center-windowStart));resetScales();chart.timeScale().setVisibleLogicalRange(centeredRange(ix,Math.min(span,Math.max(20,all.length*1.2))));}else if(preservedRange){chart.timeScale().setVisibleLogicalRange({from:preservedRange.from-windowStart,to:preservedRange.to-windowStart});}requestAnimationFrame(()=>{changingWindow=false;schedule();});}
 let listOffset=0;function renderList(){listOffset=0;$('signalListContainer').replaceChildren();$('signalCountTag').textContent=signals.length+'개';appendList();}
 function appendList(){const container=$('signalListContainer');container.querySelector('.more')?.remove();const end=Math.min(signals.length,listOffset+100);const fragment=document.createDocumentFragment();for(;listOffset<end;listOffset++){const s=signals[signals.length-1-listOffset],el=document.createElement('div');el.className='signal-item '+s.type;const text=document.createElement('div');text.textContent=`${date(s.eventTime)} · ${s.rate.toFixed(6)}%`;el.append(text);el.onclick=()=>focusSignal(s,el);fragment.append(el);}container.append(fragment);if(listOffset<signals.length){const b=document.createElement('button');b.className='more';b.textContent='신호 100개 더 보기';b.onclick=appendList;container.append(b);}if(!signals.length)container.textContent='설정 조건에 해당하는 펀딩비 신호 없음';}
@@ -174,7 +243,7 @@ async function fundingPage(ex,s,cursor,page,signal){const b=baseSymbol(s);let j,
  case 'OKX':j=await json('https://www.okx.com/api/v5/public/funding-rate-history',{instId:b+'-USDT-SWAP',limit:400,after:cursor},signal);rows=j.data;break;
  }if(!Array.isArray(rows))throw Error('펀딩비 응답 형식 오류');return uniqueSorted(rows.map(r=>({time:Math.floor(Number(r.fundingRateTimestamp??r.fundingTime??r.settleTime)/1000),rate:Number(ex==='OKX'&&r.realizedRate!==undefined&&r.realizedRate!==''?r.realizedRate:r.fundingRate)*100})).filter(r=>Number.isFinite(r.rate)));}
 async function loadData(){try{thresholds();}catch(e){return status(e.message,true);}const symbol=$('symbolInput').value.trim().toUpperCase();if(!/^[A-Z0-9_-]+$/.test(symbol))return status('유효한 심볼을 입력하세요.',true);
- controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;busy=true;clearRuler();selectedSignal=null;all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume.setData([]);funding.setData([]);settlementCycle.setData([]);cycleMarkers.setMarkers([]);cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleCaption.textContent='정산 주기: 이력 수집 중';markers.setMarkers([]);renderList();
+ controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume.setData([]);funding.setData([]);settlementCycle.setData([]);cycleMarkers.setMarkers([]);cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleCaption.textContent='정산 주기: 이력 수집 중';markers.setMarkers([]);renderList();
  $('coverage').textContent='선택 거래소 USDT 무기한 선물 · 제공 가능한 이력 끝까지 수집 · 오래된 구간은 하단 슬라이더/최초 데이터로 이동';
  status(`${ex} ${symbol} · 과거 이력 수집 시작`);
  let candleEnd=Date.now(),chunks=[],count=0,candleNote='',fundNote='';
@@ -192,8 +261,7 @@ async function loadData(){try{thresholds();}catch(e){return status(e.message,tru
 $('searchBtn').onclick=loadData;$('symbolInput').onkeydown=e=>{if(e.key==='Enter')loadData();};$('stopBtn').onclick=()=>controller?.abort();
 $('oldestBtn').onclick=()=>renderWindow(0);$('latestBtn').onclick=()=>renderWindow(all.length-1);
 let sliderTimer;$('historyPosition').oninput=()=>{clearTimeout(sliderTimer);sliderTimer=setTimeout(()=>renderWindow(+$('historyPosition').value),100);};
-$('btnToggleLines').onclick=function(){showLines=!showLines;this.classList.toggle('active',showLines);schedule();};
-$('btnLogScale').onclick=function(){log=!log;candles.priceScale().applyOptions({mode:log?LC.PriceScaleMode.Logarithmic:LC.PriceScaleMode.Normal});this.classList.toggle('active',log);};
+$('btnToggleLines').onclick=function(){showLines=!showLines;this.classList.toggle('active',showLines);schedule();};$('btnLogScale').onclick=function(){log=!log;candles.priceScale().applyOptions({mode:log?LC.PriceScaleMode.Logarithmic:LC.PriceScaleMode.Normal});this.classList.toggle('active',log);};
 $('btnAutoFit').onclick=()=>{resetScales();chart.timeScale().fitContent();schedule();};
 for(const id of ['warnThresh','extThresh'])$(id).onchange=()=>{try{rebuild();renderWindow(+$('historyPosition').value);}catch(e){status(e.message,true);}};
 loadData();
