@@ -4,7 +4,7 @@ const LC = LightweightCharts;
 const chart = LC.createChart($('unified-chart'), {
  autoSize:true, layout:{background:{type:'solid',color:'#111827'},textColor:'#9ca3af',panes:{separatorColor:'#374151',separatorHoverColor:'#4b5563'}},
  grid:{vertLines:{color:'#1f2937'},horzLines:{color:'#1f2937'}},
- crosshair:{mode:LC.CrosshairMode.Normal},handleScroll:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:{mouseWheel:false,pinch:true},rightPriceScale:{minimumWidth:100,borderColor:'#374151'},
+ crosshair:{mode:LC.CrosshairMode.Normal},handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:{mouseWheel:true,pinch:true},rightPriceScale:{minimumWidth:100,borderColor:'#374151'},
  timeScale:{timeVisible:true,secondsVisible:false,rightOffset:3,tickMarkFormatter:t=>new Date(Number(t)*1000).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false})},localization:{locale:'ko-KR',timeFormatter:t=>new Date(Number(t)*1000).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',hour12:false})}
 });
 const candles=chart.addSeries(LC.CandlestickSeries,{upColor:'#22c55e',downColor:'#ef4444',borderVisible:false,wickUpColor:'#22c55e',wickDownColor:'#ef4444',priceFormat:{type:'price',precision:8,minMove:0.00000001}},0);
@@ -43,7 +43,7 @@ const rulerBtn=$('btnRuler');rulerBtn.className='btn-toggle';rulerBtn.textConten
 const rulerLabel=document.createElement('div');rulerLabel.hidden=true;rulerLabel.style.cssText='position:absolute;pointer-events:none;z-index:7;background:#2563eb;color:#fff;border:1px solid #93c5fd;padding:8px 12px;border-radius:4px;font-size:13px;font-weight:700;line-height:1.6;text-align:center;white-space:pre-line;box-shadow:0 2px 8px #0009;max-width:280px';$('unified-chart').append(rulerLabel);
 function priceChange(start,end){if(!Number.isFinite(start)||!Number.isFinite(end)||start<=0)return null;return {difference:end-start,percent:(end-start)/start*100};}
 function clearRuler(){rulerStart=null;rulerEnd=null;rulerLocked=false;rulerTemporary=false;rulerLabel.hidden=true;schedule();}
-function rulerInteraction(){const active=rulerEnabled||shiftHeld||rulerDragging;chart.applyOptions({handleScroll:active?false:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:active?false:{mouseWheel:false,pinch:true}});$('unified-chart').style.cursor=active?'crosshair':'';}
+function rulerInteraction(){const active=rulerEnabled||shiftHeld||rulerDragging;chart.applyOptions({handleScroll:active?false:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:active?false:{mouseWheel:true,pinch:true}});$('unified-chart').style.cursor=active?'crosshair':'';}
 function endRulerDrag(){if(rulerPointer!==null&&$('unified-chart').hasPointerCapture(rulerPointer))$('unified-chart').releasePointerCapture(rulerPointer);rulerDragging=false;rulerPointer=null;rulerInteraction();}
 function toggleRuler(enabled){endRulerDrag();rulerEnabled=enabled;rulerBtn.classList.toggle('active',enabled);rulerBtn.setAttribute('aria-pressed',String(enabled));clearRuler();rulerInteraction();if(enabled)status('줄자: 가격 차트에서 누른 채 드래그하세요. Shift+드래그도 가능 · Esc 종료');}
 rulerBtn.onclick=()=>toggleRuler(!rulerEnabled);
@@ -55,7 +55,7 @@ const rulerHost=$('unified-chart');
 const paneScaleSeries=[candles,volume,funding,settlementCycle];
 function paneAtY(y){let bottom=0;for(let i=0;i<chart.panes().length;i++){bottom+=chart.panes()[i].getHeight()+(i?1:0);if(y<bottom)return i;}return -1;}
 
-/* 커스텀 가격축 범위 관리 */
+/* 🎯 커스텀 가격축 범위(Price Range) 관리 */
 const customPriceRanges = new Map();
 
 function applyCustomPriceRange(series, minVal, maxVal) {
@@ -80,7 +80,11 @@ rulerHost.addEventListener('wheel', e => {
   if (rulerEnabled || shiftHeld || rulerDragging) return;
   const box = rulerHost.getBoundingClientRect(),
         x = e.clientX - box.left,
-        y = e.clientY - box.top;
+        y = e.clientY - box.top,
+        timeWidth = chart.timeScale().width();
+  
+  // Requirement 2 & 3: 오른쪽 가격축 영역이 아닌 본문 영역 스크롤 시 완전히 무시 (시간축 고정)
+  if (x < timeWidth) return;
 
   const pane = paneAtY(y);
   const series = paneScaleSeries[pane];
@@ -89,6 +93,7 @@ rulerHost.addEventListener('wheel', e => {
   e.preventDefault();
   e.stopImmediatePropagation();
 
+  // 해당 패널 내 Y 좌표 위치 계산
   let accumulatedHeight = 0;
   const panes = chart.panes();
   for (let i = 0; i < pane; i++) {
@@ -97,6 +102,7 @@ rulerHost.addEventListener('wheel', e => {
   const paneTop = y - accumulatedHeight;
   const paneHeight = panes[pane].getHeight();
 
+  // 패널의 현재 최상단 / 최하단 가격 추출
   const topPrice = series.coordinateToPrice(0);
   const bottomPrice = series.coordinateToPrice(paneHeight);
   if (topPrice === null || bottomPrice === null || !Number.isFinite(topPrice) || !Number.isFinite(bottomPrice)) return;
@@ -105,14 +111,18 @@ rulerHost.addEventListener('wheel', e => {
   const currentMin = Math.min(topPrice, bottomPrice);
   if (currentMax <= currentMin) return;
 
+  // Requirement 6: 마우스 커서 위치의 가격을 고정점으로 설정
   const cursorPrice = series.coordinateToPrice(paneTop);
   if (cursorPrice === null || !Number.isFinite(cursorPrice)) return;
 
+  // Requirement 5: 마우스 휠 축소/확대 비율
   const factor = e.deltaY < 0 ? 0.85 : 1.18;
 
+  // 커서 가격 기준 상/하단 가격 범위 계산
   const newMin = cursorPrice - (cursorPrice - currentMin) * factor;
   const newMax = cursorPrice + (currentMax - cursorPrice) * factor;
 
+  // Requirement 1, 4, 7: 해당 패널의 가격축만 독립적으로 변경
   applyCustomPriceRange(series, newMin, newMax);
   schedule();
 }, { capture: true, passive: false });
@@ -159,7 +169,7 @@ $('unified-chart').addEventListener('mousemove',e=>{if(rulerDragging)return;cons
 new ResizeObserver(placeChartNavigation).observe($('unified-chart'));
 
 function lowerBound(a,t){let l=0,r=a.length;while(l<r){const m=(l+r)>>>1;if(a[m].time<t)l=m+1;else r=m;}return l;}
-function thresholds(){const warn=Number($('warnThresh').value),ext=Number($('extThresh').value);if(!$('warnThresh').value\vert{}\vert{}!$('extThresh').value||!Number.isFinite(warn)||!Number.isFinite(ext)||ext>warn)throw Error('극단 경고는 1차 경고 이하의 숫자로 입력하세요.');return {warn,ext};}
+function thresholds(){const warn=Number($('warnThresh').value),ext=Number($('extThresh').value);if(!$('warnThresh').value||!$('extThresh').value||!Number.isFinite(warn)||!Number.isFinite(ext)||ext>warn)throw Error('극단 경고는 1차 경고 이하의 숫자로 입력하세요.');return {warn,ext};}
 function rebuild(){const {warn,ext}=thresholds();mapped=new Map();signals=[];
  let i=0;for(const f of rates){while(i+1<all.length&&all[i+1].time<=f.time)i++;const c=all[i];if(!c||f.time<c.time||f.time>=c.time+duration[$('intervalSelect').value])continue;
  const old=mapped.get(c.time);if(!old||f.rate<old.rate)mapped.set(c.time,{time:c.time,rate:f.rate,events:(old?.events||0)+1});else old.events++;
