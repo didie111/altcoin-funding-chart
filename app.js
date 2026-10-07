@@ -34,24 +34,41 @@ function draw(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clie
  for(;i<signals.length&&signals[i].time<=Number(range.to);i++){const s=signals[i],x=chart.timeScale().timeToCoordinate(s.time);if(x===null||x-last<2)continue;last=x;ctx.strokeStyle=s.type==='EXTREME'?'#a855f780':'#ef444480';ctx.setLineDash([3,4]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();}
 }
 
-let rulerEnabled=false,rulerStart=null,rulerEnd=null,rulerLocked=false;
-const rulerBtn=$('btnRuler');rulerBtn.className='btn-toggle';rulerBtn.textContent='📏 줄자';rulerBtn.title='시작 가격 클릭 → 끝 가격 클릭 · Esc 종료';rulerBtn.setAttribute('aria-pressed','false');$('btnLogScale').parentElement.append(rulerBtn);
-const rulerLabel=document.createElement('div');rulerLabel.hidden=true;rulerLabel.style.cssText='position:absolute;pointer-events:none;z-index:7;background:#111827f2;color:#fff;border:2px solid #38bdf8;padding:8px 12px;border-radius:8px;font-size:13px;font-weight:700;white-space:pre-line;box-shadow:0 2px 8px #0009;max-width:280px';$('unified-chart').append(rulerLabel);
+
+let rulerEnabled=false,rulerStart=null,rulerEnd=null,rulerLocked=false,shiftHeld=false,rulerTemporary=false,rulerDragging=false,rulerPointer=null;
+const rulerBtn=$('btnRuler');rulerBtn.className='btn-toggle';rulerBtn.textContent='📏 줄자';rulerBtn.title='드래그로 측정 · Shift+드래그: 임시 줄자 · Esc 종료';rulerBtn.setAttribute('aria-pressed','false');
+const rulerLabel=document.createElement('div');rulerLabel.hidden=true;rulerLabel.style.cssText='position:absolute;pointer-events:none;z-index:7;background:#2563eb;color:#fff;border:1px solid #93c5fd;padding:8px 12px;border-radius:4px;font-size:13px;font-weight:700;line-height:1.6;text-align:center;white-space:pre-line;box-shadow:0 2px 8px #0009;max-width:280px';$('unified-chart').append(rulerLabel);
 function priceChange(start,end){if(!Number.isFinite(start)||!Number.isFinite(end)||start<=0)return null;return {difference:end-start,percent:(end-start)/start*100};}
-function clearRuler(){rulerStart=null;rulerEnd=null;rulerLocked=false;rulerLabel.hidden=true;schedule();}
-function toggleRuler(enabled){rulerEnabled=enabled;rulerBtn.classList.toggle('active',enabled);rulerBtn.setAttribute('aria-pressed',String(enabled));chart.applyOptions({handleScroll:!enabled,handleScale:!enabled});$('unified-chart').style.cursor=enabled?'crosshair':'';clearRuler();if(enabled)status('줄자: 위쪽 가격 차트의 시작 가격 → 끝 가격을 클릭하세요. Esc로 종료');}
+function clearRuler(){rulerStart=null;rulerEnd=null;rulerLocked=false;rulerTemporary=false;rulerLabel.hidden=true;schedule();}
+function rulerInteraction(){const active=rulerEnabled||shiftHeld||rulerDragging;chart.applyOptions({handleScroll:!active,handleScale:!active});$('unified-chart').style.cursor=active?'crosshair':'';}
+function endRulerDrag(){if(rulerPointer!==null&&$('unified-chart').hasPointerCapture(rulerPointer))$('unified-chart').releasePointerCapture(rulerPointer);rulerDragging=false;rulerPointer=null;rulerInteraction();}
+function toggleRuler(enabled){endRulerDrag();rulerEnabled=enabled;rulerBtn.classList.toggle('active',enabled);rulerBtn.setAttribute('aria-pressed',String(enabled));clearRuler();rulerInteraction();if(enabled)status('줄자: 가격 차트에서 누른 채 드래그하세요. Shift+드래그도 가능 · Esc 종료');}
 rulerBtn.onclick=()=>toggleRuler(!rulerEnabled);
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&rulerEnabled)toggleRuler(false);});
-function rulerPoint(p){if(!p.point||p.paneIndex!==0)return null;const logical=chart.timeScale().coordinateToLogical(p.point.x),price=candles.coordinateToPrice(p.point.y);if(logical===null||price===null||price<=0)return null;return {index:logical+windowStart,price};}
-chart.subscribeClick(p=>{if(!rulerEnabled)return;const point=rulerPoint(p);if(!point)return;if(!rulerStart||rulerLocked){rulerStart=point;rulerEnd=point;rulerLocked=false;status('줄자: 끝 가격을 클릭하면 측정 결과가 고정됩니다.');}else{rulerEnd=point;rulerLocked=true;status('줄자 측정 완료 · 다시 클릭해 새 측정 / Esc 종료');}schedule();});
-chart.subscribeCrosshairMove(p=>{if(!rulerEnabled||!rulerStart||rulerLocked)return;const point=rulerPoint(p);if(point){rulerEnd=point;schedule();}});
-function drawRuler(w,h){rulerLabel.hidden=true;if(!rulerEnabled||!rulerStart||!rulerEnd)return;
+function typingTarget(t){return t instanceof Element&&Boolean(t.closest('input,textarea,select,[contenteditable="true"]'));}
+document.addEventListener('keydown',e=>{if(typingTarget(e.target))return;if(e.key==='Shift'&&!shiftHeld){shiftHeld=true;rulerInteraction();}if(e.key==='Escape'){shiftHeld=false;toggleRuler(false);}});
+document.addEventListener('keyup',e=>{if(e.key==='Shift'){shiftHeld=false;rulerInteraction();}});
+window.addEventListener('blur',()=>{shiftHeld=false;if(rulerDragging){endRulerDrag();rulerLocked=true;}rulerInteraction();});
+const rulerHost=$('unified-chart');
+function pointerPrice(e,clamp=false){const box=rulerHost.getBoundingClientRect();let x=e.clientX-box.left,y=e.clientY-box.top;const width=chart.timeScale().width(),height=chart.panes()[0].getHeight();
+ if(clamp){x=Math.max(0,Math.min(width-1,x));y=Math.max(0,Math.min(height-1,y));}else if(x<0||x>=width||y<0||y>=height)return null;
+ const logical=chart.timeScale().coordinateToLogical(x),price=candles.coordinateToPrice(y);if(logical===null||price===null||price<=0)return null;return {index:Math.round(logical)+windowStart,price};}
+rulerHost.addEventListener('pointerdown',e=>{if(e.button!==0)return;const active=rulerEnabled||e.shiftKey||shiftHeld;if(!active){if(rulerTemporary)clearRuler();return;}const point=pointerPrice(e);if(!point)return;e.preventDefault();e.stopImmediatePropagation();rulerTemporary=!rulerEnabled;rulerStart=point;rulerEnd=point;rulerLocked=false;rulerDragging=true;rulerPointer=e.pointerId;rulerHost.setPointerCapture(e.pointerId);rulerInteraction();schedule();},{capture:true});
+rulerHost.addEventListener('pointermove',e=>{if(!rulerDragging||e.pointerId!==rulerPointer)return;e.preventDefault();e.stopImmediatePropagation();const point=pointerPrice(e,true);if(point){rulerEnd=point;schedule();}},{capture:true});
+rulerHost.addEventListener('pointerup',e=>{if(!rulerDragging||e.pointerId!==rulerPointer)return;e.preventDefault();e.stopImmediatePropagation();const point=pointerPrice(e,true);if(point)rulerEnd=point;rulerLocked=true;endRulerDrag();status('줄자 측정 완료 · 다시 드래그해 측정 / Esc 종료');schedule();},{capture:true});
+rulerHost.addEventListener('pointercancel',()=>{if(rulerDragging){endRulerDrag();clearRuler();}});
+let rulerVolumeData=null,rulerVolumePrefix=[];
+function measureDetails(a,b){if(rulerVolumeData!==all){rulerVolumeData=all;rulerVolumePrefix=[0];for(const c of all)rulerVolumePrefix.push(rulerVolumePrefix.at(-1)+(Number.isFinite(c.volume)?c.volume:0));}
+ const ai=Math.max(0,Math.min(all.length-1,Math.round(a.index))),bi=Math.max(0,Math.min(all.length-1,Math.round(b.index))),lo=Math.min(ai,bi),hi=Math.max(ai,bi);const seconds=all[ai]&&all[bi]?Math.abs(all[bi].time-all[ai].time):0;const days=Math.floor(seconds/86400),hours=Math.floor(seconds%86400/3600),minutes=Math.floor(seconds%3600/60);return {bars:Math.round(b.index-a.index),period:[days?days+'일':'',hours?hours+'시간':'',minutes?minutes+'분':''].filter(Boolean).join(' ')||'0분',volume:(rulerVolumePrefix[hi+1]||0)-(rulerVolumePrefix[lo]||0),start:all[ai]?.time,end:all[bi]?.time};}
+function drawRuler(w,h){rulerLabel.hidden=true;if(!(rulerEnabled||rulerTemporary)||!rulerStart||!rulerEnd)return;
  const x1=chart.timeScale().logicalToCoordinate(rulerStart.index-windowStart),x2=chart.timeScale().logicalToCoordinate(rulerEnd.index-windowStart),y1=candles.priceToCoordinate(rulerStart.price),y2=candles.priceToCoordinate(rulerEnd.price);
  if([x1,x2,y1,y2].some(v=>v===null))return;const change=priceChange(rulerStart.price,rulerEnd.price);if(!change)return;
- const color=change.percent>=0?'#34d399':'#fb7185';const ph=chart.panes()[0].getHeight();ctx.save();ctx.beginPath();ctx.rect(0,0,w-100,ph);ctx.clip();ctx.setLineDash([]);ctx.strokeStyle=color;ctx.fillStyle=change.percent>=0?'#34d39920':'#fb718520';ctx.lineWidth=1.5;ctx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.strokeRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+ const color=change.percent>=0?'#3b82f6':'#ef4444';const ph=chart.panes()[0].getHeight();ctx.save();ctx.beginPath();ctx.rect(0,0,w-100,ph);ctx.clip();ctx.setLineDash([]);ctx.strokeStyle=color;ctx.fillStyle=change.percent>=0?'#3b82f633':'#ef444433';ctx.lineWidth=1.5;ctx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.strokeRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.beginPath();const mx=(x1+x2)/2,my=(y1+y2)/2;ctx.moveTo(x1,my);ctx.lineTo(x2,my);ctx.moveTo(mx,y1);ctx.lineTo(mx,y2);ctx.stroke();for(const [ax,ay,dx,dy] of [[x2,my,-Math.sign(x2-x1)*6,0],[mx,y2,0,-Math.sign(y2-y1)*6]]){ctx.beginPath();ctx.moveTo(ax+dx+(dy?4:0),ay+dy+(dx?4:0));ctx.lineTo(ax,ay);ctx.lineTo(ax+dx-(dy?4:0),ay+dy-(dx?4:0));ctx.stroke();}
  for(const [x,y] of [[x1,y1],[x2,y2]]){ctx.beginPath();ctx.fillStyle=color;ctx.arc(x,y,4,0,Math.PI*2);ctx.fill();}ctx.restore();
- const sign=change.percent>=0?'+':'';rulerLabel.textContent=`${sign}${change.percent.toFixed(2)}%  · 가격차 ${change.difference>=0?'+':''}${change.difference.toPrecision(6)}\n${rulerStart.price.toPrecision(7)} → ${rulerEnd.price.toPrecision(7)}\n${Math.round(Math.abs(rulerEnd.index-rulerStart.index))}봉 · ${rulerLocked?'측정 고정':'끝 가격 클릭으로 고정'}`;
- rulerLabel.style.borderColor=color;rulerLabel.style.left=Math.max(8,Math.min(w-390,(x1+x2)/2+12))+'px';rulerLabel.style.top=Math.max(8,Math.min(ph-90,Math.min(y1,y2)-85))+'px';rulerLabel.hidden=false;
+
+ const details=measureDetails(rulerStart,rulerEnd),sign=change.percent>=0?'+':'';rulerLabel.textContent=`${change.difference>=0?'+':''}${change.difference.toPrecision(6)} (${sign}${change.percent.toFixed(2)}%)\n${details.bars}봉 · ${details.period}\n거래량 ${new Intl.NumberFormat('ko-KR',{notation:'compact',maximumFractionDigits:2}).format(details.volume)}`;
+ rulerLabel.style.background=color;rulerLabel.style.borderColor=color;rulerLabel.style.left=Math.max(8,Math.min(w-370,(x1+x2)/2-100))+'px';rulerLabel.style.top=Math.max(8,Math.min(ph-85,Math.min(y1,y2)-85))+'px';rulerLabel.hidden=false;
+ ctx.save();ctx.setLineDash([]);ctx.font='bold 11px sans-serif';ctx.textAlign='left';for(const [price,y] of [[rulerStart.price,y1],[rulerEnd.price,y2]]){if(y<0||y>ph)continue;ctx.fillStyle=color;ctx.fillRect(w-100,y-9,100,18);ctx.fillStyle='#fff';ctx.fillText(price.toPrecision(7),w-96,y+4);}ctx.restore();
+
 }
 
 function lowerBound(a,t){let l=0,r=a.length;while(l<r){const m=(l+r)>>>1;if(a[m].time<t)l=m+1;else r=m;}return l;}
