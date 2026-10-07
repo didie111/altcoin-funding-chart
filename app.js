@@ -30,7 +30,7 @@ const status=(s,error=false)=>{$('status-msg').textContent=s;$('status-msg').cla
 function schedule(){if(!frame)frame=requestAnimationFrame(()=>{frame=0;draw();});}
 function draw(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clientHeight,dpr=devicePixelRatio||1;
  if(overlay.width!==Math.round(w*dpr)||overlay.height!==Math.round(h*dpr)){overlay.width=Math.round(w*dpr);overlay.height=Math.round(h*dpr);overlay.style.width=w+'px';overlay.style.height=h+'px';}
- ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawRuler(w,h);
+ ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawRuler(w,h);placeChartNavigation();
  if(selectedSignal&&selectedGuideVisible){const x=chart.timeScale().timeToCoordinate(selectedSignal.time);if(x!==null&&x>=0&&x<=w-100){guideCountdown.hidden=false;guideCountdown.style.left=Math.max(65,Math.min(w-165,x))+'px';ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
  if(!showLines)return;
  const range=chart.timeScale().getVisibleRange();if(!range)return;
@@ -57,7 +57,7 @@ const rulerHost=$('unified-chart');
 function pointerPrice(e,clamp=false){const box=rulerHost.getBoundingClientRect();let x=e.clientX-box.left,y=e.clientY-box.top;const width=chart.timeScale().width(),height=chart.panes()[0].getHeight();
  if(clamp){x=Math.max(0,Math.min(width-1,x));y=Math.max(0,Math.min(height-1,y));}else if(x<0||x>=width||y<0||y>=height)return null;
  const logical=chart.timeScale().coordinateToLogical(x),price=candles.coordinateToPrice(y);if(logical===null||price===null||price<=0)return null;return {index:Math.round(logical)+windowStart,price};}
-rulerHost.addEventListener('pointerdown',e=>{if(e.button!==0)return;const active=rulerEnabled||e.shiftKey||shiftHeld;if(!active){if(rulerTemporary)clearRuler();return;}const point=pointerPrice(e);if(!point)return;e.preventDefault();e.stopImmediatePropagation();rulerTemporary=!rulerEnabled;rulerStart=point;rulerEnd=point;rulerLocked=false;rulerDragging=true;rulerPointer=e.pointerId;rulerHost.setPointerCapture(e.pointerId);rulerInteraction();schedule();},{capture:true});
+rulerHost.addEventListener('pointerdown',e=>{if(e.target instanceof Element&&e.target.closest('[data-chart-nav]'))return;if(e.button!==0)return;const active=rulerEnabled||e.shiftKey||shiftHeld;if(!active){if(rulerTemporary)clearRuler();return;}const point=pointerPrice(e);if(!point)return;e.preventDefault();e.stopImmediatePropagation();rulerTemporary=!rulerEnabled;rulerStart=point;rulerEnd=point;rulerLocked=false;rulerDragging=true;rulerPointer=e.pointerId;rulerHost.setPointerCapture(e.pointerId);rulerInteraction();schedule();},{capture:true});
 rulerHost.addEventListener('pointermove',e=>{if(!rulerDragging||e.pointerId!==rulerPointer)return;e.preventDefault();e.stopImmediatePropagation();const point=pointerPrice(e,true);if(point){rulerEnd=point;schedule();}},{capture:true});
 rulerHost.addEventListener('pointerup',e=>{if(!rulerDragging||e.pointerId!==rulerPointer)return;e.preventDefault();e.stopImmediatePropagation();const point=pointerPrice(e,true);if(point)rulerEnd=point;rulerLocked=true;endRulerDrag();status('줄자 측정 완료 · 다시 드래그해 측정 / Esc 종료');schedule();},{capture:true});
 rulerHost.addEventListener('pointercancel',()=>{if(rulerDragging){endRulerDrag();clearRuler();}});
@@ -75,6 +75,27 @@ function drawRuler(w,h){rulerLabel.hidden=true;if(!(rulerEnabled||rulerTemporary
  ctx.save();ctx.setLineDash([]);ctx.font='bold 11px sans-serif';ctx.textAlign='left';for(const [price,y] of [[rulerStart.price,y1],[rulerEnd.price,y2]]){if(y<0||y>ph)continue;ctx.fillStyle=color;ctx.fillRect(w-100,y-9,100,18);ctx.fillStyle='#fff';ctx.fillText(price.toPrecision(7),w-96,y+4);}ctx.restore();
 
 }
+
+
+let navigationPane=3;
+const chartNavigation=document.createElement('div');chartNavigation.dataset.chartNav='true';chartNavigation.setAttribute('role','toolbar');chartNavigation.setAttribute('aria-label','차트 확대 및 좌우 이동');chartNavigation.style.cssText='position:absolute;z-index:9;display:flex;gap:4px;transform:translateX(-50%);padding:3px;border-radius:6px;background:#111827dd;box-shadow:0 1px 8px #0006;pointer-events:auto';
+$('unified-chart').append(chartNavigation);
+function moveChartRange(range){if(!all.length)return;const absolute={from:range.from+windowStart,to:range.to+windowStart},middle=(absolute.from+absolute.to)/2;
+ if(absolute.from<windowStart||absolute.to>=windowEnd)renderWindow(Math.max(0,Math.min(all.length-1,middle)),false,240,absolute);else chart.timeScale().setVisibleLogicalRange(range);
+ $('historyPosition').value=Math.max(0,Math.min(all.length-1,Math.round(middle)));schedule();}
+function navigationRange(range,action){const span=Math.max(8,range.to-range.from),center=(range.from+range.to)/2;if(action==='left'||action==='right'){const shift=span*.25*(action==='left'?-1:1);return {from:range.from+shift,to:range.to+shift};}
+ const width=Math.max(8,Math.min(Math.max(10000,all.length*1.5),span*(action==='in'?.8:1.25)));return {from:center-width/2,to:center+width/2};}
+function navigateChart(action){if(!all.length)return;
+ if(action==='reset'){resetScales();const span=Math.min(180,Math.max(20,all.length*1.2)),end=all.length-1;moveChartRange({from:end-span+5-windowStart,to:end+5-windowStart});}
+ else {const range=chart.timeScale().getVisibleLogicalRange();if(range)moveChartRange(navigationRange(range,action));}}
+for(const [action,label,title] of [['out','−','축소'],['in','+','확대'],['left','‹','이전 구간으로 이동'],['right','›','다음 구간으로 이동'],['reset','↺','최근 차트로 이동 및 화면 초기화']]){
+ const button=document.createElement('button');button.type='button';button.textContent=label;button.title=title;button.setAttribute('aria-label',title);button.style.cssText='width:30px;height:28px;padding:0;background:#263244;border:1px solid #475569;color:#e2e8f0;border-radius:4px;font-size:20px;line-height:24px';
+ button.onclick=e=>{e.stopPropagation();navigateChart(action);};button.onmouseenter=()=>button.style.background='#475569';button.onmouseleave=()=>button.style.background='#263244';chartNavigation.append(button);
+}
+chartNavigation.addEventListener('pointerdown',e=>e.stopPropagation());chartNavigation.addEventListener('dblclick',e=>e.stopPropagation());
+function placeChartNavigation(){const panes=chart.panes();if(!panes.length)return;navigationPane=Math.min(navigationPane,panes.length-1);let bottom=0;for(let i=0;i<=navigationPane;i++)bottom+=panes[i].getHeight()+ (i?1:0);chartNavigation.style.left=chart.timeScale().width()/2+'px';chartNavigation.style.top=Math.max(4,bottom-38)+'px';}
+$('unified-chart').addEventListener('mousemove',e=>{if(rulerDragging)return;const y=e.clientY-$('unified-chart').getBoundingClientRect().top;let bottom=0;for(const [i,pane] of chart.panes().entries()){bottom+=pane.getHeight()+(i?1:0);if(y<bottom){navigationPane=i;placeChartNavigation();break;}}});
+new ResizeObserver(placeChartNavigation).observe($('unified-chart'));
 
 function lowerBound(a,t){let l=0,r=a.length;while(l<r){const m=(l+r)>>>1;if(a[m].time<t)l=m+1;else r=m;}return l;}
 function thresholds(){const warn=Number($('warnThresh').value),ext=Number($('extThresh').value);if(!$('warnThresh').value||!$('extThresh').value||!Number.isFinite(warn)||!Number.isFinite(ext)||ext>warn)throw Error('극단 경고는 1차 경고 이하의 숫자로 입력하세요.');return {warn,ext};}
