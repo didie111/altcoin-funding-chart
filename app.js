@@ -5,7 +5,7 @@ const chart = LC.createChart($('unified-chart'), {
  autoSize:true, layout:{background:{type:'solid',color:'#111827'},textColor:'#9ca3af',panes:{separatorColor:'#374151',separatorHoverColor:'#4b5563'}},
  grid:{vertLines:{color:'#1f2937'},horzLines:{color:'#1f2937'}},
  crosshair:{mode:LC.CrosshairMode.Normal},rightPriceScale:{minimumWidth:100,borderColor:'#374151'},
- timeScale:{timeVisible:true,secondsVisible:false,rightOffset:3},localization:{locale:'ko-KR'}
+ timeScale:{timeVisible:true,secondsVisible:false,rightOffset:3,tickMarkFormatter:t=>new Date(Number(t)*1000).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false})},localization:{locale:'ko-KR',timeFormatter:t=>new Date(Number(t)*1000).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',hour12:false})}
 });
 const candles=chart.addSeries(LC.CandlestickSeries,{upColor:'#22c55e',downColor:'#ef4444',borderVisible:false,wickUpColor:'#22c55e',wickDownColor:'#ef4444',priceFormat:{type:'price',precision:8,minMove:0.00000001}},0);
 const volume=chart.addSeries(LC.HistogramSeries,{priceFormat:{type:'volume'},lastValueVisible:false},1);
