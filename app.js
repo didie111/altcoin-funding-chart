@@ -25,7 +25,7 @@ const status=(s,error=false)=>{$('status-msg').textContent=s;$('status-msg').cla
 function schedule(){if(!frame)frame=requestAnimationFrame(()=>{frame=0;draw();});}
 function draw(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clientHeight,dpr=devicePixelRatio||1;
  if(overlay.width!==Math.round(w*dpr)||overlay.height!==Math.round(h*dpr)){overlay.width=Math.round(w*dpr);overlay.height=Math.round(h*dpr);overlay.style.width=w+'px';overlay.style.height=h+'px';}
- ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;
+ ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawRuler(w,h);
  if(selectedSignal&&selectedGuideVisible){const x=chart.timeScale().timeToCoordinate(selectedSignal.time);if(x!==null&&x>=0&&x<=w-100){guideCountdown.hidden=false;guideCountdown.style.left=Math.max(65,Math.min(w-165,x))+'px';ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
  if(!showLines)return;
  const range=chart.timeScale().getVisibleRange();if(!range)return;
@@ -33,6 +33,27 @@ function draw(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clie
  let last=-100;let i=lowerBound(signals,Number(range.from));
  for(;i<signals.length&&signals[i].time<=Number(range.to);i++){const s=signals[i],x=chart.timeScale().timeToCoordinate(s.time);if(x===null||x-last<2)continue;last=x;ctx.strokeStyle=s.type==='EXTREME'?'#a855f780':'#ef444480';ctx.setLineDash([3,4]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();}
 }
+
+let rulerEnabled=false,rulerStart=null,rulerEnd=null,rulerLocked=false;
+const rulerBtn=document.createElement('button');rulerBtn.className='btn-toggle';rulerBtn.textContent='📏 줄자';rulerBtn.title='시작 가격 클릭 → 끝 가격 클릭 · Esc 종료';rulerBtn.setAttribute('aria-pressed','false');$('btnLogScale').parentElement.append(rulerBtn);
+const rulerLabel=document.createElement('div');rulerLabel.hidden=true;rulerLabel.style.cssText='position:absolute;pointer-events:none;z-index:7;background:#111827f2;color:#fff;border:2px solid #38bdf8;padding:8px 12px;border-radius:8px;font-size:13px;font-weight:700;white-space:pre-line;box-shadow:0 2px 8px #0009;max-width:280px';$('unified-chart').append(rulerLabel);
+function priceChange(start,end){if(!Number.isFinite(start)||!Number.isFinite(end)||start<=0)return null;return {difference:end-start,percent:(end-start)/start*100};}
+function clearRuler(){rulerStart=null;rulerEnd=null;rulerLocked=false;rulerLabel.hidden=true;schedule();}
+function toggleRuler(enabled){rulerEnabled=enabled;rulerBtn.classList.toggle('active',enabled);rulerBtn.setAttribute('aria-pressed',String(enabled));chart.applyOptions({handleScroll:!enabled,handleScale:!enabled});$('unified-chart').style.cursor=enabled?'crosshair':'';clearRuler();if(enabled)status('줄자: 위쪽 가격 차트의 시작 가격 → 끝 가격을 클릭하세요. Esc로 종료');}
+rulerBtn.onclick=()=>toggleRuler(!rulerEnabled);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&rulerEnabled)toggleRuler(false);});
+function rulerPoint(p){if(!p.point||p.paneIndex!==0)return null;const logical=chart.timeScale().coordinateToLogical(p.point.x),price=candles.coordinateToPrice(p.point.y);if(logical===null||price===null||price<=0)return null;return {index:logical+windowStart,price};}
+chart.subscribeClick(p=>{if(!rulerEnabled)return;const point=rulerPoint(p);if(!point)return;if(!rulerStart||rulerLocked){rulerStart=point;rulerEnd=point;rulerLocked=false;status('줄자: 끝 가격을 클릭하면 측정 결과가 고정됩니다.');}else{rulerEnd=point;rulerLocked=true;status('줄자 측정 완료 · 다시 클릭해 새 측정 / Esc 종료');}schedule();});
+chart.subscribeCrosshairMove(p=>{if(!rulerEnabled||!rulerStart||rulerLocked)return;const point=rulerPoint(p);if(point){rulerEnd=point;schedule();}});
+function drawRuler(w,h){rulerLabel.hidden=true;if(!rulerEnabled||!rulerStart||!rulerEnd)return;
+ const x1=chart.timeScale().logicalToCoordinate(rulerStart.index-windowStart),x2=chart.timeScale().logicalToCoordinate(rulerEnd.index-windowStart),y1=candles.priceToCoordinate(rulerStart.price),y2=candles.priceToCoordinate(rulerEnd.price);
+ if([x1,x2,y1,y2].some(v=>v===null))return;const change=priceChange(rulerStart.price,rulerEnd.price);if(!change)return;
+ const color=change.percent>=0?'#34d399':'#fb7185';const ph=chart.panes()[0].getHeight();ctx.save();ctx.beginPath();ctx.rect(0,0,w-100,ph);ctx.clip();ctx.setLineDash([]);ctx.strokeStyle=color;ctx.fillStyle=change.percent>=0?'#34d39920':'#fb718520';ctx.lineWidth=1.5;ctx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.strokeRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+ for(const [x,y] of [[x1,y1],[x2,y2]]){ctx.beginPath();ctx.fillStyle=color;ctx.arc(x,y,4,0,Math.PI*2);ctx.fill();}ctx.restore();
+ const sign=change.percent>=0?'+':'';rulerLabel.textContent=`${sign}${change.percent.toFixed(2)}%  · 가격차 ${change.difference>=0?'+':''}${change.difference.toPrecision(6)}\n${rulerStart.price.toPrecision(7)} → ${rulerEnd.price.toPrecision(7)}\n${Math.round(Math.abs(rulerEnd.index-rulerStart.index))}봉 · ${rulerLocked?'측정 고정':'끝 가격 클릭으로 고정'}`;
+ rulerLabel.style.borderColor=color;rulerLabel.style.left=Math.max(8,Math.min(w-390,(x1+x2)/2+12))+'px';rulerLabel.style.top=Math.max(8,Math.min(ph-90,Math.min(y1,y2)-85))+'px';rulerLabel.hidden=false;
+}
+
 function lowerBound(a,t){let l=0,r=a.length;while(l<r){const m=(l+r)>>>1;if(a[m].time<t)l=m+1;else r=m;}return l;}
 function thresholds(){const warn=Number($('warnThresh').value),ext=Number($('extThresh').value);if(!$('warnThresh').value||!$('extThresh').value||!Number.isFinite(warn)||!Number.isFinite(ext)||ext>warn)throw Error('극단 경고는 1차 경고 이하의 숫자로 입력하세요.');return {warn,ext};}
 function rebuild(){const {warn,ext}=thresholds();mapped=new Map();signals=[];
@@ -90,7 +111,7 @@ async function fundingPage(ex,s,cursor,page,signal){const b=baseSymbol(s);let j,
  case 'OKX':j=await json('https://www.okx.com/api/v5/public/funding-rate-history',{instId:b+'-USDT-SWAP',limit:400,after:cursor},signal);rows=j.data;break;
  }if(!Array.isArray(rows))throw Error('펀딩비 응답 형식 오류');return uniqueSorted(rows.map(r=>({time:Math.floor(Number(r.fundingRateTimestamp??r.fundingTime??r.settleTime)/1000),rate:Number(ex==='OKX'&&r.realizedRate!==undefined&&r.realizedRate!==''?r.realizedRate:r.fundingRate)*100})).filter(r=>Number.isFinite(r.rate)));}
 async function loadData(){try{thresholds();}catch(e){return status(e.message,true);}const symbol=$('symbolInput').value.trim().toUpperCase();if(!/^[A-Z0-9_-]+$/.test(symbol))return status('유효한 심볼을 입력하세요.',true);
- controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;busy=true;selectedSignal=null;all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume.setData([]);funding.setData([]);markers.setMarkers([]);renderList();
+ controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;busy=true;clearRuler();selectedSignal=null;all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume.setData([]);funding.setData([]);markers.setMarkers([]);renderList();
  $('coverage').textContent='선택 거래소 USDT 무기한 선물 · 제공 가능한 이력 끝까지 수집 · 오래된 구간은 하단 슬라이더/최초 데이터로 이동';
  status(`${ex} ${symbol} · 과거 이력 수집 시작`);
  let candleEnd=Date.now(),chunks=[],count=0,candleNote='',fundNote='';
