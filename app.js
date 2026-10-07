@@ -35,7 +35,7 @@ function draw(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clie
 }
 
 let rulerEnabled=false,rulerStart=null,rulerEnd=null,rulerLocked=false;
-const rulerBtn=document.createElement('button');rulerBtn.className='btn-toggle';rulerBtn.textContent='📏 줄자';rulerBtn.title='시작 가격 클릭 → 끝 가격 클릭 · Esc 종료';rulerBtn.setAttribute('aria-pressed','false');$('btnLogScale').parentElement.append(rulerBtn);
+const rulerBtn=$('btnRuler');rulerBtn.className='btn-toggle';rulerBtn.textContent='📏 줄자';rulerBtn.title='시작 가격 클릭 → 끝 가격 클릭 · Esc 종료';rulerBtn.setAttribute('aria-pressed','false');$('btnLogScale').parentElement.append(rulerBtn);
 const rulerLabel=document.createElement('div');rulerLabel.hidden=true;rulerLabel.style.cssText='position:absolute;pointer-events:none;z-index:7;background:#111827f2;color:#fff;border:2px solid #38bdf8;padding:8px 12px;border-radius:8px;font-size:13px;font-weight:700;white-space:pre-line;box-shadow:0 2px 8px #0009;max-width:280px';$('unified-chart').append(rulerLabel);
 function priceChange(start,end){if(!Number.isFinite(start)||!Number.isFinite(end)||start<=0)return null;return {difference:end-start,percent:(end-start)/start*100};}
 function clearRuler(){rulerStart=null;rulerEnd=null;rulerLocked=false;rulerLabel.hidden=true;schedule();}
