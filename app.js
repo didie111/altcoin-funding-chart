@@ -4,7 +4,7 @@ const LC = LightweightCharts;
 const chart = LC.createChart($('unified-chart'), {
  autoSize:true, layout:{background:{type:'solid',color:'#111827'},textColor:'#9ca3af',panes:{separatorColor:'#374151',separatorHoverColor:'#4b5563'}},
  grid:{vertLines:{color:'#1f2937'},horzLines:{color:'#1f2937'}},
- crosshair:{mode:LC.CrosshairMode.Normal},handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:{mouseWheel:true,pinch:true},rightPriceScale:{minimumWidth:100,borderColor:'#374151'},
+ crosshair:{mode:LC.CrosshairMode.Normal},handleScroll:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:{mouseWheel:false,pinch:true},rightPriceScale:{minimumWidth:100,borderColor:'#374151'},
  timeScale:{timeVisible:true,secondsVisible:false,rightOffset:3,tickMarkFormatter:t=>new Date(Number(t)*1000).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false})},localization:{locale:'ko-KR',timeFormatter:t=>new Date(Number(t)*1000).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',hour12:false})}
 });
 const candles=chart.addSeries(LC.CandlestickSeries,{upColor:'#22c55e',downColor:'#ef4444',borderVisible:false,wickUpColor:'#22c55e',wickDownColor:'#ef4444',priceFormat:{type:'price',precision:8,minMove:0.00000001}},0);
@@ -45,7 +45,7 @@ const rulerBtn=$('btnRuler');rulerBtn.className='btn-toggle';rulerBtn.textConten
 const rulerLabel=document.createElement('div');rulerLabel.hidden=true;rulerLabel.style.cssText='position:absolute;pointer-events:none;z-index:7;background:#2563eb;color:#fff;border:1px solid #93c5fd;padding:8px 12px;border-radius:4px;font-size:13px;font-weight:700;line-height:1.6;text-align:center;white-space:pre-line;box-shadow:0 2px 8px #0009;max-width:280px';$('unified-chart').append(rulerLabel);
 function priceChange(start,end){if(!Number.isFinite(start)||!Number.isFinite(end)||start<=0)return null;return {difference:end-start,percent:(end-start)/start*100};}
 function clearRuler(){rulerStart=null;rulerEnd=null;rulerLocked=false;rulerTemporary=false;rulerLabel.hidden=true;schedule();}
-function rulerInteraction(){const active=rulerEnabled||shiftHeld||rulerDragging;chart.applyOptions({handleScroll:active?false:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:active?false:{mouseWheel:true,pinch:true}});$('unified-chart').style.cursor=active?'crosshair':'';}
+function rulerInteraction(){const active=rulerEnabled||shiftHeld||rulerDragging;chart.applyOptions({handleScroll:active?false:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:active?false:{mouseWheel:false,pinch:true}});$('unified-chart').style.cursor=active?'crosshair':'';}
 function endRulerDrag(){if(rulerPointer!==null&&$('unified-chart').hasPointerCapture(rulerPointer))$('unified-chart').releasePointerCapture(rulerPointer);rulerDragging=false;rulerPointer=null;rulerInteraction();}
 function toggleRuler(enabled){endRulerDrag();rulerEnabled=enabled;rulerBtn.classList.toggle('active',enabled);rulerBtn.setAttribute('aria-pressed',String(enabled));clearRuler();rulerInteraction();if(enabled)status('줄자: 가격 차트에서 누른 채 드래그하세요. Shift+드래그도 가능 · Esc 종료');}
 rulerBtn.onclick=()=>toggleRuler(!rulerEnabled);
@@ -54,6 +54,9 @@ document.addEventListener('keydown',e=>{if(typingTarget(e.target))return;if(e.ke
 document.addEventListener('keyup',e=>{if(e.key==='Shift'){shiftHeld=false;rulerInteraction();}});
 window.addEventListener('blur',()=>{shiftHeld=false;if(rulerDragging){endRulerDrag();rulerLocked=true;}rulerInteraction();});
 const rulerHost=$('unified-chart');
+const paneScaleSeries=[candles,volume,funding,settlementCycle];
+function paneAtY(y){let bottom=0;for(let i=0;i<chart.panes().length;i++){bottom+=chart.panes()[i].getHeight()+(i?1:0);if(y<bottom)return i;}return -1;}
+rulerHost.addEventListener('wheel',e=>{if(rulerEnabled||shiftHeld||rulerDragging)return;const box=rulerHost.getBoundingClientRect(),x=e.clientX-box.left,y=e.clientY-box.top,timeWidth=chart.timeScale().width();if(x<timeWidth)return;const pane=paneAtY(y),series=paneScaleSeries[pane];if(!series)return;const paneTop=y-(chart.panes().slice(0,pane).reduce((n,p,i)=>n+p.getHeight()+(i?1:0),0)),price=series.coordinateToPrice(paneTop),scale=series.priceScale(),range=scale.getVisibleRange();if(price===null||!range||!Number.isFinite(price)||!Number.isFinite(range.from)||!Number.isFinite(range.to)||range.to<=range.from)return;e.preventDefault();e.stopImmediatePropagation();scale.setAutoScale(false);const factor=e.deltaY<0?.82:1.22,from=price-(price-range.from)*factor,to=price+(range.to-price)*factor;scale.setVisibleRange({from,to});schedule();},{capture:true,passive:false});
 function pointerPrice(e,clamp=false){const box=rulerHost.getBoundingClientRect();let x=e.clientX-box.left,y=e.clientY-box.top;const width=chart.timeScale().width(),height=chart.panes()[0].getHeight();
  if(clamp){x=Math.max(0,Math.min(width-1,x));y=Math.max(0,Math.min(height-1,y));}else if(x<0||x>=width||y<0||y>=height)return null;
  const logical=chart.timeScale().coordinateToLogical(x),price=candles.coordinateToPrice(y);if(logical===null||price===null||price<=0)return null;return {index:Math.round(logical)+windowStart,price};}
