@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>알트코인 실시간 & 과거 통합 펀딩비 차트</title>
+    <!-- TradingView Lightweight Charts v4 CDN -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        body {
+            background-color: #111827;
+            color: #f3f4f6;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+        header {
+            background-color: #1f2937;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            border-bottom: 1px solid #374151;
+            flex-wrap: wrap;
+            z-index: 20;
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        label {
+            font-size: 11px;
+            color: #9ca3af;
+            font-weight: 600;
+        }
+        input, select, button {
+            background-color: #374151;
+            color: #ffffff;
+            border: 1px solid #4b5563;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            outline: none;
+        }
+        input[type="text"] {
+            width: 100px;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+        input[type="number"] {
+            width: 65px;
+        }
+        button {
+            cursor: pointer;
+            background-color: #2563eb;
+            border: none;
+            font-weight: 600;
+            padding: 6px 12px;
+        }
+        button:hover { background-color: #1d4ed8; }
+        .btn-toggle {
+            background-color: #4b5563;
+            color: #d1d5db;
+            font-weight: 700;
+            padding: 6px 10px;
+            min-width: 36px;
+            border-radius: 6px;
+        }
+        .btn-toggle.active { background-color: #10b981; color: #fff; }
+        #status-msg { font-size: 12px; color: #10b981; font-weight: 600; }
+        #status-msg.error { color: #f87171; }
+
+        /* 메인 레이아웃 */
+        #main-wrapper {
+            flex: 1;
+            display: flex;
+            width: 100%;
+            height: calc(100vh - 60px);
+            overflow: hidden;
+        }
+
+        #chart-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            position: relative;
+            background: #111827;
+        }
+        #price-chart-wrapper {
+            flex: 7;
+            width: 100%;
+            position: relative;
+        }
+        #price-chart {
+            width: 100%;
+            height: 100%;
+        }
+        #vertical-line-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 5;
+        }
+        #funding-chart {
+            flex: 3;
+            width: 100%;
+            border-top: 1px solid #374151;
+            position: relative;
+        }
+
+        /* 신호 목록 사이드바 */
+        #signal-sidebar {
+            width: 310px;
+            background-color: #1f2937;
+            border-left: 1px solid #374151;
+            display: flex;
+            flex-direction: column;
+            z-index: 10;
+        }
+        .sidebar-header {
+            padding: 12px 14px;
+            background-color: #111827;
+            border-bottom: 1px solid #374151;
+            font-size: 13px;
+            font-weight: 700;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .sidebar-header span {
+            background-color: #2563eb;
+            color: #fff;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+        }
+        .signal-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .signal-item {
+            background-color: #374151;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            border-left: 5px solid #3b82f6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .signal-item:hover {
+            background-color: #4b5563;
+            transform: translateX(-3px);
+        }
+        .signal-item.EXTREME {
+            border-left-color: #a855f7;
+            background-color: rgba(168, 85, 247, 0.15);
+        }
+        .signal-item.WARN {
+            border-left-color: #ef4444;
+            background-color: rgba(239, 68, 68, 0.15);
+        }
+        .signal-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .signal-date {
+            font-size: 11px;
+            color: #d1d5db;
+            font-weight: 600;
+        }
+        .signal-rate {
+            font-size: 13px;
+            font-weight: 800;
+        }
+        .signal-rate.EXTREME { color: #c084fc; }
+        .signal-rate.WARN { color: #f87171; }
+        .btn-move {
+            background-color: #2563eb;
+            color: #fff;
+            border: none;
+            padding: 6px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 2px;
+        }
+        .btn-move:hover { background-color: #1d4ed8; }
+
+        .chart-label {
+            position: absolute;
+            top: 8px;
+            left: 12px;
+            z-index: 10;
+            font-size: 11px;
+            font-weight: 700;
+            color: #9ca3af;
+            background: rgba(17, 24, 39, 0.85);
+            padding: 3px 8px;
+            border-radius: 4px;
+            pointer-events: none;
+        }
+        .legend-tag {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 4px;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="control-group">
+            <div>
+                <label>코인 심볼</label><br>
+                <input type="text" id="symbolInput" value="AKEUSDT">
+            </div>
+            <div>
+                <label>거래소</label><br>
+                <select id="exchangeSelect">
+                    <option value="BINANCE" selected>Binance</option>
+                    <option value="BYBIT">Bybit</option>
+                </select>
+            </div>
+            <div>
+                <label>봉 주기</label><br>
+                <select id="intervalSelect">
+                    <option value="15m">15분 (최대3,000봉)</option>
+                    <option value="1h">1시간 (최대3,000봉)</option>
+                    <option value="4h" selected>4시간</option>
+                    <option value="1d">1일 (일봉)</option>
+                </select>
+            </div>
+            <div>
+                <label>1차 경고(%)</label><br>
+                <input type="number" id="warnThresh" value="-0.5" step="0.1">
+            </div>
+            <div>
+                <label>극단 경고(%)</label><br>
+                <input type="number" id="extThresh" value="-2.0" step="0.1">
+            </div>
+            <div style="align-self: flex-end;">
+                <button id="searchBtn">🔍 검색 & 세로줄 신호 생성</button>
+            </div>
+        </div>
+
+        <div class="control-group">
+            <div>
+                <label>보기 설정</label><br>
+                <div style="display: flex; gap: 4px;">
+                    <button id="btnToggleLines" class="btn-toggle active" title="세로줄 가이드 켜기/끄기">👁️ 세로줄</button>
+                    <button id="btnAutoFit" class="btn-toggle active" title="자동 정렬 & 화면 포커싱">A</button>
+                    <button id="btnLogScale" class="btn-toggle" title="로그 스케일 토글">L</button>
+                </div>
+            </div>
+            <div id="status-msg">준비 완료</div>
+        </div>
+    </header>
+
+    <div id="main-wrapper">
+        <div id="chart-container">
+            <div id="price-chart-wrapper">
+                <div id="price-chart"></div>
+                <canvas id="vertical-line-overlay"></canvas>
+                <div class="chart-label">캔들 차트 & 펀딩비 가이드 세로선</div>
+            </div>
+            <div id="funding-chart">
+                <div class="chart-label">
+                    <span class="legend-tag" style="background:#a855f7;"></span>극단(-2.0% 이하) 
+                    <span class="legend-tag" style="background:#ef4444; margin-left:8px;"></span>경고(-0.5% 이하) 
+                    <span class="legend-tag" style="background:#3b82f6; margin-left:8px;"></span>일반 펀딩비
+                </div>
+            </div>
+        </div>
+
+        <!-- ⚡ 발생 신호 목록 패널 -->
+        <div id="signal-sidebar">
+            <div class="sidebar-header">
+                ⚡ 펀딩비 발생 신호 목록
+                <span id="signalCountTag">0개</span>
+            </div>
+            <div class="signal-list" id="signalListContainer">
+                <div style="color: #9ca3af; font-size: 12px; text-align: center; padding: 20px;">
+                    검색을 실행하면 여기에 발생한 신호 목록이 생성됩니다.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const priceChartContainer = document.getElementById('price-chart');
+        const fundingChartContainer = document.getElementById('funding-chart');
+        const overlayCanvas = document.getElementById('vertical-line-overlay');
+        const overlayCtx = overlayCanvas.getContext('2d');
+
+        // Y축 너비를 80px로 완전 동일 고정 (크로스헤어 어긋남 100% 방지)
+        const priceScaleConfig = {
+            borderColor: '#374151',
+            autoScale: true,
+            width: 80,
+            entireTextOnly: true,
+        };
+
+        const priceChart = LightweightCharts.createChart(priceChartContainer, {
+            layout: { background: { type: 'solid', color: '#111827' }, textColor: '#9ca3af' },
+            grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
+            crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+            rightPriceScale: priceScaleConfig,
+            timeScale: { visible: false, borderColor: '#374151', rightOffset: 2 },
+        });
+
+        const fundingChart = LightweightCharts.createChart(fundingChartContainer, {
+            layout: { background: { type: 'solid', color: '#111827' }, textColor: '#9ca3af' },
+            grid: { vertLines: { color: '#1f2937' }, horzLines: { color: '#1f2937' } },
+            crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+            rightPriceScale: priceScaleConfig,
+            timeScale: { visible: true, borderColor: '#374151', timeVisible: true, rightOffset: 2 },
+        });
+
+        const candleSeries = priceChart.addCandlestickSeries({
+            upColor: '#22c55e', downColor: '#ef4444', borderVisible: false,
+            wickUpColor: '#22c55e', wickDownColor: '#ef4444',
+        });
+
+        const fundingHistogramSeries = fundingChart.addHistogramSeries({
+            color: '#3b82f6',
+            priceFormat: { type: 'custom', formatter: p => p.toFixed(4) + '%' },
+        });
+
+        fundingHistogramSeries.createPriceLine({
+            price: 0, color: '#6b7280', lineWidth: 1, lineStyle: LightweightCharts.LineStyle.Dotted, axisLabelVisible: false,
+        });
+
+        let activeSignals = [];
+        let showVerticalLines = true;
+
+        // 세로줄 가이드선 렌더링
+        function drawVerticalLines() {
+            const width = priceChartContainer.clientWidth;
+            const height = priceChartContainer.clientHeight;
+            overlayCanvas.width = width;
+            overlayCanvas.height = height;
+
+            overlayCtx.clearRect(0, 0, width, height);
+            if (!showVerticalLines || !activeSignals || activeSignals.length === 0) return;
+
+            const timeScale = priceChart.timeScale();
+
+            activeSignals.forEach(sig => {
+                const x = timeScale.timeToCoordinate(sig.time);
+                if (x !== null && x >= 0 && x <= width) {
+                    const isExtreme = sig.type === 'EXTREME';
+
+                    overlayCtx.fillStyle = isExtreme ? 'rgba(168, 85, 247, 0.8)' : 'rgba(239, 68, 68, 0.8)';
+                    overlayCtx.fillRect(x - 4, 0, 8, 10);
+                    overlayCtx.fillRect(x - 4, height - 10, 8, 10);
+
+                    overlayCtx.beginPath();
+                    overlayCtx.lineWidth = 1;
+                    overlayCtx.strokeStyle = isExtreme ? 'rgba(168, 85, 247, 0.35)' : 'rgba(239, 68, 68, 0.35)';
+                    overlayCtx.setLineDash([3, 4]);
+
+                    overlayCtx.moveTo(x, 10);
+                    overlayCtx.lineTo(x, height - 10);
+                    overlayCtx.stroke();
+                }
+            });
+        }
+
+        let isSyncing = false;
+        function syncTimeScale(sourceChart, targetChart) {
+            sourceChart.timeScale().subscribeVisibleLogicalRangeChange(range => {
+                if (isSyncing || !range) return;
+                isSyncing = true;
+                targetChart.timeScale().setVisibleLogicalRange(range);
+                drawVerticalLines();
+                isSyncing = false;
+            });
+        }
+        syncTimeScale(priceChart, fundingChart);
+        syncTimeScale(fundingChart, priceChart);
+
+        let isCrosshairSyncing = false;
+        priceChart.subscribeCrosshairMove(param => {
+            if (isCrosshairSyncing) return;
+            isCrosshairSyncing = true;
+            if (param.time) {
+                fundingChart.setCrosshairPosition(0, param.time, fundingHistogramSeries);
+            } else {
+                fundingChart.clearCrosshairPosition();
+            }
+            isCrosshairSyncing = false;
+        });
+
+        fundingChart.subscribeCrosshairMove(param => {
+            if (isCrosshairSyncing) return;
+            isCrosshairSyncing = true;
+            if (param.time) {
+                priceChart.setCrosshairPosition(0, param.time, candleSeries);
+            } else {
+                priceChart.clearCrosshairPosition();
+            }
+            isCrosshairSyncing = false;
+        });
+
+        let isLogMode = false;
+        document.getElementById('btnToggleLines').addEventListener('click', function() {
+            showVerticalLines = !showVerticalLines;
+            this.classList.toggle('active', showVerticalLines);
+            drawVerticalLines();
+        });
+        document.getElementById('btnAutoFit').addEventListener('click', fitAndFocusChart);
+        document.getElementById('btnLogScale').addEventListener('click', toggleLogScale);
+        document.getElementById('searchBtn').addEventListener('click', loadData);
+        document.getElementById('symbolInput').addEventListener('keypress', (e) => { if (e.key === 'Enter') loadData(); });
+
+        const resizeObserver = new ResizeObserver(entries => {
+            for (let entry of entries) {
+                const width = entry.contentRect.width;
+                const height = entry.contentRect.height;
+                if (entry.target === priceChartContainer) priceChart.applyOptions({ width, height });
+                if (entry.target === fundingChartContainer) fundingChart.applyOptions({ width, height });
+            }
+            drawVerticalLines();
+        });
+        resizeObserver.observe(priceChartContainer);
+        resizeObserver.observe(fundingChartContainer);
+
+        function fitAndFocusChart() {
+            priceChart.priceScale('right').applyOptions({ autoScale: true });
+            fundingChart.priceScale('right').applyOptions({ autoScale: true });
+            priceChart.timeScale().fitContent();
+            fundingChart.timeScale().fitContent();
+            document.getElementById('btnAutoFit').classList.add('active');
+            setTimeout(drawVerticalLines, 50);
+        }
+
+        function toggleLogScale() {
+            isLogMode = !isLogMode;
+            priceChart.priceScale('right').applyOptions({
+                mode: isLogMode ? LightweightCharts.PriceScaleMode.Logarithmic : LightweightCharts.PriceScaleMode.Normal
+            });
+            document.getElementById('btnLogScale').classList.toggle('active', isLogMode);
+        }
+
+        function formatDate(timestamp) {
+            const d = new Date(timestamp * 1000);
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            const hours = String(d.getHours()).padStart(2, '0');
+            const minutes = String(d.getMinutes()).padStart(2, '0');
+            return `${month}월 ${day}일 ${hours}:${minutes}`;
+        }
+
+        function moveToSignalTime(targetTime) {
+            const timeScale = priceChart.timeScale();
+            timeScale.setVisibleRange({
+                from: targetTime - (86400 * 5),
+                to: targetTime + (86400 * 5)
+            });
+            setTimeout(drawVerticalLines, 50);
+        }
+
+        function setStatus(msg, isError = false) {
+            const el = document.getElementById('status-msg');
+            el.textContent = msg;
+            el.classList.toggle('error', isError);
+        }
+
+        // === 15분/1시간 봉 대량 과거 데이터 연쇄 수집 (Pagination) ===
+        async function fetchKlines(symbol, exchange, interval) {
+            let allKlines = [];
+            let endTime = null;
+            const limit = 1000;
+            // 15분, 1시간 봉일 경우 최대 3회 연쇄 호출 (최대 3000개 캔들 수집)
+            const fetchPages = (interval === '15m' || interval === '1h') ? 3 : 1;
+
+            for (let page = 0; page < fetchPages; page++) {
+                let url = '';
+                if (exchange === 'BYBIT') {
+                    const intervalMap = { '15m': '15', '1h': '60', '4h': '240', '1d': 'D' };
+                    url = `https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol}&interval=${intervalMap[interval]||'240'}&limit=${limit}`;
+                    if (endTime) url += `&endTime=${endTime}`;
+                } else {
+                    url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+                    if (endTime) url += `&endTime=${endTime}`;
+                }
+
+                const res = await fetch(url);
+                const json = await res.json();
+                let pageKlines = [];
+
+                if (exchange === 'BYBIT') {
+                    if (json.retCode !== 0 || !json.result?.list?.length) break;
+                    pageKlines = json.result.list.map(item => ({
+                        time: Math.floor(parseInt(item[0]) / 1000),
+                        open: parseFloat(item[1]), high: parseFloat(item[2]), low: parseFloat(item[3]), close: parseFloat(item[4]),
+                    })).reverse();
+                } else {
+                    if (!Array.isArray(json) || json.length === 0) break;
+                    pageKlines = json.map(item => ({
+                        time: Math.floor(item[0] / 1000),
+                        open: parseFloat(item[1]), high: parseFloat(item[2]), low: parseFloat(item[3]), close: parseFloat(item[4]),
+                    }));
+                }
+
+                if (pageKlines.length === 0) break;
+
+                if (page === 0) {
+                    allKlines = pageKlines;
+                } else {
+                    const oldestTime = allKlines[0].time;
+                    const olderKlines = pageKlines.filter(k => k.time < oldestTime);
+                    if (olderKlines.length === 0) break;
+                    allKlines = [...olderKlines, ...allKlines];
+                }
+
+                endTime = (allKlines[0].time * 1000) - 1;
+            }
+
+            if (allKlines.length === 0) throw new Error(`${exchange} 캔들 데이터 없음`);
+            return allKlines;
+        }
+
+        async function fetchFundingRates(symbol, exchange) {
+            if (exchange === 'BYBIT') {
+                const url = `https://api.bybit.com/v5/market/history-fund-rate?category=linear&symbol=${symbol}&limit=200`;
+                const res = await fetch(url);
+                const json = await res.json();
+                if (json.retCode !== 0 || !json.result?.list) return [];
+                return json.result.list.map(item => ({
+                    time: Math.floor(parseInt(item.fundingRateTimestamp) / 1000),
+                    rate: parseFloat(item.fundingRate) * 100
+                })).reverse();
+            } else {
+                const url = `https://fapi.binance.com/fapi/v1/fundingRate?symbol=${symbol}&limit=1000`;
+                const res = await fetch(url);
+                const json = await res.json();
+                if (!Array.isArray(json)) return [];
+                return json.map(item => ({
+                    time: Math.floor(item.fundingTime / 1000),
+                    rate: parseFloat(item.fundingRate) * 100
+                }));
+            }
+        }
+
+        async function loadData() {
+            let symbol = document.getElementById('symbolInput').value.trim().toUpperCase();
+            let exchange = document.getElementById('exchangeSelect').value;
+            const interval = document.getElementById('intervalSelect').value;
+            const warnThresh = parseFloat(document.getElementById('warnThresh').value);
+            const extThresh = parseFloat(document.getElementById('extThresh').value);
+
+            if (!symbol) return setStatus("코인 심볼을 입력하세요.", true);
+            if (!symbol.endsWith('USDT')) symbol += 'USDT';
+
+            setStatus(`[${symbol}] 과거 데이터 대량 수집 중...`);
+
+            try {
+                let klines, rawFundingList;
+                try {
+                    klines = await fetchKlines(symbol, exchange, interval);
+                    rawFundingList = await fetchFundingRates(symbol, exchange);
+                } catch (e) {
+                    const altExchange = exchange === 'BINANCE' ? 'BYBIT' : 'BINANCE';
+                    setStatus(`[${exchange}] 데이터 없음. [${altExchange}]로 교체 수집 중...`);
+                    exchange = altExchange;
+                    document.getElementById('exchangeSelect').value = exchange;
+                    klines = await fetchKlines(symbol, exchange, interval);
+                    rawFundingList = await fetchFundingRates(symbol, exchange);
+                }
+
+                candleSeries.setData(klines);
+
+                const startTime = klines[0].time;
+                const endTime = klines[klines.length - 1].time;
+                const validFunding = rawFundingList.filter(f => f.time >= startTime - 86400 && f.time <= endTime + 86400);
+
+                const histogramData = [];
+                const candleMarkers = [];
+                activeSignals = [];
+
+                // 봉 주기별 초 단위 구간 시간 정의 (1D = 86400초)
+                const intervalSecondsMap = { '15m': 900, '1h': 3600, '4h': 14400, '1d': 86400 };
+                const candleDuration = intervalSecondsMap[interval] || 14400;
+
+                klines.forEach(kline => {
+                    // 해당 캔들의 시각 범위 내 발생한 모든 펀딩비 추출
+                    const candleStartTime = kline.time;
+                    const candleEndTime = kline.time + candleDuration;
+
+                    const matchedFunds = validFunding.filter(f => 
+                        f.time >= candleStartTime - 300 && f.time < candleEndTime - 300
+                    );
+
+                    let val = 0;
+
+                    if (matchedFunds.length > 0) {
+                        // 일봉 등 여러 번 펀딩비가 터졌다면 가장 음수인(가장 낮은) 수치 채택
+                        val = Math.min(...matchedFunds.map(f => f.rate));
+                    }
+
+                    let barColor = '#3b82f6';
+
+                    if (val <= extThresh) {
+                        barColor = '#a855f7';
+                        activeSignals.push({ time: kline.time, type: 'EXTREME', rate: val });
+                        candleMarkers.push({
+                            time: kline.time,
+                            position: 'aboveBar',
+                            color: '#a855f7',
+                            shape: 'arrowDown',
+                            text: `펀딩비: ${val.toFixed(2)}%`,
+                        });
+                    } else if (val <= warnThresh) {
+                        barColor = '#ef4444';
+                        activeSignals.push({ time: kline.time, type: 'WARN', rate: val });
+                        candleMarkers.push({
+                            time: kline.time,
+                            position: 'belowBar',
+                            color: '#ef4444',
+                            shape: 'arrowUp',
+                            text: `펀딩비: ${val.toFixed(2)}%`,
+                        });
+                    }
+
+                    histogramData.push({ time: kline.time, value: val, color: barColor });
+                });
+
+                fundingHistogramSeries.setData(histogramData);
+                candleMarkers.sort((a, b) => a.time - b.time);
+                candleSeries.setMarkers(candleMarkers);
+
+                const listContainer = document.getElementById('signalListContainer');
+                document.getElementById('signalCountTag').textContent = `${activeSignals.length}개`;
+
+                if (activeSignals.length === 0) {
+                    listContainer.innerHTML = `<div style="color: #9ca3af; font-size: 12px; text-align: center; padding: 20px;">설정한 조건 이하의 펀딩비 신호가 없습니다.</div>`;
+                } else {
+                    listContainer.innerHTML = '';
+                    [...activeSignals].reverse().forEach(sig => {
+                        const dateStr = formatDate(sig.time);
+                        const item = document.createElement('div');
+                        item.className = `signal-item ${sig.type}`;
+                        item.innerHTML = `
+                            <div class="signal-info">
+                                <div class="signal-date">📅 ${dateStr}</div>
+                                <div class="signal-rate ${sig.type}">펀딩비: ${sig.rate.toFixed(2)}%</div>
+                            </div>
+                            <button class="btn-move">🎯 이동</button>
+                        `;
+
+                        item.addEventListener('click', () => moveToSignalTime(sig.time));
+                        listContainer.appendChild(item);
+                    });
+                }
+
+                fitAndFocusChart();
+                setStatus(`✅ [${symbol}] 로딩 완료! (캔들 ${klines.length}개 / 과거 신호 ${activeSignals.length}개 발견)`);
+
+            } catch (err) {
+                console.error(err);
+                setStatus(`⚠️ 오류: ${err.message}`, true);
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', loadData);
+    </script>
+</body>
+</html>
