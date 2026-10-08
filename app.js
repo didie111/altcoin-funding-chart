@@ -4,13 +4,13 @@ const LC = LightweightCharts;
 const chart = LC.createChart($('unified-chart'), {
  autoSize:true, layout:{background:{type:'solid',color:'#111827'},textColor:'#9ca3af',panes:{separatorColor:'#374151',separatorHoverColor:'#4b5563'}},
  grid:{vertLines:{color:'#1f2937'},horzLines:{color:'#1f2937'}},
- crosshair:{mode:LC.CrosshairMode.Normal},handleScroll:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:{mouseWheel:false,pinch:true},rightPriceScale:{minimumWidth:100,borderColor:'#374151'},
- timeScale:{timeVisible:true,secondsVisible:false,rightOffset:3,tickMarkFormatter:t=>new Date(Number(t)*1000).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false})},localization:{locale:'ko-KR',timeFormatter:t=>new Date(Number(t)*1000).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',hour12:false})}
+ crosshair:{mode:LC.CrosshairMode.Normal},handleScroll:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:{mouseWheel:false,pinch:true,axisPressedMouseMove:{time:true,price:true},axisDoubleClickReset:{time:true,price:false}},rightPriceScale:{minimumWidth:100,borderColor:'#374151'},
+ timeScale:{timeVisible:true,secondsVisible:false,rightOffset:3,lockVisibleTimeRangeOnResize:true,tickMarkFormatter:t=>new Date(Number(t)*1000).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false})},localization:{locale:'ko-KR',timeFormatter:t=>new Date(Number(t)*1000).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',hour12:false})}
 });
 const candles=chart.addSeries(LC.CandlestickSeries,{upColor:'#22c55e',downColor:'#ef4444',borderVisible:false,wickUpColor:'#22c55e',wickDownColor:'#ef4444',priceFormat:{type:'price',precision:8,minMove:0.00000001}},0);
 const volume=chart.addSeries(LC.HistogramSeries,{priceFormat:{type:'volume'},lastValueVisible:false},1);
 const funding=chart.addSeries(LC.HistogramSeries,{priceFormat:{type:'custom',minMove:0.000001,formatter:v=>v.toFixed(6)+'%'},lastValueVisible:false},2);
-const settlementCycle=chart.addSeries(LC.HistogramSeries,{priceFormat:{type:'custom',minMove:1,formatter:v=>v+'시간'},lastValueVisible:false,priceLineVisible:false},3);
+const settlementCycle=chart.addSeries(LC.HistogramSeries,{priceFormat:{type:'custom',minMove:1,formatter:v=>Number(v.toFixed(2))+'시간'},lastValueVisible:false,priceLineVisible:false},3);
 const cycleMarkers=LC.createSeriesMarkers(settlementCycle,[]);
 chart.panes()[3].setStretchFactor(1.5);
 const cycleCaption=document.createElement('div');cycleCaption.style.cssText='padding:4px 12px;font-size:12px;color:#cbd5e1';cycleCaption.textContent='정산 주기: 기록 대기 · 8h 파랑 / 4h 주황 / 1h 빨강';$('coverage').before(cycleCaption);
@@ -28,10 +28,10 @@ const ctx=overlay.getContext('2d');let frame=0;
 const date=t=>new Date(t*1000).toLocaleString('ko-KR',{timeZone:'Asia/Seoul',hour12:false});
 const status=(s,error=false)=>{$('status-msg').textContent=s;$('status-msg').classList.toggle('error',error);};
 function schedule(){if(!frame)frame=requestAnimationFrame(()=>{frame=0;draw();});}
-function draw(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clientHeight,dpr=devicePixelRatio||1;
+function draw(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clientHeight,dpr=devicePixelRatio||1,plotWidth=chart.timeScale().width();
  if(overlay.width!==Math.round(w*dpr)||overlay.height!==Math.round(h*dpr)){overlay.width=Math.round(w*dpr);overlay.height=Math.round(h*dpr);overlay.style.width=w+'px';overlay.style.height=h+'px';}
  ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawRuler(w,h);placeChartNavigation();
- if(selectedSignal&&selectedGuideVisible){const x=chart.timeScale().timeToCoordinate(selectedSignal.time);if(x!==null&&x>=0&&x<=w-100){guideCountdown.hidden=false;guideCountdown.style.left=Math.max(65,Math.min(w-165,x))+'px';ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
+ if(selectedSignal&&selectedGuideVisible){const x=chart.timeScale().timeToCoordinate(selectedSignal.time);if(x!==null&&x>=0&&x<=plotWidth){guideCountdown.hidden=false;guideCountdown.style.left=Math.max(65,Math.min(plotWidth-65,x))+'px';ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
  if(!showLines)return;
  const range=chart.timeScale().getVisibleRange();if(!range)return;
  let last=-100;let i=lowerBound(signals,Number(range.from));
@@ -43,7 +43,7 @@ const rulerBtn=$('btnRuler');rulerBtn.className='btn-toggle';rulerBtn.textConten
 const rulerLabel=document.createElement('div');rulerLabel.hidden=true;rulerLabel.style.cssText='position:absolute;pointer-events:none;z-index:7;background:#2563eb;color:#fff;border:1px solid #93c5fd;padding:8px 12px;border-radius:4px;font-size:13px;font-weight:700;line-height:1.6;text-align:center;white-space:pre-line;box-shadow:0 2px 8px #0009;max-width:280px';$('unified-chart').append(rulerLabel);
 function priceChange(start,end){if(!Number.isFinite(start)||!Number.isFinite(end)||start<=0)return null;return {difference:end-start,percent:(end-start)/start*100};}
 function clearRuler(){rulerStart=null;rulerEnd=null;rulerLocked=false;rulerTemporary=false;rulerLabel.hidden=true;schedule();}
-function rulerInteraction(){const active=rulerEnabled||shiftHeld||rulerDragging;chart.applyOptions({handleScroll:active?false:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:active?false:{mouseWheel:false,pinch:true}});$('unified-chart').style.cursor=active?'crosshair':'';}
+function rulerInteraction(){const active=rulerEnabled||shiftHeld||rulerDragging;chart.applyOptions({handleScroll:active?false:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:active?false:{mouseWheel:false,pinch:true,axisPressedMouseMove:{time:true,price:true},axisDoubleClickReset:{time:true,price:false}}});$('unified-chart').style.cursor=active?'crosshair':'';}
 function endRulerDrag(){if(rulerPointer!==null&&$('unified-chart').hasPointerCapture(rulerPointer))$('unified-chart').releasePointerCapture(rulerPointer);rulerDragging=false;rulerPointer=null;rulerInteraction();}
 function toggleRuler(enabled){endRulerDrag();rulerEnabled=enabled;rulerBtn.classList.toggle('active',enabled);rulerBtn.setAttribute('aria-pressed',String(enabled));clearRuler();rulerInteraction();if(enabled)status('줄자: 가격 차트에서 누른 채 드래그하세요. Shift+드래그도 가능 · Esc 종료');}
 rulerBtn.onclick=()=>toggleRuler(!rulerEnabled);
@@ -54,118 +54,136 @@ window.addEventListener('blur',()=>{shiftHeld=false;if(rulerDragging){endRulerDr
 const rulerHost=$('unified-chart');
 const paneScaleSeries=[candles,volume,funding,settlementCycle];
 
-/* 패널 분할 레이아웃 계산 */
-const PANE_STRETCHES = [6, 1.5, 2.5, 1.5];
-const TOTAL_STRETCH = 11.5;
-
+// Read the rendered panes, including separators and any user resize.
 function getPaneLayout() {
-  const totalH = Math.max(1, rulerHost.clientHeight - 26);
-  let currentTop = 0;
-  const layout = [];
-  for (let i = 0; i < PANE_STRETCHES.length; i++) {
-    const h = (totalH * PANE_STRETCHES[i]) / TOTAL_STRETCH;
-    layout.push({
-      index: i,
-      top: currentTop,
-      height: h,
-      bottom: currentTop + h,
-      series: paneScaleSeries[i]
-    });
-    currentTop += h;
-  }
-  return layout;
+  const hostTop = rulerHost.getBoundingClientRect().top;
+  return chart.panes().map((pane, index) => {
+    const element = pane.getHTMLElement();
+    if (!element) return null;
+    const top = element.getBoundingClientRect().top - hostTop;
+    const height = pane.getHeight();
+    return { index, top, height, bottom: top + height, series: paneScaleSeries[index] };
+  }).filter(Boolean);
 }
 
 function getPaneInfoAtY(y) {
-  const layout = getPaneLayout();
-  for (const pane of layout) {
-    if (y < pane.bottom) return pane;
-  }
-  return layout[layout.length - 1];
+  return getPaneLayout().find(pane => y >= pane.top && y < pane.bottom) || null;
 }
 
 function paneAtY(y) {
-  return getPaneInfoAtY(y).index;
+  return getPaneInfoAtY(y)?.index ?? -1;
 }
 
-/* 커스텀 가격축 범위 관리 */
-const customPriceRanges = new Map();
+// PriceScaleApi uses its actual range, without repeatedly adding screen margins.
+const manualPriceSpans = new WeakMap();
+let wheelTimeAnchor = null, wheelTimeFrame = 0;
 
-function applyCustomPriceRange(series, minVal, maxVal) {
-  customPriceRanges.set(series, { minValue: minVal, maxValue: maxVal });
-  series.applyOptions({
-    autoscaleInfoProvider: (original) => {
-      const custom = customPriceRanges.get(series);
-      if (custom) return { priceRange: custom };
-      return original();
-    }
+function holdPriceAxisWidth() {
+  const width = candles.priceScale().width();
+  if (width > chart.options().rightPriceScale.minimumWidth) {
+    chart.applyOptions({ rightPriceScale: { minimumWidth: width } });
+  }
+}
+
+function keepWheelTimeAnchor() {
+  if (wheelTimeFrame) return;
+  wheelTimeFrame = requestAnimationFrame(() => {
+    wheelTimeFrame = 0;
+    const anchor = wheelTimeAnchor;
+    wheelTimeAnchor = null;
+    const timeScale = chart.timeScale(), width = timeScale.width();
+    if (!anchor || width <= 0 || width === anchor.width) return;
+    // Longer price labels can widen the axis on the chart's next render.
+    holdPriceAxisWidth();
+    const range = timeScale.getVisibleLogicalRange();
+    if (!range) return;
+    const span = range.to - range.from + 1;
+    const from = anchor.absolute - windowStart - (anchor.x + 1) / width * span + .5;
+    moveChartRange({ from, to: from + span - 1 });
   });
 }
 
 function resetCustomPriceRange(series) {
-  customPriceRanges.delete(series);
-  series.applyOptions({
-    autoscaleInfoProvider: undefined
-  });
+  manualPriceSpans.delete(series);
+  series.priceScale().setAutoScale(true);
+}
+
+function zoomPanePrice(pane, localY, factor) {
+  const series = pane.series, scale = series.priceScale();
+  // coordinateToPrice also makes the current autoscale result up to date.
+  const anchorPrice = series.coordinateToPrice(localY);
+  const range = scale.getVisibleRange();
+  if (anchorPrice === null || !Number.isFinite(anchorPrice) || !range) return;
+  const span = range.to - range.from;
+  if (!Number.isFinite(span) || span <= 0) return;
+  const base = manualPriceSpans.get(series) ?? span;
+  manualPriceSpans.set(series, base);
+  const minMove = scale.options().mode === LC.PriceScaleMode.Normal ? (series.options().priceFormat.minMove || 0) : 0;
+  const nextSpan = Math.max(base * .0001, minMove * 2, Math.min(base * 1000, span * factor));
+  const actualFactor = nextSpan / span;
+  if (Math.abs(actualFactor - 1) < 1e-12) return;
+  let next;
+  if (scale.options().mode === LC.PriceScaleMode.Normal) {
+    next = { from: anchorPrice - (anchorPrice - range.from) * actualFactor, to: anchorPrice + (range.to - anchorPrice) * actualFactor };
+  } else {
+    // Calibrate the native coordinate mapping for logarithmic/inverted scales.
+    // This keeps the cursor price fixed without accessing library internals.
+    const center = (range.from + range.to) / 2;
+    next = { from: center - nextSpan / 2, to: center + nextSpan / 2 };
+    scale.setVisibleRange(next);
+    const anchorY = series.priceToCoordinate(anchorPrice), probe = nextSpan * .01;
+    scale.setVisibleRange({ from: next.from + probe, to: next.to + probe });
+    const shiftedY = series.priceToCoordinate(anchorPrice);
+    if (anchorY !== null && shiftedY !== null && Math.abs(shiftedY - anchorY) > 1e-9) {
+      const shift = (localY - anchorY) * probe / (shiftedY - anchorY);
+      next = { from: next.from + shift, to: next.to + shift };
+    }
+  }
+  if (!Number.isFinite(next.from) || !Number.isFinite(next.to) || next.from >= next.to) return;
+  scale.setVisibleRange(next);
+  $('btnAutoFit').classList.remove('active');
+}
+
+function zoomPaneTime(x, factor) {
+  const timeScale = chart.timeScale(), range = timeScale.getVisibleLogicalRange();
+  if (!all.length || !range || timeScale.width() <= 0) return;
+  // Logical ranges include both end bars. Zoom their edges, not snapped bar indices.
+  const span = range.to - range.from + 1;
+  const left = range.from - .5, right = range.to + .5;
+  const anchor = left + (x + 1) / timeScale.width() * span;
+  if (span <= 0) return;
+  const maxSpan = Math.max(8, Math.min(WINDOW - 10, all.length * 1.25));
+  const nextSpan = Math.max(8, Math.min(maxSpan, span * factor));
+  const actualFactor = nextSpan / span;
+  wheelTimeAnchor = { x, absolute: anchor + windowStart, width: timeScale.width() };
+  if (Math.abs(actualFactor - 1) >= 1e-12) {
+    moveChartRange({ from: anchor - (anchor - left) * actualFactor + .5, to: anchor + (right - anchor) * actualFactor - .5 });
+  }
+  keepWheelTimeAnchor();
 }
 
 rulerHost.addEventListener('wheel', e => {
-  if (rulerEnabled || shiftHeld || rulerDragging) return;
-  const box = rulerHost.getBoundingClientRect(),
-        x = e.clientX - box.left,
-        y = e.clientY - box.top,
-        timeWidth = chart.timeScale().width();
-
-  const paneInfo = getPaneInfoAtY(y);
-  if (!paneInfo) return;
-
-  const series = paneInfo.series;
-  if (!series) return;
-
+  if (!Number.isFinite(e.deltaY) || e.deltaY === 0) return;
+  const box = rulerHost.getBoundingClientRect(), x = e.clientX - box.left, y = e.clientY - box.top;
+  const pane = getPaneInfoAtY(y);
+  if (!pane?.series || x < 0 || x >= box.width) return;
   e.preventDefault();
   e.stopImmediatePropagation();
-
-  const factor = e.deltaY < 0 ? 0.85 : 1.18;
-
-  // 1. 차트 본문 영역(x < timeWidth)에서 마우스 휠 조작 시 가로(시간축) 확대/축소
-  if (x < timeWidth) {
-    const timeRange = chart.timeScale().getVisibleLogicalRange();
-    if (timeRange) {
-      const cursorLogical = chart.timeScale().coordinateToLogical(x);
-      if (cursorLogical !== null && Number.isFinite(cursorLogical)) {
-        const newFrom = cursorLogical - (cursorLogical - timeRange.from) * factor;
-        const newTo = cursorLogical + (timeRange.to - cursorLogical) * factor;
-        moveChartRange({ from: newFrom, to: newTo });
-      }
-    }
-  }
-
-  // 2. 세로(가격축) 확대/축소 (가격표 영역 x >= timeWidth에서는 가로축 고정된 채 세로축만 동작)
-  const paneTop = y - paneInfo.top;
-  const paneHeight = paneInfo.height;
-
-  const topPrice = series.coordinateToPrice(0);
-  const bottomPrice = series.coordinateToPrice(paneHeight);
-  if (topPrice === null || bottomPrice === null || !Number.isFinite(topPrice) || !Number.isFinite(bottomPrice)) return;
-
-  const currentMax = Math.max(topPrice, bottomPrice);
-  const currentMin = Math.min(topPrice, bottomPrice);
-  if (currentMax <= currentMin) return;
-
-  let cursorPrice = series.coordinateToPrice(paneTop);
-  if (cursorPrice === null || !Number.isFinite(cursorPrice)) {
-    cursorPrice = (currentMax + currentMin) / 2;
-  }
-
-  const newMin = cursorPrice - (cursorPrice - currentMin) * factor;
-  const newMax = cursorPrice + (currentMax - cursorPrice) * factor;
-
-  applyCustomPriceRange(series, newMin, newMax);
+  if (rulerEnabled || shiftHeld || rulerDragging) return;
+  // Keep a shrinking label from moving the shared time axis during a gesture.
+  holdPriceAxisWidth();
+  wheelTimeAnchor = null;
+  const delta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? pane.height : 1);
+  // Reciprocal factors: equal wheel movements in opposite directions undo each other.
+  const factor = Math.exp(Math.max(-240, Math.min(240, delta)) * .0015);
+  zoomPanePrice(pane, y - pane.top, factor);
+  if (x < chart.timeScale().width()) zoomPaneTime(x, factor);
   schedule();
 }, { capture: true, passive: false });
 
-/* 가격표 영역 더블 클릭 시 자동 스케일 원복 */
+// Reset only the price axis that was double-clicked.
 rulerHost.addEventListener('dblclick', e => {
+  if (rulerEnabled || shiftHeld || rulerDragging) return;
   const box = rulerHost.getBoundingClientRect(),
         x = e.clientX - box.left,
         y = e.clientY - box.top,
@@ -174,12 +192,14 @@ rulerHost.addEventListener('dblclick', e => {
   if (x >= timeWidth) {
     const paneInfo = getPaneInfoAtY(y);
     if (paneInfo && paneInfo.series) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
       resetCustomPriceRange(paneInfo.series);
       paneInfo.series.priceScale().applyOptions({ autoScale: true, scaleMargins: { top: 0.12, bottom: 0.12 } });
       schedule();
     }
   }
-});
+}, { capture: true });
 
 function pointerPrice(e,clamp=false){const box=rulerHost.getBoundingClientRect();let x=e.clientX-box.left,y=e.clientY-box.top;const width=chart.timeScale().width(),height=getPaneLayout()[0].height;
  if(clamp){x=Math.max(0,Math.min(width-1,x));y=Math.max(0,Math.min(height-1,y));}else if(x<0||x>=width||y<0||y>=height)return null;
@@ -194,12 +214,12 @@ function measureDetails(a,b){if(rulerVolumeData!==all){rulerVolumeData=all;ruler
 function drawRuler(w,h){rulerLabel.hidden=true;if(!(rulerEnabled||rulerTemporary)||!rulerStart||!rulerEnd)return;
  const x1=chart.timeScale().logicalToCoordinate(rulerStart.index-windowStart),x2=chart.timeScale().logicalToCoordinate(rulerEnd.index-windowStart),y1=candles.priceToCoordinate(rulerStart.price),y2=candles.priceToCoordinate(rulerEnd.price);
  if([x1,x2,y1,y2].some(v=>v===null))return;const change=priceChange(rulerStart.price,rulerEnd.price);if(!change)return;
- const color=change.percent>=0?'#3b82f6':'#ef4444';const ph=getPaneLayout()[0].height;ctx.save();ctx.beginPath();ctx.rect(0,0,w-100,ph);ctx.clip();ctx.setLineDash([]);ctx.strokeStyle=color;ctx.fillStyle=change.percent>=0?'#3b82f633':'#ef444433';ctx.lineWidth=1.5;ctx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.strokeRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.beginPath();const mx=(x1+x2)/2,my=(y1+y2)/2;ctx.moveTo(x1,my);ctx.lineTo(x2,my);ctx.moveTo(mx,y1);ctx.lineTo(mx,y2);ctx.stroke();for(const [ax,ay,dx,dy] of [[x2,my,-Math.sign(x2-x1)*6,0],[mx,y2,0,-Math.sign(y2-y1)*6]]){ctx.beginPath();ctx.moveTo(ax+dx+(dy?4:0),ay+dy+(dx?4:0));ctx.lineTo(ax,ay);ctx.lineTo(ax+dx-(dy?4:0),ay+dy-(dx?4:0));ctx.stroke();}
+ const color=change.percent>=0?'#3b82f6':'#ef4444';const ph=getPaneLayout()[0].height,plotWidth=chart.timeScale().width();ctx.save();ctx.beginPath();ctx.rect(0,0,plotWidth,ph);ctx.clip();ctx.setLineDash([]);ctx.strokeStyle=color;ctx.fillStyle=change.percent>=0?'#3b82f633':'#ef444433';ctx.lineWidth=1.5;ctx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.strokeRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.beginPath();const mx=(x1+x2)/2,my=(y1+y2)/2;ctx.moveTo(x1,my);ctx.lineTo(x2,my);ctx.moveTo(mx,y1);ctx.lineTo(mx,y2);ctx.stroke();for(const [ax,ay,dx,dy] of [[x2,my,-Math.sign(x2-x1)*6,0],[mx,y2,0,-Math.sign(y2-y1)*6]]){ctx.beginPath();ctx.moveTo(ax+dx+(dy?4:0),ay+dy+(dx?4:0));ctx.lineTo(ax,ay);ctx.lineTo(ax+dx-(dy?4:0),ay+dy-(dx?4:0));ctx.stroke();}
  for(const [x,y] of [[x1,y1],[x2,y2]]){ctx.beginPath();ctx.fillStyle=color;ctx.arc(x,y,4,0,Math.PI*2);ctx.fill();}ctx.restore();
 
  const details=measureDetails(rulerStart,rulerEnd),sign=change.percent>=0?'+':'';rulerLabel.textContent=`${change.difference>=0?'+':''}${change.difference.toPrecision(6)} (${sign}${change.percent.toFixed(2)}%)\n${details.bars}봉 · ${details.period}\n거래량 ${new Intl.NumberFormat('ko-KR',{notation:'compact',maximumFractionDigits:2}).format(details.volume)}`;
  rulerLabel.style.background=color;rulerLabel.style.borderColor=color;rulerLabel.style.left=Math.max(8,Math.min(w-370,(x1+x2)/2-100))+'px';rulerLabel.style.top=Math.max(8,Math.min(ph-85,Math.min(y1,y2)-85))+'px';rulerLabel.hidden=false;
- ctx.save();ctx.setLineDash([]);ctx.font='bold 11px sans-serif';ctx.textAlign='left';for(const [price,y] of [[rulerStart.price,y1],[rulerEnd.price,y2]]){if(y<0||y>ph)continue;ctx.fillStyle=color;ctx.fillRect(w-100,y-9,100,18);ctx.fillStyle='#fff';ctx.fillText(price.toPrecision(7),w-96,y+4);}ctx.restore();
+ ctx.save();ctx.setLineDash([]);ctx.font='bold 11px sans-serif';ctx.textAlign='left';for(const [price,y] of [[rulerStart.price,y1],[rulerEnd.price,y2]]){if(y<0||y>ph)continue;ctx.fillStyle=color;ctx.fillRect(plotWidth,y-9,w-plotWidth,18);ctx.fillStyle='#fff';ctx.fillText(price.toPrecision(7),plotWidth+4,y+4);}ctx.restore();
 }
 
 let navigationPane=3;
@@ -220,6 +240,7 @@ for(const [action,label,title] of [['out','-','축소'],['in','+','확대'],['le
 chartNavigation.addEventListener('pointerdown',e=>e.stopPropagation());chartNavigation.addEventListener('dblclick',e=>e.stopPropagation());
 function placeChartNavigation(){
   const layout = getPaneLayout();
+  if (!layout.length) return;
   navigationPane = Math.min(navigationPane, layout.length - 1);
   const bottom = layout[navigationPane].bottom;
   chartNavigation.style.left = chart.timeScale().width() / 2 + 'px';
@@ -229,7 +250,7 @@ $('unified-chart').addEventListener('mousemove',e=>{
   if(rulerDragging)return;
   const y=e.clientY-$('unified-chart').getBoundingClientRect().top;
   const paneIndex = paneAtY(y);
-  if(paneIndex !== navigationPane){
+  if(paneIndex >= 0 && paneIndex !== navigationPane){
     navigationPane = paneIndex;
     placeChartNavigation();
   }
@@ -329,7 +350,8 @@ async function loadData(){try{thresholds();}catch(e){return status(e.message,tru
 $('searchBtn').onclick=loadData;$('symbolInput').onkeydown=e=>{if(e.key==='Enter')loadData();};$('stopBtn').onclick=()=>controller?.abort();
 $('oldestBtn').onclick=()=>renderWindow(0);$('latestBtn').onclick=()=>renderWindow(all.length-1);
 let sliderTimer;$('historyPosition').oninput=()=>{clearTimeout(sliderTimer);sliderTimer=setTimeout(()=>renderWindow(+$('historyPosition').value),100);};
-$('btnToggleLines').onclick=function(){showLines=!showLines;this.classList.toggle('active',showLines);schedule();};$('btnLogScale').onclick=function(){log=!log;candles.priceScale().applyOptions({mode:log?LC.PriceScaleMode.Logarithmic:LC.PriceScaleMode.Normal});this.classList.toggle('active',log);};
+$('btnToggleLines').onclick=function(){showLines=!showLines;this.classList.toggle('active',showLines);schedule();};$('btnLogScale').onclick=function(){log=!log;resetCustomPriceRange(candles);candles.priceScale().applyOptions({mode:log?LC.PriceScaleMode.Logarithmic:LC.PriceScaleMode.Normal});this.classList.toggle('active',log);schedule();};
 $('btnAutoFit').onclick=()=>{resetScales();chart.timeScale().fitContent();schedule();};
 for(const id of ['warnThresh','extThresh'])$(id).onchange=()=>{try{rebuild();renderWindow(+$('historyPosition').value);}catch(e){status(e.message,true);}};
 loadData();
+
