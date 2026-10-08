@@ -229,6 +229,61 @@
             margin-right: 4px;
         }
     #main-wrapper {min-height:0;height:auto} #chart-container {min-width:0} @media(max-width:800px){#signal-sidebar{width:210px} header{padding:8px} }
+    [hidden] {display:none!important}
+    .panel-controls-layer {position:absolute;inset:0;pointer-events:none;z-index:8;overflow:hidden}
+    .pane-header {position:absolute;left:6px;display:flex;justify-content:space-between;align-items:center;height:25px;gap:6px;pointer-events:none;color:#cbd5e1;font-size:11px}
+    .pane-header-left {display:flex;align-items:center;gap:6px;min-width:0;background:#111827dc;border-radius:4px;padding:0 3px}
+    .panel-title {pointer-events:auto;background:transparent;padding:3px 2px;font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:inherit}
+    .panel-title:hover {background:#263244}
+    .panel-values {color:#b49ae3;font-variant-numeric:tabular-nums;white-space:nowrap}
+    .pane-tools,.pane-move-tools {display:flex;gap:2px;pointer-events:auto;align-items:center}
+    .pane-tools button,.pane-move-tools button {display:flex;align-items:center;justify-content:center;width:24px;height:23px;padding:3px;border:1px solid #47556966;border-radius:3px;background:#111827dc;color:#cbd5e1}
+    /* 위/아래/최대화 버튼: 해당 패널에 마우스가 올라가 있을 때(또는 최대화 상태)만 표시 */
+    .pane-move-tools {opacity:0;visibility:hidden;transition:opacity .12s}
+    .pane-header.pane-hover .pane-move-tools,.pane-header.pane-maximized .pane-move-tools {opacity:1;visibility:visible}
+    .pane-tools button:hover,.pane-move-tools button:hover {background:#374151;color:#fff}
+    .pane-header button:focus-visible,.panel-menu button:focus-visible {outline:2px solid #a78bfa;outline-offset:1px}
+    .pane-header button:disabled {opacity:.25;cursor:default}
+    .study-hidden .panel-title {color:#64748b;text-decoration:line-through}
+    .study-hidden .panel-values {display:none}
+    .pane-header [aria-pressed="true"] {color:#a78bfa;background:#312e81}
+    .panel-menu {position:fixed;z-index:40;min-width:190px;padding:5px;background:#1f2937;border:1px solid #475569;border-radius:7px;box-shadow:0 8px 24px #0009}
+    .panel-menu strong {display:block;padding:9px 10px;color:#e2e8f0;font-size:12px}
+    .panel-menu button {display:block;width:100%;padding:9px 12px;text-align:left;font-weight:400;background:transparent;border-radius:4px;color:#e2e8f0;font-size:12px}
+    .panel-menu button:hover {background:#374151}
+    .panel-menu button:disabled {color:#64748b;cursor:default}
+    .panel-menu .danger {color:#f87171}
+    dialog {width:min(470px,calc(100vw - 24px));max-height:calc(100vh - 32px);margin:auto;padding:0;background:#111827;color:#e2e8f0;border:1px solid #475569;border-radius:12px;box-shadow:0 16px 80px #000a}
+    dialog::backdrop {background:#02061799}
+    .settings-heading {display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid #334155}
+    .settings-heading h2 {font-size:18px;font-weight:600}
+    .settings-heading button {background:transparent;font-size:22px;padding:0 4px;color:#94a3b8}
+    .settings-tabs {display:flex;gap:12px;padding:0 20px;border-bottom:1px solid #334155}
+    .settings-tabs button {padding:12px 4px;border-radius:0;background:transparent;color:#94a3b8;border-bottom:2px solid transparent}
+    .settings-tabs button[aria-selected="true"] {color:#e2e8f0;border-bottom-color:#a78bfa}
+    .settings-body {padding:16px 20px;max-height:55vh;overflow:auto}
+    .settings-row {display:flex;align-items:center;justify-content:space-between;gap:16px;margin:12px 0;font-size:13px}
+    .settings-row label {font-size:13px;color:#cbd5e1;font-weight:400}
+    .settings-row input[type="number"],.settings-row select {width:175px;max-width:50%;padding:8px}
+    .settings-row input[type="checkbox"] {accent-color:#a78bfa;width:16px;height:16px}
+    .settings-row input[type="color"] {width:40px;height:28px;padding:2px;background:transparent;border-color:#475569}
+    .settings-group {margin-top:20px;font-size:11px;color:#94a3b8;font-weight:600;text-transform:uppercase}
+    .settings-note {font-size:11px;line-height:1.6;color:#94a3b8;margin:12px 0}
+    .settings-footer {display:flex;justify-content:space-between;gap:8px;padding:14px 20px;border-top:1px solid #334155}
+    .settings-footer .secondary {background:#374151}
+    #rsi-settings-error {font-size:12px;color:#f87171;padding:0 20px;line-height:1.6}
+    .rsi-count {font-size:10px;color:#94a3b8}
+    /* 메인 차트 감추기 상태: 보이기 버튼만 표시 */
+    .pane-header.price-collapsed .panel-title,.pane-header.price-collapsed .panel-values,.pane-header.price-collapsed .pane-tools button:not([data-panel-action="hide"]),.pane-header.price-collapsed .pane-move-tools {display:none!important}
+    .legend-collapsed .pane-header.price-collapsed .pane-header-left {display:flex!important}
+    .pane-header.price-collapsed [data-panel-action="hide"] {width:auto;padding:3px 10px;background:#312e81;color:#e9d5ff;border-color:#a78bfa}
+    .pane-header.price-collapsed [data-panel-action="hide"]::after {content:"메인 차트 보이기";margin-left:6px;font-size:11px;font-weight:600;white-space:nowrap}
+    /* 정산 주기 배지 */
+    #cycle-badge {position:absolute;top:8px;right:215px;z-index:6;pointer-events:none;padding:5px 12px;border-radius:8px;font-size:13px;font-weight:800;color:#111827;box-shadow:0 2px 10px #000a;white-space:nowrap}
+    #cycle-badge.fast {font-size:14px;border:2px solid #fff;animation:cyclePulse 1.6s ease-in-out 3}
+    @keyframes cyclePulse {50%{transform:scale(1.08)}}
+    @media(max-width:700px){#cycle-badge{right:150px;font-size:11px}#cycle-badge.fast{font-size:12px}}
+    @media(max-width:700px){.pane-tools{gap:0}.pane-tools button,.pane-move-tools button{width:21px}.panel-values{display:none}.pane-header-left{gap:3px}.panel-title{max-width:110px}}
     </style>
 </head>
 <body>
@@ -275,6 +330,7 @@
                     <button id="btnToggleLines" class="btn-toggle active" title="세로줄 가이드 켜기/끄기">👁️ 세로줄</button>
                     <button id="btnAutoFit" class="btn-toggle active" title="자동 정렬 & 화면 포커싱">A</button>
                     <button id="btnLogScale" class="btn-toggle" title="로그 스케일 토글">L</button><button id="btnRuler" class="btn-toggle" title="시작 가격과 끝 가격을 클릭해 변동률 측정">📏 줄자</button>
+                    <button id="btnIndicators" class="btn-toggle" title="지표 추가 및 관리" aria-expanded="false">지표 ＋</button>
                 </div>
             </div>
             <div id="status-msg">준비 완료</div>
@@ -283,7 +339,7 @@
 
     <div id="main-wrapper">
         <div id="chart-container">
-          <div id="chart-key" style="padding:6px 12px;font-size:12px;min-height:28px">가격 · 거래량 · 펀딩비(%) · 정산 주기(시간) — 동일 시간축</div>
+          <div id="chart-key" style="padding:6px 12px;font-size:12px;min-height:28px">가격 · 거래량 · 펀딩비 · 정산 주기 · RSI Div — 동일 시간축</div>
           <div id="unified-chart" style="flex:1;min-height:0;position:relative"></div>
           <div style="padding:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px">
             <button id="oldestBtn">최초 데이터</button><button id="latestBtn">최근 데이터</button>
@@ -308,7 +364,55 @@
         </div>
     </div>
 
-    <script src="app.js?v=20261008-wheel-fix-10"></script>
+    <dialog id="rsiSettingsDialog" aria-labelledby="rsiSettingsTitle">
+      <div class="settings-heading"><h2 id="rsiSettingsTitle">RSI Div</h2><button type="button" data-close-dialog="rsiSettingsDialog" aria-label="설정 닫기">×</button></div>
+      <div class="settings-tabs" role="tablist" aria-label="RSI 설정">
+        <button type="button" role="tab" data-settings-tab="inputs" aria-selected="true">인풋</button>
+        <button type="button" role="tab" data-settings-tab="style" aria-selected="false">모습</button>
+        <button type="button" role="tab" data-settings-tab="visibility" aria-selected="false">보임</button>
+      </div>
+      <form id="rsiSettingsForm">
+        <div class="settings-body" data-settings-body="inputs">
+          <p class="settings-group">RSI 설정</p>
+          <div class="settings-row"><label for="rsiLength">RSI 길이</label><input id="rsiLength" name="length" type="number" min="1" step="1" required></div>
+          <div class="settings-row"><label for="rsiSource">소스</label><select id="rsiSource" name="source"><option value="close">종가</option><option value="open">시가</option><option value="high">고가</option><option value="low">저가</option><option value="hl2">고가·저가 평균 (HL2)</option><option value="hlc3">HLC3</option><option value="ohlc4">OHLC4</option><option value="hlcc4">HLCC4</option></select></div>
+          <div class="settings-row"><label for="rsiDiv">다이버전스 계산</label><input id="rsiDiv" name="divergence" type="checkbox"></div>
+          <p class="settings-group">Divergence settings</p>
+          <div class="settings-row"><label for="rsiOB">과매수 기준 (Bearish)</label><input id="rsiOB" name="overbought" type="number" min="0" max="100" step="1" required></div>
+          <div class="settings-row"><label for="rsiOS">과매도 기준 (Bullish)</label><input id="rsiOS" name="oversold" type="number" min="0" max="100" step="1" required></div>
+          <p class="settings-note">좌우 5봉 피봇 · 오른쪽 5봉 뒤 확인 · 신호 표시는 피봇 봉 위치.<br>피봇 비교 간격은 제공한 Pine 코드의 조건을 사용합니다. 배경 기준선은 원본과 같은 70 / 50 / 30입니다.</p>
+          <p class="settings-group">스무딩</p>
+          <div class="settings-row"><label for="rsiMAType">이동평균 종류</label><select id="rsiMAType" name="maType"><option>None</option><option>SMA</option><option>SMA + Bollinger Bands</option><option>EMA</option><option>SMMA (RMA)</option><option>WMA</option><option>VWMA</option></select></div>
+          <div class="settings-row"><label for="rsiMALength">이동평균 길이</label><input id="rsiMALength" name="maLength" type="number" min="1" step="1" required></div>
+          <div class="settings-row"><label for="rsiBBMult">BB 표준편차 배수</label><input id="rsiBBMult" name="bbMult" type="number" min="0.001" max="50" step="any" required></div>
+          <div class="settings-row"><label for="rsiAlerts">새 신호를 상태 표시줄에 알림</label><input id="rsiAlerts" name="alerts" type="checkbox"></div>
+        </div>
+        <div class="settings-body" data-settings-body="style" hidden>
+          <div class="settings-row"><label for="rsiShow">RSI 선</label><input id="rsiShow" name="showRsi" type="checkbox"><input name="rsiColor" type="color" aria-label="RSI 선 색상"></div>
+          <div class="settings-row"><label for="rsiLineWidth">RSI 선 두께</label><select id="rsiLineWidth" name="lineWidth"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>
+          <div class="settings-row"><label for="rsiShowMA">RSI 이동평균</label><input id="rsiShowMA" name="showMa" type="checkbox"><input name="maColor" type="color" aria-label="RSI 이동평균 색상"></div>
+          <div class="settings-row"><label for="rsiShowBB">볼린저 밴드</label><input id="rsiShowBB" name="showBands" type="checkbox"></div>
+          <div class="settings-row"><label for="rsiShowFill">배경 및 과매수·과매도 채우기</label><input id="rsiShowFill" name="showFill" type="checkbox"></div>
+          <div class="settings-row"><label for="rsiShowBull">Bull 선·라벨</label><input id="rsiShowBull" name="showBull" type="checkbox"><input name="bullColor" type="color" aria-label="Bull 색상"></div>
+          <div class="settings-row"><label for="rsiShowBear">Bear 선·라벨</label><input id="rsiShowBear" name="showBear" type="checkbox"><input name="bearColor" type="color" aria-label="Bear 색상"></div>
+        </div>
+        <div class="settings-body" data-settings-body="visibility" hidden>
+          <p class="settings-note">RSI 지표를 표시할 봉 주기를 선택하세요.</p>
+          <div class="settings-row"><label for="rsiTF15">15분</label><input id="rsiTF15" name="timeframes" value="15m" type="checkbox"></div>
+          <div class="settings-row"><label for="rsiTF1">1시간</label><input id="rsiTF1" name="timeframes" value="1h" type="checkbox"></div>
+          <div class="settings-row"><label for="rsiTF4">4시간</label><input id="rsiTF4" name="timeframes" value="4h" type="checkbox"></div>
+          <div class="settings-row"><label for="rsiTFD">일봉</label><input id="rsiTFD" name="timeframes" value="1d" type="checkbox"></div>
+        </div>
+        <p id="rsi-settings-error" role="alert"></p>
+        <div class="settings-footer"><button id="rsiDefaults" class="secondary" type="button">기본 설정</button><div><button class="secondary" type="button" data-close-dialog="rsiSettingsDialog">취소</button> <button type="submit">확인</button></div></div>
+      </form>
+    </dialog>
+    <dialog id="axisSettingsDialog" aria-labelledby="axisSettingsTitle">
+      <div class="settings-heading"><h2 id="axisSettingsTitle">가격축 설정</h2><button type="button" data-close-dialog="axisSettingsDialog" aria-label="설정 닫기">×</button></div>
+      <form id="axisSettingsForm"><div class="settings-body"><div class="settings-row"><label for="axisAuto">자동 스케일</label><input id="axisAuto" type="checkbox"></div><div class="settings-row"><label for="axisInvert">가격축 반전</label><input id="axisInvert" type="checkbox"></div></div><div class="settings-footer"><button type="button" class="secondary" data-close-dialog="axisSettingsDialog">취소</button><button type="submit">확인</button></div></form>
+    </dialog>
+    <script src="indicators.js?v=20261008-rsi-panels-2"></script>
+    <script src="app.js?v=20261008-rsi-panels-2"></script>
 </body>
 </html>
 
