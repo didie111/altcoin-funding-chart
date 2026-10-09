@@ -109,25 +109,29 @@ function harness(options = {}) {
     if (!nodes.has(id)) nodes.set(id, {textContent: '', disabled: false, title: ''});
     return nodes.get(id);
   };
-  const requests = [], renders = [], timers = [];
+  const requests = [], renders = [], timers = [], live = {data: [], options: {}};
+  class Clock extends Date {static now() {return now;}}
   const context = {
-    FundingEngine: engine, AbortController, AbortSignal, Date, Map,
+    FundingEngine: engine, AbortController, AbortSignal, Date: Clock, Map,
     $: node, document: {hidden: false},
     setInterval: (callback, ms) => {const timer = {callback, ms, stopped: false}; timers.push(timer); return timer;},
     clearInterval: timer => {if (timer) timer.stopped = true;},
     date: t => new Date(t * 1000).toISOString(),
-    run: 1, busy: options.busy ?? true, all: [{time: settle / 1000}],
+    run: 1, busy: options.busy ?? true, all: [{time: settle / 1000}, {time: now / 1000}],
     rates: [{time: settle / 1000, rate: .01}], unmappedFunding: [],
-    duration: {'1h': 3600}, windowStart: 0, officialCycle: null,
+    duration: {'1h': 3600}, windowStart: 0, windowEnd: 2, officialCycle: null,
+    fundingLive: {setData: rows => {live.data = rows;}, applyOptions: value => {Object.assign(live.options, value);}},
+    studyPanels: {updateFundingLegend: () => {}}, schedule: () => {},
     chart: {timeScale: () => ({getVisibleLogicalRange: () => ({from: -10, to: 10})})},
     json: async (url, params, signal) => {
       requests.push({url, params, signal});
-      if (options.gate) await options.gate;
-      if (options.error) throw Error('network unavailable');
       const ex = engine.exchanges.find(([ex]) => url === engine.currentRequest(ex, 'KAIA').url)?.[0] ?? 'MEXC';
-      return current(ex, '-0.015', String(params.symbol ?? params.instId ?? 'KAIA').startsWith('BTC') ? 'BTC' : 'KAIA');
+      if (options.gate) await options.gate;
+      if (options.exchangeGates?.[ex]) await options.exchangeGates[ex];
+      if (options.error) throw Error('network unavailable');
+      return current(ex, options.rate ?? '-0.015', String(params.symbol ?? params.instId ?? 'KAIA').startsWith('BTC') ? 'BTC' : 'KAIA');
     },
-    fundingPage: async () => options.history ?? [{time: settle / 1000, rate: -.2}],
+    fundingPage: async () => {if (options.historyGate) await options.historyGate; return options.history ?? [{time: settle / 1000, rate: -.2}];},
     candlePage: async () => [{time: settle / 1000}, {time: next / 1000}],
     uniqueSorted: rows => engine.merge(rows),
     rebuild: () => {}, renderWindow: (...args) => renders.push(args),
@@ -135,8 +139,8 @@ function harness(options = {}) {
     status: () => {}, focusSignal: () => {}, loadData: () => {}, pause: async () => {}
   };
   vm.createContext(context);
-  vm.runInContext(snippet + '\nthis.api={startFundingUpdates,stopFundingUpdates,refreshFundingSession,renderFundingBoard,getSession:()=>fundingSession};', context);
-  return {context, nodes, requests, renders, timers, api: context.api};
+  vm.runInContext(snippet + '\nthis.api={startFundingUpdates,stopFundingUpdates,refreshFundingSession,refreshFundingQuotes,renderFundingBoard,fundingLegend,getSession:()=>fundingSession};', context);
+  return {context, nodes, requests, renders, timers, live, api: context.api};
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 test('live value is shown during backfill and is kept separate from settled rates', async () => {
@@ -146,18 +150,22 @@ test('live value is shown during backfill and is kept separate from settled rate
   assert.match(h.nodes.get('fundingSettled').textContent, /-0\.200000%/);
   assert.equal(h.context.rates[0].rate, .01);
   assert.equal(h.renders.length, 0);
+  assert.equal(h.live.data.at(-1).value, -1.5);
+  assert.equal(h.live.data[0].value, undefined);
   assert.equal(h.requests.length, 6);
-  assert.equal(h.timers[0].ms, 60000);
+  assert.deepEqual(h.timers.map(row => row.ms), [10000, 60000]);
 });
 test('live settlement refresh merges new records and keeps the current viewport', async () => {
   const rows = [{time: settle / 1000, rate: .01}, {time: next / 1000, rate: -1.5}];
   const h = harness({busy: false, history: rows}); h.api.startFundingUpdates('MEXC', 'KAIA', '1h', 1);
   await flush();
   assert.equal(h.context.rates.at(-1).rate, -1.5);
-  assert.equal(h.renders.length, 1);
-  assert.equal(h.renders[0][1], false);
-  assert.equal(h.renders[0][3].from, -10);
-  assert.equal(h.renders[0][3].to, 10);
+  assert.ok(h.renders.length > 0);
+  for (const render of h.renders) {
+    assert.equal(render[1], false);
+    assert.equal(render[3].from, -10);
+    assert.equal(render[3].to, 10);
+  }
 });
 test('failed quote requests are unavailable rather than zero', async () => {
   const h = harness({error: true}); h.api.startFundingUpdates('MEXC', 'KAIA', '1h', 1);
@@ -165,6 +173,8 @@ test('failed quote requests are unavailable rather than zero', async () => {
   assert.match(h.nodes.get('fundingSelected').textContent, /조회 실패/);
   assert.doesNotMatch(h.nodes.get('fundingSelected').textContent, /0\.000000%/);
   assert.ok([...h.api.getSession().entries.values()].every(row => row.quote === null && row.error));
+  assert.ok(h.live.data.every(row => row.value === undefined));
+  assert.match(h.nodes.get('fundingApiError').textContent, /network unavailable/);
 });
 test('changing the selected coin discards outstanding responses from the old session', async () => {
   let release; const gate = new Promise(resolve => {release = resolve;});
@@ -181,6 +191,47 @@ test('stop aborts requests and disables periodic refresh', async () => {
   const h = harness(); h.api.startFundingUpdates('MEXC', 'KAIA', '1h', 1);
   await flush(); h.api.stopFundingUpdates();
   assert.ok(h.api.getSession().abort.signal.aborted);
-  assert.ok(h.timers[0].stopped);
+  assert.ok(h.timers.every(row => row.stopped));
+  assert.equal(h.live.options.title, '이전값');
   assert.match(h.nodes.get('fundingUpdateStatus').textContent, /자동 갱신 중지/);
+});
+
+test('selected live panel updates immediately while another exchange and history are pending', async () => {
+  let release; const gate = new Promise(resolve => {release = resolve;});
+  const h = harness({rate: '-0.02', exchangeGates: {BINGX: gate}, historyGate: gate});
+  h.api.startFundingUpdates('BINANCE', 'KAIA', '1h', 1);
+  await flush();
+  assert.equal(h.live.data.at(-1).value, -2);
+  assert.match(h.api.fundingLegend(), /현재 -2\.000000% · 미정산/);
+  assert.ok(h.api.getSession().pending);
+  assert.equal(h.api.getSession().entries.has('BINGX'), false);
+  release(); await flush();
+});
+test('ten-second quote refresh changes the live panel without overwriting settlement rates', async () => {
+  const options = {rate: '-0.015'};
+  const h = harness(options); h.api.startFundingUpdates('BINANCE', 'KAIA', '1h', 1);
+  await flush(); options.rate = '-0.02';
+  h.timers.find(timer => timer.ms === 10000).callback(); await flush();
+  assert.equal(h.live.data.at(-1).value, -2);
+  assert.equal(h.api.getSession().liveRows.length, 1);
+  assert.equal(h.context.rates[0].rate, .01);
+});
+test('failed refresh retains the observed rate with an explicit stale label', async () => {
+  const options = {};
+  const h = harness(options); h.api.startFundingUpdates('BINGX', 'KAIA', '1h', 1);
+  await flush(); options.error = true;
+  await h.api.refreshFundingQuotes(h.api.getSession());
+  assert.equal(h.live.data.at(-1).value, -1.5);
+  assert.equal(h.live.options.title, '이전값');
+  assert.match(h.api.fundingLegend(), /이전값/);
+  assert.match(h.nodes.get('fundingApiError').textContent, /network unavailable/);
+});
+test('observed current rates leave unseen historical candles blank across settlement', () => {
+  const interval = 3600, t = now / 1000;
+  let records = engine.observeCurrent([], {fetchedAt: t + 10, rate: -1.5}, interval);
+  records = engine.observeCurrent(records, {fetchedAt: t + 20, rate: -2}, interval);
+  records = engine.observeCurrent(records, {fetchedAt: t + interval + 10, rate: .01}, interval);
+  assert.deepEqual(engine.liveSeriesData([{time: t - interval}, {time: t}, {time: t + interval}], records), [
+    {time: t - interval}, {time: t, value: -2}, {time: t + interval, value: .01}
+  ]);
 });

@@ -112,7 +112,18 @@ const FundingEngine = (() => {
   function minimum(records) {
     return records.reduce((lowest, row) => !lowest || row.rate < lowest.rate ? row : lowest, null);
   }
-  return {exchanges, numeric, percent, seconds, base, contract, currentRequest, normalizeCurrent, historyRequest, normalizeHistory, merge, mapToCandles, minimum};
+  // Keep observations apart from settlement history. Only values actually fetched
+  // while the page is open are plotted; unseen historical estimates stay blank.
+  function observeCurrent(records, quote, interval) {
+    if (!Number.isFinite(quote.rate) || !Number.isFinite(quote.fetchedAt) || !(interval > 0)) throw Error('현재 펀딩비 관측 값이 올바르지 않습니다.');
+    const time = Math.floor(quote.fetchedAt / interval) * interval;
+    return merge(records, [{time, rate: quote.rate, observedAt: quote.fetchedAt}]);
+  }
+  function liveSeriesData(bars, records) {
+    const values = new Map(records.map(row => [row.time, row.rate]));
+    return bars.map(bar => values.has(bar.time) ? {time: bar.time, value: values.get(bar.time)} : {time: bar.time});
+  }
+  return {exchanges, numeric, percent, seconds, base, contract, currentRequest, normalizeCurrent, historyRequest, normalizeHistory, merge, mapToCandles, minimum, observeCurrent, liveSeriesData};
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = FundingEngine;

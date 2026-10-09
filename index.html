@@ -299,6 +299,8 @@
     .funding-card strong.negative {color:#f87171}.funding-card strong.positive {color:#4ade80}
     .funding-card span {color:#94a3b8;font-size:10px}.funding-card.stale span {color:#fbbf24}
     .funding-note {color:#94a3b8}
+    .funding-api-error {color:#fbbf24;overflow-wrap:anywhere}
+    .funding-card span {overflow-wrap:anywhere}
     @media(max-width:850px){#fundingExchangeGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
     </style>
 </head>
@@ -360,7 +362,8 @@
             <div class="funding-history-row"><span id="fundingSettled">최근 정산: 조회 중</span><span id="fundingMinimum">수집 구간 최저: 수집 중</span><button id="fundingMinimumBtn" type="button" disabled>최저 기록으로 이동</button></div>
             <div class="funding-history-row"><button id="fundingRefreshBtn" type="button">현재값 새로고침</button><span id="fundingUpdateStatus"></span></div>
             <details id="fundingComparisons"><summary>거래소별 현재 펀딩비 비교 · 6곳</summary><div id="fundingExchangeGrid"></div><p class="funding-note">USDT 무기한 선물의 거래소별 1회 표시율 · 정산 전 값은 변동 가능 · 조회 실패는 확인 불가로 표시</p></details>
-            <p class="funding-note">차트와 신호 목록은 선택 거래소의 정산 기록입니다. 비교 시 거래소·계약·시각·1회/누적 기준을 맞춰주세요.</p>
+            <div id="fundingApiError" class="funding-api-error" role="status" hidden></div>
+            <p class="funding-note">하단 막대: 정산 기록 · 노란 점/선: 페이지에서 관측한 현재율(미정산). 관측 전 구간은 공백이며 신호 목록은 정산 기록 기준입니다.</p>
           </section>
           <div id="chart-key" style="padding:6px 12px;font-size:12px;min-height:28px">가격 · 거래량 · 정산 펀딩비 · 정산 주기 · RSI Div — 동일 시간축</div>
           <div id="unified-chart" style="flex:1;min-height:0;position:relative"></div>
@@ -434,9 +437,10 @@
       <div class="settings-heading"><h2 id="axisSettingsTitle">가격축 설정</h2><button type="button" data-close-dialog="axisSettingsDialog" aria-label="설정 닫기">×</button></div>
       <form id="axisSettingsForm"><div class="settings-body"><div class="settings-row"><label for="axisAuto">자동 스케일</label><input id="axisAuto" type="checkbox"></div><div class="settings-row"><label for="axisInvert">가격축 반전</label><input id="axisInvert" type="checkbox"></div></div><div class="settings-footer"><button type="button" class="secondary" data-close-dialog="axisSettingsDialog">취소</button><button type="submit">확인</button></div></form>
     </dialog>
-    <script src="funding.js?v=20261009-funding-live-1"></script>
-    <script src="indicators.js?v=20261009-funding-live-1"></script>
-    <script src="app.js?v=20261009-funding-live-1"></script>
+    <script src="market-api.js?v=20261009-realtime-pane-2"></script>
+    <script src="funding.js?v=20261009-realtime-pane-2"></script>
+    <script src="indicators.js?v=20261009-realtime-pane-2"></script>
+    <script src="app.js?v=20261009-realtime-pane-2"></script>
 </body>
 </html>
 

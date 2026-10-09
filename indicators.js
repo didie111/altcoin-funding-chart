@@ -651,7 +651,7 @@ class StudyPanelManager {
       ['funding', {
         id: 'funding',
         title: '펀딩비 (%)',
-        members: [funding],
+        members: [funding, fundingLive],
         stretch: 2.5,
         active: true,
         hidden: false
@@ -881,7 +881,8 @@ class StudyPanelManager {
         axisLabelVisible: false
       });
 
-      p.members = [funding];
+      fundingLive = chart.addSeries(LC.LineSeries, fundingLiveOptions(), index);
+      p.members = [funding, fundingLive];
     }
 
     if (id === 'cycle') {
@@ -1049,7 +1050,7 @@ class StudyPanelManager {
     p.active = false;
 
     if (id === 'volume') volume = null;
-    if (id === 'funding') funding = null;
+    if (id === 'funding') {funding = null; fundingLive = null;}
     if (id === 'cycle') settlementCycle = null;
 
     this.order = this.order.filter(v => v !== id);
@@ -1374,7 +1375,13 @@ class StudyPanelManager {
     this.refresh();
   }
 
+  updateFundingLegend() {
+    const values = this.headers?.get('funding')?.querySelector('.panel-values');
+    if (values) {values.textContent = fundingLegend(); values.style.color = '#fbbf24';}
+  }
+
   updateLegend(time = null) {
+    this.updateFundingLegend();
     const p = this.panels.get('rsi');
     const header = this.headers?.get('rsi');
 
