@@ -230,6 +230,14 @@
         }
     #main-wrapper {min-height:0;height:auto} #chart-container {min-width:0} @media(max-width:800px){#signal-sidebar{width:210px} header{padding:8px} }
     [hidden] {display:none!important}
+    #chartFullscreenZone {position:absolute;right:4px;bottom:30px;width:40px;height:42px;display:flex;align-items:center;justify-content:center;z-index:10}
+    #chartFullscreenBtn {display:flex;align-items:center;justify-content:center;width:30px;height:30px;padding:4px;border:1px solid #475569;border-radius:5px;background:#263244e8;color:#e2e8f0;opacity:0;pointer-events:none;transition:opacity .12s}
+    #chartFullscreenZone:hover #chartFullscreenBtn,#chartFullscreenZone:focus-within #chartFullscreenBtn,.chart-is-fullscreen #chartFullscreenBtn {opacity:1;pointer-events:auto}
+    #chartFullscreenBtn:hover {background:#475569}
+    #chartFullscreenBtn:focus-visible {outline:2px solid #a78bfa;outline-offset:2px}
+    #unified-chart:fullscreen,#unified-chart.chart-fullscreen-fallback {position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;height:100dvh!important;min-height:0;display:block;flex:none;background:#111827;z-index:1000}
+    #unified-chart::backdrop {background:#111827}
+    @media(hover:none),(pointer:coarse){#chartFullscreenBtn{opacity:1;pointer-events:auto}}
     .panel-controls-layer {position:absolute;inset:0;pointer-events:none;z-index:8;overflow:hidden}
     .pane-header {position:absolute;left:6px;display:flex;justify-content:space-between;align-items:center;height:25px;gap:6px;pointer-events:none;color:#cbd5e1;font-size:11px}
     .pane-header-left {display:flex;align-items:center;gap:6px;min-width:0;background:#111827dc;border-radius:4px;padding:0 3px}
@@ -440,7 +448,7 @@
     <script src="market-api.js?v=20261009-realtime-pane-3"></script>
     <script src="funding.js?v=20261009-realtime-pane-3"></script>
     <script src="indicators.js?v=20261009-realtime-pane-3"></script>
-    <script src="app.js?v=20261009-realtime-pane-3"></script>
+    <script src="app.js?v=20261009-chart-fullscreen-1"></script>
 </body>
 </html>
 

@@ -250,6 +250,7 @@ function flushWheel() {
 }
 // 마우스 휠: 차트 위 = 가격 + 시간축 확대/축소, 가격표(오른쪽 축) 위 = 해당 패널 가격만 확대/축소
 rulerHost.addEventListener('wheel', e => {
+  if (e.target instanceof Element && e.target.closest('[data-chart-fullscreen]')) return;
   if (!Number.isFinite(e.deltaY) || e.deltaY === 0) return;
   const box = rulerHost.getBoundingClientRect(), x = e.clientX - box.left, y = e.clientY - box.top;
   const pane = getPaneInfoAtY(y);
@@ -268,6 +269,7 @@ rulerHost.addEventListener('wheel', e => {
 
 // 가격축 더블클릭: 해당 패널 가격축만 자동 정렬
 rulerHost.addEventListener('dblclick', e => {
+  if (e.target instanceof Element && e.target.closest('[data-chart-fullscreen]')) return;
   if (rulerEnabled || shiftHeld || rulerDragging) return;
   const box = rulerHost.getBoundingClientRect(),
         x = e.clientX - box.left,
@@ -288,7 +290,7 @@ rulerHost.addEventListener('dblclick', e => {
 function pointerPrice(e,clamp=false){const pl=pricePane();if(!pl)return null;const box=rulerHost.getBoundingClientRect();let x=e.clientX-box.left,y=e.clientY-box.top-pl.top;const width=chart.timeScale().width(),height=pl.height;
  if(clamp){x=Math.max(0,Math.min(width-1,x));y=Math.max(0,Math.min(height-1,y));}else if(x<0||x>=width||y<0||y>=height)return null;
  const logical=chart.timeScale().coordinateToLogical(x),price=candles.coordinateToPrice(y);if(logical===null||price===null||price<=0)return null;return {index:Math.round(logical)+windowStart,price};}
-rulerHost.addEventListener('pointerdown',e=>{if(e.target instanceof Element&&e.target.closest('[data-chart-nav]'))return;if(e.button!==0)return;const active=rulerEnabled||e.shiftKey||shiftHeld;if(!active){if(rulerTemporary)clearRuler();return;}const point=pointerPrice(e);if(!point)return;e.preventDefault();e.stopImmediatePropagation();rulerTemporary=!rulerEnabled;rulerStart=point;rulerEnd=point;rulerLocked=false;rulerDragging=true;rulerPointer=e.pointerId;rulerHost.setPointerCapture(e.pointerId);rulerInteraction();schedule();},{capture:true});
+rulerHost.addEventListener('pointerdown',e=>{if(e.target instanceof Element&&e.target.closest('[data-chart-nav],[data-chart-fullscreen]'))return;if(e.button!==0)return;const active=rulerEnabled||e.shiftKey||shiftHeld;if(!active){if(rulerTemporary)clearRuler();return;}const point=pointerPrice(e);if(!point)return;e.preventDefault();e.stopImmediatePropagation();rulerTemporary=!rulerEnabled;rulerStart=point;rulerEnd=point;rulerLocked=false;rulerDragging=true;rulerPointer=e.pointerId;rulerHost.setPointerCapture(e.pointerId);rulerInteraction();schedule();},{capture:true});
 rulerHost.addEventListener('pointermove',e=>{if(!rulerDragging||e.pointerId!==rulerPointer)return;e.preventDefault();e.stopImmediatePropagation();const point=pointerPrice(e,true);if(point){rulerEnd=point;schedule();}},{capture:true});
 rulerHost.addEventListener('pointerup',e=>{if(!rulerDragging||e.pointerId!==rulerPointer)return;e.preventDefault();e.stopImmediatePropagation();const point=pointerPrice(e,true);if(point)rulerEnd=point;rulerLocked=true;endRulerDrag();status('줄자 측정 완료 · 다시 드래그해 측정 / Esc 종료');schedule();},{capture:true});
 rulerHost.addEventListener('pointercancel',()=>{if(rulerDragging){endRulerDrag();clearRuler();}});
@@ -379,6 +381,63 @@ legendToggle.onclick = e => {
 $('unified-chart').append(legendToggle);
 applyLegendState();
 new ResizeObserver(placeChartNavigation).observe($('unified-chart'));
+
+// One fullscreen surface for the price chart and every active indicator pane.
+const chartFullscreenZone = document.createElement('div');
+chartFullscreenZone.id = 'chartFullscreenZone';
+chartFullscreenZone.dataset.chartFullscreen = 'true';
+const chartFullscreenBtn = document.createElement('button');
+chartFullscreenBtn.id = 'chartFullscreenBtn';
+chartFullscreenBtn.type = 'button';
+chartFullscreenZone.append(chartFullscreenBtn);
+rulerHost.append(chartFullscreenZone);
+let chartFullscreenPending = false;
+function isChartFullscreen() {
+  return document.fullscreenElement === rulerHost || rulerHost.classList.contains('chart-fullscreen-fallback');
+}
+function syncChartFullscreen() {
+  const active = isChartFullscreen();
+  rulerHost.classList.toggle('chart-is-fullscreen', active);
+  const label = active ? '차트 전체화면 종료' : '가격 차트와 모든 지표 전체화면';
+  chartFullscreenBtn.title = label;
+  chartFullscreenBtn.setAttribute('aria-label', label);
+  chartFullscreenBtn.setAttribute('aria-pressed', String(active));
+  const path = active
+    ? 'M3 7h4V3m10 4h-4V3M3 13h4v4m10-4h-4v4'
+    : 'M7 3H3v4m10-4h4v4M3 13v4h4m10-4v4h-4';
+  chartFullscreenBtn.innerHTML = '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + path + '"/></svg>';
+  schedule();
+}
+async function toggleChartFullscreen() {
+  if (chartFullscreenPending) return;
+  chartFullscreenPending = true;
+  chartFullscreenBtn.disabled = true;
+  try {
+    if (isChartFullscreen()) {
+      if (document.fullscreenElement === rulerHost) await document.exitFullscreen();
+      rulerHost.classList.remove('chart-fullscreen-fallback');
+    } else {
+      // Pane-only maximization is a separate control; include the full layout here.
+      studyPanels?.restoreMaximized();
+      if (document.fullscreenEnabled && rulerHost.requestFullscreen) {
+        try {await rulerHost.requestFullscreen();}
+        catch {rulerHost.classList.add('chart-fullscreen-fallback');}
+      } else rulerHost.classList.add('chart-fullscreen-fallback');
+    }
+  } finally {
+    chartFullscreenPending = false;
+    chartFullscreenBtn.disabled = false;
+    syncChartFullscreen();
+  }
+}
+chartFullscreenBtn.onclick = event => {event.stopPropagation(); void toggleChartFullscreen();};
+for (const type of ['pointerdown', 'dblclick']) chartFullscreenZone.addEventListener(type, event => event.stopPropagation());
+document.addEventListener('fullscreenchange', syncChartFullscreen);
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && isChartFullscreen()) void toggleChartFullscreen();
+});
+syncChartFullscreen();
+
 
 function windowStartFor(c){return Math.max(0,Math.min(all.length-WINDOW,Math.floor(c-WINDOW/2)));}
 function lowerBound(a,t){let l=0,r=a.length;while(l<r){const m=(l+r)>>>1;if(a[m].time<t)l=m+1;else r=m;}return l;}
