@@ -424,6 +424,7 @@ function renderWindow(center,focus=true,span=240,preservedRange=null){if(!all.le
  volume?.setData(part.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'#22c55e80':'#ef444480'})));
  funding?.setData(part.map(c=>{const f=mapped.get(c.time);return f?{time:c.time,value:f.rate,color:f.rate<=ext?'#a855f7':f.rate<=warn?'#ef4444':'#3b82f6'}:{time:c.time};}));
  renderLiveFunding();
+ if(fundingSessionActive(fundingSession)&&fundingSession.liveRows.length&&all.at(-1).time<fundingSession.liveRows.at(-1).time)void refreshFundingCandles(fundingSession);
  renderCycles(part);
  studyPanels?.render(part);
  const visible=signals.slice(lowerBound(signals,part[0].time),lowerBound(signals,part.at(-1).time+1));
@@ -472,7 +473,7 @@ const fundingCards = new Map();
 const FUNDING_QUOTE_MS = 10000, FUNDING_REFRESH_MS = 60000;
 
 function fundingSessionActive(session) {
-  return fundingSession === session && session.id === run && !session.abort.signal.aborted;
+  return Boolean(session) && fundingSession === session && session.id === run && !session.abort.signal.aborted;
 }
 function fundingError(error) {
   return error.name === 'TimeoutError' ? '15초 응답 제한 초과 · 네트워크 또는 거래소 접근 제한 확인 필요' : error.message || String(error);
@@ -552,7 +553,7 @@ function renderFundingBoard() {
 }
 function startFundingUpdates(ex, symbol, interval, id) {
   stopFundingUpdates();
-  const session = {ex, symbol, interval, id, abort: new AbortController(), entries: new Map(), quotePending: new Set(), liveRows: [], latestRows: [], historyChecked: false, historyError: null, candleError: null, pending: false, candlesPending: false};
+  const session = {ex, symbol, interval, id, abort: new AbortController(), entries: new Map(), quotePending: new Set(), liveRows: [], recentCandles: [], latestRows: [], historyChecked: false, historyError: null, candleError: null, pending: false, candlesPending: false};
   fundingSession = session;
   renderLiveFunding(); renderFundingBoard();
   void refreshFundingSession(session);
@@ -581,6 +582,7 @@ async function refreshFundingQuotes(session) {
         session.liveRows = FundingEngine.observeCurrent(session.liveRows, quote, duration[session.interval]);
         if (quote.hours) officialCycle = {hours: quote.hours, note: ''};
         renderLiveFunding();
+        if (all.length && all.at(-1).time < session.liveRows.at(-1).time) void refreshFundingCandles(session);
       }
     } catch (error) {
       if (!fundingSessionActive(session)) return;
@@ -593,7 +595,7 @@ async function refreshFundingQuotes(session) {
   }));
 }
 function refreshFundingChart(session, recentCandles = []) {
-  if (!fundingSessionActive(session) || busy || !all.length) return;
+  if (!fundingSessionActive(session) || !all.length) return;
   const visible = chart.timeScale().getVisibleLogicalRange();
   const absolute = visible ? {from: visible.from + windowStart, to: visible.to + windowStart} : null;
   all = uniqueSorted([...all, ...recentCandles]);
@@ -602,11 +604,12 @@ function refreshFundingChart(session, recentCandles = []) {
   renderWindow(absolute ? (absolute.from + absolute.to) / 2 : all.length - 1, false, 240, absolute);
 }
 async function refreshFundingCandles(session) {
-  if (!fundingSessionActive(session) || busy || !all.length || session.candlesPending) return;
+  if (!fundingSessionActive(session) || !all.length || session.candlesPending) return;
   session.candlesPending = true;
   try {
     const rows = await candlePage(session.ex, session.symbol, session.interval, Date.now(), fundingRequestSignal(session), true);
     if (!fundingSessionActive(session)) return;
+    session.recentCandles = uniqueSorted([...session.recentCandles, ...rows]).slice(-100);
     refreshFundingChart(session, rows);
     session.candleError = null; session.chartError = null;
   } catch (error) {
@@ -653,7 +656,7 @@ async function loadData(){try{thresholds();}catch(e){return status(e.message,tru
  let candleEnd=Date.now(),chunks=[],count=0,candleNote='',fundNote='';
  try{for(;;){const rows=uniqueSorted(await candlePage(ex,symbol,int,candleEnd,signal)).filter(c=>c.time*1000<=candleEnd);if(!rows.length){candleNote='API 이력 끝';break;}chunks.push(rows);count+=rows.length;status(`${ex} ${symbol} · 캔들 ${count.toLocaleString()}봉 수집 중`);if(chunks.length===1){all=rows;renderWindow(all.length-1);}const next=rows[0].time*1000-1;if(next>=candleEnd){candleNote='API 페이지 진행 불가';break;}candleEnd=next;if(candleEnd<=0){candleNote='이력 끝';break;}await pause(ex==='BINGX'?1150:350,signal);}
  }catch(e){candleNote=e.name==='AbortError'?'사용자 중지':e.message;}
- if(id!==run)return;all=uniqueSorted(chunks.flat());if(!all.length){busy=false;renderFundingBoard();return status(`${ex}: ${candleNote||'해당 심볼 데이터 없음'}`,true);}renderWindow(all.length-1);
+ if(id!==run)return;all=uniqueSorted([...chunks.flat(),...(fundingSession?.recentCandles??[])]);if(!all.length){busy=false;renderFundingBoard();return status(`${ex}: ${candleNote||'해당 심볼 데이터 없음'}`,true);}renderWindow(all.length-1);
  if(!signal.aborted){let cursor=ex==='BINANCE'?all[0].time*1000:Date.now(),parts=[],previous=-1;
  try{for(let page=1;;page++){const rows=await fundingPage(ex,symbol,cursor,page,signal);if(!rows.length){fundNote='API 이력 끝';break;}const useful=rows.filter(f=>f.time>=all[0].time);parts.push(useful);status(`${ex} · ${all.length.toLocaleString()}봉 / 펀딩비 ${parts.reduce((n,a)=>n+a.length,0).toLocaleString()}건 수집 중`);
  const edge=ex==='BINANCE'?rows.at(-1).time:rows[0].time;if(edge===previous){fundNote='API 페이지 반복: 제공 범위까지만 표시';break;}previous=edge;cursor=ex==='BINANCE'?edge*1000+1:edge*1000-1;if((ex==='BINANCE'&&cursor>=Date.now())||(ex!=='BINANCE'&&edge<=all[0].time)){fundNote='캔들 구간 수집 완료';break;}await pause(ex==='BINGX'?1150:350,signal);}

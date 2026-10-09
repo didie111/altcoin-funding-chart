@@ -132,7 +132,7 @@ function harness(options = {}) {
       return current(ex, options.rate ?? '-0.015', String(params.symbol ?? params.instId ?? 'KAIA').startsWith('BTC') ? 'BTC' : 'KAIA');
     },
     fundingPage: async () => {if (options.historyGate) await options.historyGate; return options.history ?? [{time: settle / 1000, rate: -.2}];},
-    candlePage: async () => [{time: settle / 1000}, {time: next / 1000}],
+    candlePage: async () => {if (options.candleGate) await options.candleGate; return options.candles ?? [{time: now / 1000}];},
     uniqueSorted: rows => engine.merge(rows),
     rebuild: () => {}, renderWindow: (...args) => renders.push(args),
     lowerBound: (rows, time) => rows.findIndex(row => row.time >= time),
@@ -148,8 +148,7 @@ test('live value is shown during backfill and is kept separate from settled rate
   await flush();
   assert.match(h.nodes.get('fundingSelected').textContent, /-1\.500000%/);
   assert.match(h.nodes.get('fundingSettled').textContent, /-0\.200000%/);
-  assert.equal(h.context.rates[0].rate, .01);
-  assert.equal(h.renders.length, 0);
+  assert.ok(h.context.rates.every(row => row.rate !== -1.5));
   assert.equal(h.live.data.at(-1).value, -1.5);
   assert.equal(h.live.data[0].value, undefined);
   assert.equal(h.requests.length, 6);
@@ -214,7 +213,7 @@ test('ten-second quote refresh changes the live panel without overwriting settle
   h.timers.find(timer => timer.ms === 10000).callback(); await flush();
   assert.equal(h.live.data.at(-1).value, -2);
   assert.equal(h.api.getSession().liveRows.length, 1);
-  assert.equal(h.context.rates[0].rate, .01);
+  assert.ok(h.context.rates.every(row => row.rate !== -2));
 });
 test('failed refresh retains the observed rate with an explicit stale label', async () => {
   const options = {};
@@ -234,4 +233,14 @@ test('observed current rates leave unseen historical candles blank across settle
   assert.deepEqual(engine.liveSeriesData([{time: t - interval}, {time: t}, {time: t + interval}], records), [
     {time: t - interval}, {time: t, value: -2}, {time: t + interval, value: .01}
   ]);
+});
+
+test('current candles keep updating while historical backfill is still in progress', async () => {
+  const h = harness({busy: true, rate: '-0.02', candles: [{time: now / 1000, close: 12}]});
+  h.api.startFundingUpdates('BITGET', 'KAIA', '1h', 1); await flush();
+  assert.equal(h.context.busy, true);
+  assert.equal(h.context.all.at(-1).close, 12);
+  assert.equal(h.api.getSession().recentCandles.at(-1).close, 12);
+  assert.equal(h.live.data.at(-1).value, -2);
+  assert.ok(h.renders.every(render => render[1] === false));
 });
