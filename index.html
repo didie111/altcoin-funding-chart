@@ -238,6 +238,8 @@
     #unified-chart:fullscreen,#unified-chart.chart-fullscreen-fallback {position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;height:100dvh!important;min-height:0;display:block;flex:none;background:#111827;z-index:1000}
     #unified-chart::backdrop {background:#111827}
     @media(hover:none),(pointer:coarse){#chartFullscreenBtn{opacity:1;pointer-events:auto}}
+    #chartSymbolLabel {position:absolute;left:8px;z-index:9;height:18px;line-height:18px;font-size:13px;font-weight:700;color:#e2e8f0;background:#111827dc;border-radius:3px;padding:0 3px;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .chart-has-symbol .pane-header[data-panel-id="price"]:not(.price-collapsed) {margin-top:22px}
     .panel-controls-layer {position:absolute;inset:0;pointer-events:none;z-index:8;overflow:hidden}
     .pane-header {position:absolute;left:6px;display:flex;justify-content:space-between;align-items:center;height:25px;gap:6px;pointer-events:none;color:#cbd5e1;font-size:11px}
     .pane-header-left {display:flex;align-items:center;gap:6px;min-width:0;background:#111827dc;border-radius:4px;padding:0 3px}
@@ -448,7 +450,7 @@
     <script src="market-api.js?v=20261009-realtime-pane-3"></script>
     <script src="funding.js?v=20261009-realtime-pane-3"></script>
     <script src="indicators.js?v=20261009-realtime-pane-3"></script>
-    <script src="app.js?v=20261009-chart-fullscreen-1"></script>
+    <script src="app.js?v=20261010-chart-symbol-nav-1"></script>
 </body>
 </html>
 

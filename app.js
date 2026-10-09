@@ -72,7 +72,7 @@ function draw(){paneLayoutCache=computePaneLayout();try{drawInner();}finally{pan
 function setStyle(el,k,v){const c=el._st||(el._st={});if(c[k]!==v){c[k]=v;el.style[k]=v;}}
 function drawInner(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clientHeight,dpr=devicePixelRatio||1,plotWidth=chart.timeScale().width();
  if(overlay.width!==Math.round(w*dpr)||overlay.height!==Math.round(h*dpr)){overlay.width=Math.round(w*dpr);overlay.height=Math.round(h*dpr);overlay.style.width=w+'px';overlay.style.height=h+'px';}
- ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawCycleBands(w,h);drawRuler(w,h);placeChartNavigation();placeLegendToggle();studyPanels?.position();
+ ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawCycleBands(w,h);drawRuler(w,h);placeChartSymbol();placeChartNavigation();placeLegendToggle();studyPanels?.position();
  if(selectedSignal&&selectedGuideVisible){const x=chart.timeScale().timeToCoordinate(selectedSignal.time);if(x!==null&&x>=0&&x<=plotWidth){guideCountdown.hidden=false;guideCountdown.style.left=Math.max(65,Math.min(plotWidth-65,x))+'px';ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
  if(!showLines)return;
  const range=chart.timeScale().getVisibleRange();if(!range)return;
@@ -97,6 +97,21 @@ document.addEventListener('keydown',e=>{if(typingTarget(e.target))return;if(e.ke
 document.addEventListener('keyup',e=>{if(e.key==='Shift'){shiftHeld=false;rulerInteraction();}});
 window.addEventListener('blur',()=>{shiftHeld=false;if(rulerDragging){endRulerDrag();rulerLocked=true;}rulerInteraction();});
 const rulerHost=$('unified-chart');
+// Keep the symbol tied to the chart being loaded, rather than an unsubmitted input edit.
+const chartSymbolLabel=document.createElement('div');
+chartSymbolLabel.id='chartSymbolLabel';
+chartSymbolLabel.hidden=true;
+chartSymbolLabel.setAttribute('aria-label','현재 차트 코인 심볼');
+rulerHost.append(chartSymbolLabel);
+function placeChartSymbol(){
+  const pane=pricePane();
+  const visible=Boolean(chartSymbolLabel.textContent && pane && !studyPanels?.priceCollapsed());
+  chartSymbolLabel.hidden=!visible;
+  rulerHost.classList.toggle('chart-has-symbol',visible);
+  if(!visible)return;
+  setStyle(chartSymbolLabel,'top',pane.top+4+'px');
+  setStyle(chartSymbolLabel,'maxWidth',Math.max(0,chart.timeScale().width()-16)+'px');
+}
 
 // 화면에 그려진 패널 위치 (패널 이동·최대화·사용자 크기 조절 반영)
 function getPaneLayout() {
@@ -309,7 +324,7 @@ function drawRuler(w,h){rulerLabel.hidden=true;if(!(rulerEnabled||rulerTemporary
  ctx.save();ctx.translate(0,pl.top);ctx.setLineDash([]);ctx.font='bold 11px sans-serif';ctx.textAlign='left';for(const [price,y] of [[rulerStart.price,y1],[rulerEnd.price,y2]]){if(y<0||y>ph)continue;ctx.fillStyle=color;ctx.fillRect(plotWidth,y-9,w-plotWidth,18);ctx.fillStyle='#fff';ctx.fillText(price.toPrecision(7),plotWidth+4,y+4);}ctx.restore();
 }
 
-const chartNavigation=document.createElement('div');chartNavigation.dataset.chartNav='true';chartNavigation.setAttribute('role','toolbar');chartNavigation.setAttribute('aria-label','차트 확대 및 좌우 이동');chartNavigation.style.cssText='position:absolute;z-index:9;display:flex;gap:4px;transform:translateX(-50%);padding:3px;border-radius:6px;background:#111827dd;box-shadow:0 1px 8px #0006;pointer-events:auto';
+const chartNavigation=document.createElement('div');chartNavigation.id='chartNavigation';chartNavigation.dataset.chartNav='true';chartNavigation.setAttribute('role','toolbar');chartNavigation.setAttribute('aria-label','차트 확대 및 좌우 이동');chartNavigation.style.cssText='position:absolute;z-index:9;display:flex;gap:4px;transform:translateX(-100%);padding:3px;border-radius:6px;background:#111827dd;box-shadow:0 1px 8px #0006;pointer-events:auto';
 $('unified-chart').append(chartNavigation);
 function moveChartRange(range){if(!all.length)return;const absolute={from:range.from+windowStart,to:range.to+windowStart},middle=(absolute.from+absolute.to)/2;
  // [최적화] 최신봉 오른쪽 여백/데이터 끝을 넘겨 줌아웃할 때마다 10000봉 setData를 다시 하던 문제:
@@ -327,7 +342,7 @@ for(const [action,label,title] of [['out','-','축소'],['in','+','확대'],['le
  button.onclick=e=>{e.stopPropagation();navigateChart(action);};button.onmouseenter=()=>button.style.background='#475569';button.onmouseleave=()=>button.style.background='#263244';chartNavigation.append(button);
 }
 chartNavigation.addEventListener('pointerdown',e=>e.stopPropagation());chartNavigation.addEventListener('dblclick',e=>e.stopPropagation());
-// 이동 버튼(-, +, <, >, R): 항상 "맨 아래 패널"에만 표시.
+// 이동 버튼(-, +, <, >, R): 맨 아래 패널의 오른쪽 가격 축 바로 왼쪽에 표시.
 // 지표 패널이 모두 없으면 맨 아래 패널 = 가격(메인) 차트가 됩니다.
 function placeChartNavigation(){
   const layout = getPaneLayout().filter(p => p.height > 1);
@@ -339,7 +354,7 @@ function placeChartNavigation(){
   const atLatest = !all.length || !range || latestOffset === null ||
     (windowEnd === all.length && Math.abs(range.to - lastRel - latestOffset) <= 2);
   setStyle(chartNavigation, 'display', atLatest ? 'none' : 'flex');
-  setStyle(chartNavigation, 'left', chart.timeScale().width() / 2 + 'px');
+  setStyle(chartNavigation, 'left', Math.max(8, chart.timeScale().width() - 8) + 'px');
   setStyle(chartNavigation, 'top', Math.max(4, bottom - 38) + 'px');
 }
 
@@ -370,7 +385,8 @@ function placeLegendToggle() {
   legendToggle.hidden = Boolean(studyPanels?.priceCollapsed());
   if (legendToggle.hidden) return;
   const top = Math.min(...layout.map(p => p.top));
-  setStyle(legendToggle, 'top', top + (legendCollapsed ? 5 : 32) + 'px');
+  const symbolOffset = !chartSymbolLabel.hidden && pricePane()?.top === top ? 22 : 0;
+  setStyle(legendToggle, 'top', top + symbolOffset + (legendCollapsed ? 5 : 32) + 'px');
 }
 legendToggle.onclick = e => {
   e.stopPropagation();
@@ -709,7 +725,7 @@ function focusMinimumFunding() {
 }
 
 async function loadData(){try{thresholds();}catch(e){return status(e.message,true);}const symbol=$('symbolInput').value.trim().toUpperCase();if(!/^[A-Z0-9_-]+$/.test(symbol))return status('유효한 심볼을 입력하세요.',true);
- controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
+ controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;chartSymbolLabel.textContent=FundingEngine.contract(ex,symbol);chartSymbolLabel.title=ex+' · '+chartSymbolLabel.textContent;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
  $('coverage').textContent='선택 거래소 USDT 무기한 선물 · 제공 가능한 이력 끝까지 수집 · 오래된 구간은 하단 슬라이더/최초 데이터로 이동';
  status(`${ex} ${symbol} · 과거 이력 수집 시작`);startFundingUpdates(ex,symbol,int,id);
  let candleEnd=Date.now(),chunks=[],count=0,candleNote='',fundNote='';
