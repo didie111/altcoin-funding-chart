@@ -284,6 +284,22 @@
     @keyframes cyclePulse {50%{transform:scale(1.08)}}
     @media(max-width:700px){#cycle-badge{right:150px;font-size:11px}#cycle-badge.fast{font-size:12px}}
     @media(max-width:700px){.pane-tools{gap:0}.pane-tools button,.pane-move-tools button{width:21px}.panel-values{display:none}.pane-header-left{gap:3px}.panel-title{max-width:110px}}
+    #fundingSnapshot {flex:none;padding:7px 12px;border-bottom:1px solid #374151;background:#151e30;font-size:11px;line-height:1.7}
+    #fundingSelected {font-weight:700;color:#e2e8f0;font-size:12px}
+    .funding-history-row {display:flex;align-items:center;gap:5px 14px;flex-wrap:wrap;color:#cbd5e1}
+    #fundingSnapshot button {font-size:10px;padding:3px 7px}
+    #fundingSnapshot button:disabled {opacity:.4;cursor:default}
+    #fundingUpdateStatus {color:#94a3b8}
+    #fundingComparisons summary {cursor:pointer;color:#93c5fd;margin-top:3px}
+    #fundingExchangeGrid {display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;margin:5px 0}
+    .funding-card {display:flex;flex-direction:column;gap:2px;padding:6px;border:1px solid #334155;border-radius:5px;background:#1f2937;min-width:0}
+    .funding-card.selected {border-color:#60a5fa}
+    .funding-card button {align-self:flex-start;background:#334155}
+    .funding-card strong {font-size:13px;color:#e2e8f0;overflow-wrap:anywhere}
+    .funding-card strong.negative {color:#f87171}.funding-card strong.positive {color:#4ade80}
+    .funding-card span {color:#94a3b8;font-size:10px}.funding-card.stale span {color:#fbbf24}
+    .funding-note {color:#94a3b8}
+    @media(max-width:850px){#fundingExchangeGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
     </style>
 </head>
 <body>
@@ -339,7 +355,14 @@
 
     <div id="main-wrapper">
         <div id="chart-container">
-          <div id="chart-key" style="padding:6px 12px;font-size:12px;min-height:28px">가격 · 거래량 · 펀딩비 · 정산 주기 · RSI Div — 동일 시간축</div>
+          <section id="fundingSnapshot" aria-label="현재 펀딩비와 정산 기록 비교">
+            <div id="fundingSelected" aria-live="polite">현재 펀딩비 조회 준비 중</div>
+            <div class="funding-history-row"><span id="fundingSettled">최근 정산: 조회 중</span><span id="fundingMinimum">수집 구간 최저: 수집 중</span><button id="fundingMinimumBtn" type="button" disabled>최저 기록으로 이동</button></div>
+            <div class="funding-history-row"><button id="fundingRefreshBtn" type="button">현재값 새로고침</button><span id="fundingUpdateStatus"></span></div>
+            <details id="fundingComparisons"><summary>거래소별 현재 펀딩비 비교 · 6곳</summary><div id="fundingExchangeGrid"></div><p class="funding-note">USDT 무기한 선물의 거래소별 1회 표시율 · 정산 전 값은 변동 가능 · 조회 실패는 확인 불가로 표시</p></details>
+            <p class="funding-note">차트와 신호 목록은 선택 거래소의 정산 기록입니다. 비교 시 거래소·계약·시각·1회/누적 기준을 맞춰주세요.</p>
+          </section>
+          <div id="chart-key" style="padding:6px 12px;font-size:12px;min-height:28px">가격 · 거래량 · 정산 펀딩비 · 정산 주기 · RSI Div — 동일 시간축</div>
           <div id="unified-chart" style="flex:1;min-height:0;position:relative"></div>
           <div style="padding:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px">
             <button id="oldestBtn">최초 데이터</button><button id="latestBtn">최근 데이터</button>
@@ -411,8 +434,9 @@
       <div class="settings-heading"><h2 id="axisSettingsTitle">가격축 설정</h2><button type="button" data-close-dialog="axisSettingsDialog" aria-label="설정 닫기">×</button></div>
       <form id="axisSettingsForm"><div class="settings-body"><div class="settings-row"><label for="axisAuto">자동 스케일</label><input id="axisAuto" type="checkbox"></div><div class="settings-row"><label for="axisInvert">가격축 반전</label><input id="axisInvert" type="checkbox"></div></div><div class="settings-footer"><button type="button" class="secondary" data-close-dialog="axisSettingsDialog">취소</button><button type="submit">확인</button></div></form>
     </dialog>
-    <script src="indicators.js?v=20261008-rsi-panels-2"></script>
-    <script src="app.js?v=20261008-rsi-panels-2"></script>
+    <script src="funding.js?v=20261009-funding-live-1"></script>
+    <script src="indicators.js?v=20261009-funding-live-1"></script>
+    <script src="app.js?v=20261009-funding-live-1"></script>
 </body>
 </html>
 

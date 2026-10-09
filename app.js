@@ -52,7 +52,7 @@ function drawCycleBands(w,h){if(!all.length||!cycleValues.size||cycleFast.length
 chart.panes()[0].setStretchFactor(6);chart.panes()[1].setStretchFactor(1.5);chart.panes()[2].setStretchFactor(2.5);
 funding.createPriceLine({price:0,color:'#6b7280',lineWidth:1,lineStyle:LC.LineStyle.Dotted,axisLabelVisible:false});
 const markers=LC.createSeriesMarkers(candles,[]);
-let all=[],rates=[],signals=[],mapped=new Map(),controller,run=0,windowStart=0,windowEnd=0,showLines=true,log=false,busy=false,selectedSignal=null,changingWindow=false;
+let all=[],rates=[],signals=[],mapped=new Map(),unmappedFunding=[],controller,run=0,windowStart=0,windowEnd=0,showLines=true,log=false,busy=false,selectedSignal=null,changingWindow=false;
 let selectedGuideVisible=false, selectedGuideTimer, selectedCountdownTimer, selectedGuideDeadline=0;
 const WINDOW=10000, duration={'15m':900,'1h':3600,'4h':14400,'1d':86400};
 let paneScaleSeries=[candles,volume,funding,settlementCycle];
@@ -381,11 +381,10 @@ new ResizeObserver(placeChartNavigation).observe($('unified-chart'));
 function windowStartFor(c){return Math.max(0,Math.min(all.length-WINDOW,Math.floor(c-WINDOW/2)));}
 function lowerBound(a,t){let l=0,r=a.length;while(l<r){const m=(l+r)>>>1;if(a[m].time<t)l=m+1;else r=m;}return l;}
 function thresholds(){const warn=Number($('warnThresh').value),ext=Number($('extThresh').value);if(!$('warnThresh').value||!$('extThresh').value||!Number.isFinite(warn)||!Number.isFinite(ext)||ext>warn)throw Error('극단 경고는 1차 경고 이하의 숫자로 입력하세요.');return {warn,ext};}
-function rebuild(){const {warn,ext}=thresholds();mapped=new Map();signals=[];
- let i=0;for(const f of rates){while(i+1<all.length&&all[i+1].time<=f.time)i++;const c=all[i];if(!c||f.time<c.time||f.time>=c.time+duration[$('intervalSelect').value])continue;
- const old=mapped.get(c.time);if(!old||f.rate<old.rate)mapped.set(c.time,{time:c.time,rate:f.rate,events:(old?.events||0)+1});else old.events++;
- const type=f.rate<=ext?'EXTREME':f.rate<=warn?'WARN':null;if(type)signals.push({time:c.time,eventTime:f.time,rate:f.rate,type});}
- rebuildCycles();renderList();}
+function rebuild(){const {warn,ext}=thresholds();
+ const result=FundingEngine.mapToCandles(all,rates,duration[$('intervalSelect').value],warn,ext);
+ mapped=result.mapped;signals=result.signals;unmappedFunding=result.unmapped;
+ rebuildCycles();renderList();renderFundingBoard();}
 
 function observedCycles(records){const periods=[];const allowed=[1,2,4,8,12,24];for(let i=1;i<records.length;i++){const seconds=records[i].time-records[i-1].time;const hours=allowed.find(h=>Math.abs(seconds-h*3600)<=60);periods.push({start:records[i-1].time,end:records[i].time,hours:hours??null});}
  for(let i=0;i<periods.length;i++){const p=periods[i],before=periods[i-1],after=periods[i+1];if(before&&after&&before.hours===after.hours&&before.hours&&p.hours>before.hours){p.hours=null;p.gap=true;}}
@@ -440,24 +439,20 @@ async function json(base,params,signal){for(let attempt=0;attempt<4;attempt++){l
 function candle(row){if(Array.isArray(row))return {time:Math.floor(Number(row[0])/1000),open:+row[1],high:+row[2],low:+row[3],close:+row[4],volume:+row[5]};return {time:Math.floor(+row.time/1000),open:+row.open,high:+row.high,low:+row.low,close:+row.close,volume:+row.volume};}
 function uniqueSorted(rows){const m=new Map();for(const r of rows)if(Number.isFinite(r.time))m.set(r.time,r);return [...m.values()].sort((a,b)=>a.time-b.time);}
 function baseSymbol(s){return s.replace(/[-_]/g,'').replace(/USDT(?:SWAP)?$/,'');}
-async function candlePage(ex,s,int,end,signal){const b=baseSymbol(s),ms=duration[int]*1000;let j,rows;
+async function candlePage(ex,s,int,end,signal,recent=false){const b=baseSymbol(s),ms=duration[int]*1000;let j,rows;
  switch(ex){
  case 'BINANCE':j=await json('https://fapi.binance.com/fapi/v1/klines',{symbol:b+'USDT',interval:int,limit:1000,endTime:end},signal);rows=j;break;
  case 'BYBIT':j=await json('https://api.bybit.com/v5/market/kline',{category:'linear',symbol:b+'USDT',interval:{'15m':'15','1h':'60','4h':'240','1d':'D'}[int],limit:1000,end},signal);rows=j.result.list;break;
  case 'BINGX':j=await json('https://open-api.bingx.com/openApi/swap/v3/quote/klines',{symbol:b+'-USDT',interval:int,limit:1000,endTime:end},signal);rows=j.data;break;
- case 'BITGET':j=await json('https://api.bitget.com/api/v2/mix/market/history-candles',{symbol:b+'USDT',productType:'USDT-FUTURES',granularity:{'15m':'15m','1h':'1H','4h':'4H','1d':'1Dutc'}[int],limit:200,endTime:end},signal);rows=j.data;break;
- case 'OKX':j=await json('https://www.okx.com/api/v5/market/history-candles',{instId:b+'-USDT-SWAP',bar:{'15m':'15m','1h':'1H','4h':'4H','1d':'1Dutc'}[int],limit:300,after:end},signal);rows=j.data.map(r=>[...r.slice(0,5),r[6]]);break;
+ case 'BITGET':j=await json('https://api.bitget.com/api/v2/mix/market/'+(recent?'candles':'history-candles'),{symbol:b+'USDT',productType:'USDT-FUTURES',granularity:{'15m':'15m','1h':'1H','4h':'4H','1d':'1Dutc'}[int],limit:200,endTime:end},signal);rows=j.data;break;
+ case 'OKX':j=await json('https://www.okx.com/api/v5/market/'+(recent?'candles':'history-candles'),{instId:b+'-USDT-SWAP',bar:{'15m':'15m','1h':'1H','4h':'4H','1d':'1Dutc'}[int],limit:300,after:end},signal);rows=j.data.map(r=>[...r.slice(0,5),r[6]]);break;
  case 'MEXC':{const sec=Math.floor(end/1000);j=await json('https://contract.mexc.com/api/v1/contract/kline/'+b+'_USDT',{interval:{'15m':'Min15','1h':'Min60','4h':'Hour4','1d':'Day1'}[int],start:Math.max(0,sec-duration[int]*1999),end:sec},signal);const d=j.data;return (d.time||[]).map((t,i)=>({time:+t,open:+d.open[i],high:+d.high[i],low:+d.low[i],close:+d.close[i],volume:+d.vol[i]}));}
  }if(!Array.isArray(rows))throw Error('캔들 응답 형식 오류');return rows.map(candle).filter(c=>[c.time,c.open,c.high,c.low,c.close,c.volume].every(Number.isFinite));}
-async function fundingPage(ex,s,cursor,page,signal){const b=baseSymbol(s);let j,rows;
- switch(ex){
- case 'BINANCE':j=await json('https://fapi.binance.com/fapi/v1/fundingRate',{symbol:b+'USDT',limit:1000,startTime:cursor,endTime:Date.now()},signal);rows=j;break;
- case 'BYBIT':j=await json('https://api.bybit.com/v5/market/funding/history',{category:'linear',symbol:b+'USDT',limit:200,endTime:cursor},signal);rows=j.result.list;break;
- case 'BINGX':j=await json('https://open-api.bingx.com/openApi/swap/v2/quote/fundingRate',{symbol:b+'-USDT',limit:1000,endTime:cursor},signal);rows=j.data;break;
- case 'BITGET':j=await json('https://api.bitget.com/api/v2/mix/market/history-fund-rate',{symbol:b+'USDT',productType:'USDT-FUTURES',pageSize:100,pageNo:page},signal);rows=j.data;break;
- case 'MEXC':j=await json('https://contract.mexc.com/api/v1/contract/funding_rate/history',{symbol:b+'_USDT',page_size:1000,page_num:page},signal);rows=j.data.resultList;break;
- case 'OKX':j=await json('https://www.okx.com/api/v5/public/funding-rate-history',{instId:b+'-USDT-SWAP',limit:400,after:cursor},signal);rows=j.data;break;
- }if(!Array.isArray(rows))throw Error('펀딩비 응답 형식 오류');return uniqueSorted(rows.map(r=>({time:Math.floor(Number(r.fundingRateTimestamp??r.fundingTime??r.settleTime)/1000),rate:Number(ex==='OKX'&&r.realizedRate!==undefined&&r.realizedRate!==''?r.realizedRate:r.fundingRate)*100})).filter(r=>Number.isFinite(r.rate)));}
+async function fundingPage(ex,s,cursor,page,signal){
+ const request=FundingEngine.historyRequest(ex,s,cursor,page);
+ const response=await json(request.url,request.params,signal);
+ return FundingEngine.normalizeHistory(ex,response,s);
+}
 // 거래소가 공식 제공하는 "현재" 펀딩 정산 주기(시간). 실패해도 차트는 계속 동작합니다.
 async function fetchOfficialCycle(ex,s,signal){const b=baseSymbol(s);let hours=null,note='';
  try{switch(ex){
@@ -469,23 +464,161 @@ async function fetchOfficialCycle(ex,s,signal){const b=baseSymbol(s);let hours=n
  default:return null;}
  }catch(e){if(e.name==='AbortError')throw e;return null;}
  return Number.isFinite(hours)&&hours>0?{hours:Math.round(hours*100)/100,note}:null;}
+let fundingSession = null;
+const fundingCards = new Map();
+const FUNDING_REFRESH_MS = 60000;
+
+function fundingSessionActive(session) {
+  return fundingSession === session && session.id === run && !session.abort.signal.aborted;
+}
+function stopFundingUpdates() {
+  if (!fundingSession) return;
+  clearInterval(fundingSession.timer);
+  fundingSession.abort.abort();
+  $('fundingUpdateStatus').textContent = '자동 갱신 중지 · 다시 검색하면 재개';
+}
+function buildFundingCards() {
+  for (const [ex, name] of FundingEngine.exchanges) {
+    const card = document.createElement('div'); card.className = 'funding-card';
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = name;
+    button.title = name + ' 정산 기록 차트로 전환';
+    button.onclick = () => {
+      if (!fundingSession) return;
+      $('symbolInput').value = fundingSession.symbol;
+      $('exchangeSelect').value = ex; loadData();
+    };
+    const value = document.createElement('strong');
+    const note = document.createElement('span');
+    card.append(button, value, note); $('fundingExchangeGrid').append(card);
+    fundingCards.set(ex, {card, value, note});
+  }
+}
+function renderFundingBoard() {
+  const session = fundingSession;
+  if (!session) return;
+  const name = FundingEngine.exchanges.find(([ex]) => ex === session.ex)[1];
+  const entry = session.entries.get(session.ex), quote = entry?.quote;
+  const pct = value => (value > 0 ? '+' : '') + value.toFixed(6) + '%';
+  let label = `${name} ${FundingEngine.contract(session.ex, session.symbol)} · 현재 표시율 `;
+  label += quote ? pct(quote.rate) + (entry.error ? ' (이전 확인값·갱신 실패)' : '') : entry?.error ? '조회 실패' : '조회 중';
+  if (quote) {label += quote.nextTime ? ` · 정산 예정 ${date(quote.nextTime)}` : ' · 정산 예정 시각 확인 불가'; label += ` · 확인 ${date(quote.timestamp ?? quote.fetchedAt)}`;}
+  $('fundingSelected').textContent = label;
+  const newest = session.latestRows.at(-1), collected = rates.at(-1);
+  const settled = newest && (!collected || newest.time >= collected.time) ? newest : collected;
+  $('fundingSettled').textContent = '최근 정산: ' + (settled ? pct(settled.rate) + ' · ' + date(settled.time) : session.historyError ? '조회 실패' : session.historyChecked ? '제공된 기록 없음' : '조회 중') + (session.historyError && settled ? ' · 최근 이력 갱신 실패' : '');
+  const min = FundingEngine.minimum(rates);
+  $('fundingMinimum').textContent = `수집 구간 최저: ${min ? pct(min.rate) + ' · ' + date(min.time) : '수집 중'} · ${rates.length.toLocaleString()}건` + (busy ? ' (수집 중)' : '') + (unmappedFunding.length ? ` · 캔들 미연결 ${unmappedFunding.length}건` : '');
+  $('fundingMinimumBtn').disabled = !min || !all.length || unmappedFunding.some(row => row.time === min.time);
+  let healthy = 0;
+  for (const [ex, ui] of fundingCards) {
+    const row = session.entries.get(ex), current = row?.quote;
+    ui.card.classList.toggle('selected', ex === session.ex);
+    ui.card.classList.toggle('stale', Boolean(row?.error));
+    ui.value.textContent = current ? pct(current.rate) : row?.error ? '확인 불가' : '조회 중';
+    ui.value.classList.toggle('negative', Boolean(current && current.rate < 0));
+    ui.value.classList.toggle('positive', Boolean(current && current.rate > 0));
+    ui.note.textContent = row?.error ? (current ? '이전 확인값 · ' : '') + '조회 실패' : current ? `조회 ${date(current.fetchedAt)}` : '공식 거래소 조회 중';
+    ui.card.title = row?.error ?? (current ? `${current.symbol} · ${current.nextTime ? '정산 예정 ' + date(current.nextTime) : '정산 시각 확인 불가'}${current.hours ? ' · ' + current.hours + '시간 주기' : ''}` : '');
+    if (current && !row.error) healthy++;
+  }
+  if (!session.abort.signal.aborted) $('fundingUpdateStatus').textContent = `현재값 ${healthy}/6곳 확인 · 60초 자동 갱신${session.pending ? ' · 갱신 중' : ''}` + (session.candleError ? ' · 최근 캔들 갱신 실패' : '') + (session.chartError ? ' · 정산 차트 갱신 실패' : '');
+}
+function startFundingUpdates(ex, symbol, interval, id) {
+  stopFundingUpdates();
+  const session = {ex, symbol, interval, id, abort: new AbortController(), entries: new Map(), latestRows: [], historyChecked: false, historyError: null, candleError: null, pending: false};
+  fundingSession = session;
+  renderFundingBoard();
+  void refreshFundingSession(session);
+  session.timer = setInterval(() => {
+    if (!document.hidden) void refreshFundingSession(session);
+  }, FUNDING_REFRESH_MS);
+}
+async function refreshFundingSession(session) {
+  if (!fundingSessionActive(session) || session.pending) return;
+  session.pending = true;
+  renderFundingBoard();
+  // Bound a snapshot request without cancelling the separate historical collection.
+  const requestSignal = () => AbortSignal.any([session.abort.signal, AbortSignal.timeout(15000)]);
+  try {
+    const jobs = FundingEngine.exchanges.map(async ([ex]) => {
+      try {
+        const request = FundingEngine.currentRequest(ex, session.symbol);
+        const result = await json(request.url, request.params, requestSignal());
+        const quote = FundingEngine.normalizeCurrent(ex, result, session.symbol);
+        if (!fundingSessionActive(session)) return;
+        session.entries.set(ex, {quote, error: null});
+      } catch (error) {
+        if (!fundingSessionActive(session)) return;
+        session.entries.set(ex, {quote: session.entries.get(ex)?.quote ?? null, error: error.message});
+      }
+      renderFundingBoard();
+    });
+    jobs.push((async () => {
+      try {
+        if (session.ex === 'BINGX') await pause(1150, session.abort.signal);
+        const rows = await fundingPage(session.ex, session.symbol, undefined, 1, requestSignal());
+        if (!fundingSessionActive(session)) return;
+        session.latestRows = rows; session.historyChecked = true; session.historyError = null;
+      } catch (error) {
+        if (!fundingSessionActive(session)) return;
+        session.historyError = error.message;
+      }
+      renderFundingBoard();
+    })());
+    let recentCandles = [];
+    if (!busy && all.length) jobs.push((async () => {
+      try {
+        recentCandles = await candlePage(session.ex, session.symbol, session.interval, Date.now(), requestSignal(), true);
+        if (fundingSessionActive(session)) session.candleError = null;
+      } catch (error) {
+        if (fundingSessionActive(session)) session.candleError = error.message;
+      }
+    })());
+    await Promise.all(jobs);
+    if (!fundingSessionActive(session)) return;
+    const selected = session.entries.get(session.ex)?.quote;
+    if (selected?.hours && !session.entries.get(session.ex).error) officialCycle = {hours: selected.hours, note: ''};
+    if (!busy && all.length) {
+      const visible = chart.timeScale().getVisibleLogicalRange();
+      const absolute = visible ? {from: visible.from + windowStart, to: visible.to + windowStart} : null;
+      all = uniqueSorted([...all, ...recentCandles]);
+      rates = FundingEngine.merge(rates, session.latestRows.filter(row => row.time >= all[0].time));
+      rebuild();
+      renderWindow(absolute ? (absolute.from + absolute.to) / 2 : all.length - 1, false, 240, absolute);
+    }
+    session.chartError = null;
+  } catch (error) {
+    if (fundingSessionActive(session)) session.chartError = error.message;
+  } finally {
+    session.pending = false;
+    if (fundingSessionActive(session)) renderFundingBoard();
+  }
+}
+function focusMinimumFunding() {
+  const min = FundingEngine.minimum(rates);
+  if (!min) return;
+  const index = lowerBound(all, min.time + 1) - 1, bar = all[index];
+  if (!bar || min.time >= bar.time + duration[fundingSession.interval]) return status('해당 정산 시각의 캔들 기록이 없어 이동할 수 없습니다.', true);
+  focusSignal({time: bar.time, eventTime: min.time, rate: min.rate}, $('fundingMinimumBtn'));
+}
+
 async function loadData(){try{thresholds();}catch(e){return status(e.message,true);}const symbol=$('symbolInput').value.trim().toUpperCase();if(!/^[A-Z0-9_-]+$/.test(symbol))return status('유효한 심볼을 입력하세요.',true);
- controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
+ controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
  $('coverage').textContent='선택 거래소 USDT 무기한 선물 · 제공 가능한 이력 끝까지 수집 · 오래된 구간은 하단 슬라이더/최초 데이터로 이동';
- status(`${ex} ${symbol} · 과거 이력 수집 시작`);
+ status(`${ex} ${symbol} · 과거 이력 수집 시작`);startFundingUpdates(ex,symbol,int,id);
  let candleEnd=Date.now(),chunks=[],count=0,candleNote='',fundNote='';
  try{for(;;){const rows=uniqueSorted(await candlePage(ex,symbol,int,candleEnd,signal)).filter(c=>c.time*1000<=candleEnd);if(!rows.length){candleNote='API 이력 끝';break;}chunks.push(rows);count+=rows.length;status(`${ex} ${symbol} · 캔들 ${count.toLocaleString()}봉 수집 중`);if(chunks.length===1){all=rows;renderWindow(all.length-1);}const next=rows[0].time*1000-1;if(next>=candleEnd){candleNote='API 페이지 진행 불가';break;}candleEnd=next;if(candleEnd<=0){candleNote='이력 끝';break;}await pause(ex==='BINGX'?1150:350,signal);}
  }catch(e){candleNote=e.name==='AbortError'?'사용자 중지':e.message;}
- if(id!==run)return;all=uniqueSorted(chunks.flat());if(!all.length){busy=false;return status(`${ex}: ${candleNote||'해당 심볼 데이터 없음'}`,true);}renderWindow(all.length-1);
+ if(id!==run)return;all=uniqueSorted(chunks.flat());if(!all.length){busy=false;renderFundingBoard();return status(`${ex}: ${candleNote||'해당 심볼 데이터 없음'}`,true);}renderWindow(all.length-1);
  if(!signal.aborted){let cursor=ex==='BINANCE'?all[0].time*1000:Date.now(),parts=[],previous=-1;
  try{for(let page=1;;page++){const rows=await fundingPage(ex,symbol,cursor,page,signal);if(!rows.length){fundNote='API 이력 끝';break;}const useful=rows.filter(f=>f.time>=all[0].time);parts.push(useful);status(`${ex} · ${all.length.toLocaleString()}봉 / 펀딩비 ${parts.reduce((n,a)=>n+a.length,0).toLocaleString()}건 수집 중`);
  const edge=ex==='BINANCE'?rows.at(-1).time:rows[0].time;if(edge===previous){fundNote='API 페이지 반복: 제공 범위까지만 표시';break;}previous=edge;cursor=ex==='BINANCE'?edge*1000+1:edge*1000-1;if((ex==='BINANCE'&&cursor>=Date.now())||(ex!=='BINANCE'&&edge<=all[0].time)){fundNote='캔들 구간 수집 완료';break;}await pause(ex==='BINGX'?1150:350,signal);}
  }catch(e){fundNote=e.name==='AbortError'?'사용자 중지':e.message;}rates=uniqueSorted(parts.flat());}
- if(id!==run)return;try{officialCycle=await fetchOfficialCycle(ex,symbol,signal);}catch{officialCycle=null;}try{otherCycles=await fetchAllCycles(symbol,signal);}catch{otherCycles=[];}if(id!==run)return;rebuild();renderWindow(all.length-1);busy=false;
- $('coverage').textContent=`캔들: ${date(all[0].time)} ~ ${date(all.at(-1).time)} (${candleNote}) · 펀딩비: ${rates.length?date(rates[0].time)+' ~ '+date(rates.at(-1).time):'확인된 기록 없음'} (${fundNote||'미수집'}) · 봉 내 최저 실현 펀딩비 표시; 기록 없는 구간은 공백. ${ex==='OKX'?'OKX 펀딩비 API는 최근 3개월 제공. ':''}${ex==='MEXC'?'거래량 단위: 계약 수. ':'거래량 단위: 기초자산. '}`;
+ if(id!==run)return;rates=FundingEngine.merge(rates,(fundingSession?.latestRows??[]).filter(f=>f.time>=all[0].time));try{officialCycle=await fetchOfficialCycle(ex,symbol,signal);}catch{officialCycle=null;}try{otherCycles=await fetchAllCycles(symbol,signal);}catch{otherCycles=[];}if(id!==run)return;rebuild();renderWindow(all.length-1);busy=false;renderFundingBoard();
+ $('coverage').textContent=`캔들: ${date(all[0].time)} ~ ${date(all.at(-1).time)} (${candleNote}) · 펀딩비: ${rates.length?date(rates[0].time)+' ~ '+date(rates.at(-1).time):'확인된 기록 없음'} (${fundNote||'미수집'}) · 선택 거래소의 정산 기록(봉 내 최저율) · 현재 표시율은 상단에 별도 표시 · 기록 없는 구간은 공백${unmappedFunding.length?' · 캔들 미연결 '+unmappedFunding.length+'건':''}. ${ex==='OKX'?'OKX 펀딩비 API는 최근 3개월 제공. ':''}${ex==='MEXC'?'거래량 단위: 계약 수. ':'거래량 단위: 기초자산. '}`;
  status(`${ex} ${symbol} · ${all.length.toLocaleString()}봉 / 펀딩비 ${rates.length.toLocaleString()}건`,!rates.length);
 }
-$('searchBtn').onclick=loadData;$('symbolInput').onkeydown=e=>{if(e.key==='Enter')loadData();};$('stopBtn').onclick=()=>controller?.abort();
+$('searchBtn').onclick=loadData;$('symbolInput').onkeydown=e=>{if(e.key==='Enter')loadData();};$('stopBtn').onclick=()=>{controller?.abort();stopFundingUpdates();};
 $('oldestBtn').onclick=()=>renderWindow(0);$('latestBtn').onclick=()=>renderWindow(all.length-1);
 let sliderTimer;$('historyPosition').oninput=()=>{clearTimeout(sliderTimer);sliderTimer=setTimeout(()=>renderWindow(+$('historyPosition').value),100);};
 $('btnToggleLines').onclick=function(){showLines=!showLines;this.classList.toggle('active',showLines);schedule();};$('btnLogScale').onclick=function(){log=!log;resetCustomPriceRange(candles);candles.priceScale().applyOptions({mode:log?LC.PriceScaleMode.Logarithmic:LC.PriceScaleMode.Normal});this.classList.toggle('active',log);schedule();};
@@ -493,6 +626,10 @@ $('btnAutoFit').onclick=()=>{resetScales();chart.timeScale().fitContent();schedu
 for(const id of ['warnThresh','extThresh'])$(id).onchange=()=>{try{rebuild();renderWindow(+$('historyPosition').value);}catch(e){status(e.message,true);}};
 
 // 지표 패널 매니저 (indicators.js) — 모든 함수/변수 정의가 끝난 뒤 생성
-studyPanels=new StudyPanelManager();
+studyPanels=new StudyPanelManager();buildFundingCards();
+$('fundingRefreshBtn').onclick=()=>{if(fundingSession&&!fundingSession.abort.signal.aborted)void refreshFundingSession(fundingSession);else loadData();};
+$('fundingMinimumBtn').onclick=focusMinimumFunding;
+for(const id of ['exchangeSelect','intervalSelect'])$(id).onchange=loadData;
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&fundingSession)void refreshFundingSession(fundingSession);});
 for(const p of studyPanels.active()){const s=studyPanels.primary(p);if(s&&p.stretch>0)s.getPane().setStretchFactor(p.stretch);}
 loadData();
