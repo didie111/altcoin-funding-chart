@@ -10,7 +10,7 @@ const tickLabel = t => { const k = Number(t); let s = tickCache.get(k); if (s ==
 const chart = LC.createChart($('unified-chart'), {
  autoSize:true, layout:{background:{type:'solid',color:'#111827'},textColor:'#9ca3af',panes:{separatorColor:'#374151',separatorHoverColor:'#4b5563'}},
  grid:{vertLines:{color:'#1f2937'},horzLines:{color:'#1f2937'}},
- crosshair:{mode:LC.CrosshairMode.Normal},handleScroll:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:{mouseWheel:false,pinch:true,axisPressedMouseMove:{time:true,price:true},axisDoubleClickReset:{time:true,price:false}},rightPriceScale:{minimumWidth:100,borderColor:'#374151'},
+ crosshair:{mode:LC.CrosshairMode.Normal},handleScroll:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:{mouseWheel:true,pinch:true,axisPressedMouseMove:{time:true,price:true},axisDoubleClickReset:{time:true,price:false}},rightPriceScale:{minimumWidth:100,borderColor:'#374151'},
  timeScale:{timeVisible:true,secondsVisible:false,rightOffset:3,lockVisibleTimeRangeOnResize:true,tickMarkFormatter:tickLabel},localization:{locale:'ko-KR',timeFormatter:t=>fullFmt.format(new Date(Number(t)*1000))}
 });
 const candles=chart.addSeries(LC.CandlestickSeries,{upColor:'#22c55e',downColor:'#ef4444',borderVisible:false,wickUpColor:'#22c55e',wickDownColor:'#ef4444',priceFormat:{type:'price',precision:8,minMove:0.00000001}},0);
@@ -88,7 +88,7 @@ const rulerBtn=$('btnRuler');rulerBtn.className='btn-toggle';rulerBtn.textConten
 const rulerLabel=document.createElement('div');rulerLabel.hidden=true;rulerLabel.style.cssText='position:absolute;pointer-events:none;z-index:7;background:#2563eb;color:#fff;border:1px solid #93c5fd;padding:8px 12px;border-radius:4px;font-size:13px;font-weight:700;line-height:1.6;text-align:center;white-space:pre-line;box-shadow:0 2px 8px #0009;max-width:280px';$('unified-chart').append(rulerLabel);
 function priceChange(start,end){if(!Number.isFinite(start)||!Number.isFinite(end)||start<=0)return null;return {difference:end-start,percent:(end-start)/start*100};}
 function clearRuler(){rulerStart=null;rulerEnd=null;rulerLocked=false;rulerTemporary=false;rulerLabel.hidden=true;schedule();}
-function rulerInteraction(){const active=rulerEnabled||shiftHeld||rulerDragging;chart.applyOptions({handleScroll:active?false:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:active?false:{mouseWheel:false,pinch:true,axisPressedMouseMove:{time:true,price:true},axisDoubleClickReset:{time:true,price:false}}});$('unified-chart').style.cursor=active?'crosshair':'';}
+function rulerInteraction(){const active=rulerEnabled||shiftHeld||rulerDragging;chart.applyOptions({handleScroll:active?false:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:active?false:{mouseWheel:true,pinch:true,axisPressedMouseMove:{time:true,price:true},axisDoubleClickReset:{time:true,price:false}}});$('unified-chart').style.cursor=active?'crosshair':'';}
 function endRulerDrag(){if(rulerPointer!==null&&$('unified-chart').hasPointerCapture(rulerPointer))$('unified-chart').releasePointerCapture(rulerPointer);rulerDragging=false;rulerPointer=null;rulerInteraction();}
 function toggleRuler(enabled){endRulerDrag();rulerEnabled=enabled;rulerBtn.classList.toggle('active',enabled);rulerBtn.setAttribute('aria-pressed',String(enabled));clearRuler();rulerInteraction();if(enabled)status('줄자: 가격 차트에서 누른 채 드래그하세요. Shift+드래그도 가능 · Esc 종료');}
 rulerBtn.onclick=()=>toggleRuler(!rulerEnabled);
@@ -167,7 +167,6 @@ function pricePane() {
 }
 
 const manualPriceSpans = new WeakMap();
-let wheelTimeAnchor = null, wheelTimeFrame = 0;
 
 function holdPriceAxisWidth() {
   const series = paneScaleSeries[0];
@@ -175,23 +174,6 @@ function holdPriceAxisWidth() {
   if (width > chart.options().rightPriceScale.minimumWidth) {
     chart.applyOptions({ rightPriceScale: { minimumWidth: width } });
   }
-}
-
-function keepWheelTimeAnchor() {
-  if (wheelTimeFrame) return;
-  wheelTimeFrame = requestAnimationFrame(() => {
-    wheelTimeFrame = 0;
-    const anchor = wheelTimeAnchor;
-    wheelTimeAnchor = null;
-    const timeScale = chart.timeScale(), width = timeScale.width();
-    if (!anchor || width <= 0 || width === anchor.width) return;
-    holdPriceAxisWidth();
-    const range = timeScale.getVisibleLogicalRange();
-    if (!range) return;
-    const span = range.to - range.from + 1;
-    const from = anchor.absolute - windowStart - (anchor.x + 1) / width * span + .5;
-    moveChartRange({ from, to: from + span - 1 });
-  });
 }
 
 function resetCustomPriceRange(series) {
@@ -234,23 +216,6 @@ function zoomPanePrice(pane, localY, factor) {
   $('btnAutoFit').classList.remove('active');
 }
 
-function zoomPaneTime(x, factor) {
-  const timeScale = chart.timeScale(), range = timeScale.getVisibleLogicalRange();
-  if (!all.length || !range || timeScale.width() <= 0) return;
-  const span = range.to - range.from + 1;
-  const left = range.from - .5, right = range.to + .5;
-  const anchor = left + (x + 1) / timeScale.width() * span;
-  if (span <= 0) return;
-  const maxSpan = Math.max(8, Math.min(WINDOW - 10, all.length * 1.25));
-  const nextSpan = Math.max(8, Math.min(maxSpan, span * factor));
-  const actualFactor = nextSpan / span;
-  wheelTimeAnchor = { x, absolute: anchor + windowStart, width: timeScale.width() };
-  if (Math.abs(actualFactor - 1) >= 1e-12) {
-    moveChartRange({ from: anchor - (anchor - left) * actualFactor + .5, to: anchor + (right - anchor) * actualFactor - .5 });
-  }
-  keepWheelTimeAnchor();
-}
-
 let wheelPending = null, wheelRaf = 0;
 function flushWheel() {
   wheelRaf = 0;
@@ -258,21 +223,27 @@ function flushWheel() {
   wheelPending = null;
   if (!p) return;
   holdPriceAxisWidth();
-  wheelTimeAnchor = null;
   zoomPanePrice(p.pane, p.y - p.pane.top, p.factor);
-  if (p.x < chart.timeScale().width()) zoomPaneTime(p.x, p.factor);
   schedule();
 }
-// 마우스 휠: 차트 위 = 가격 + 시간축 확대/축소, 가격표(오른쪽 축) 위 = 해당 패널 가격만 확대/축소
+// 차트 안의 휠은 라이브러리의 시간축 줌을 사용합니다. 자동 가격축은 보이는 봉에 맞춰 조정됩니다.
+// 오른쪽 가격 축에서만 해당 패널의 가격 범위를 수동 확대/축소합니다.
 rulerHost.addEventListener('wheel', e => {
   if (e.target instanceof Element && e.target.closest('[data-chart-fullscreen]')) return;
   if (!Number.isFinite(e.deltaY) || e.deltaY === 0) return;
   const box = rulerHost.getBoundingClientRect(), x = e.clientX - box.left, y = e.clientY - box.top;
   const pane = getPaneInfoAtY(y);
   if (!pane?.series || x < 0 || x >= box.width) return;
+  if (rulerEnabled || shiftHeld || rulerDragging) {
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    return;
+  }
+  // Let Lightweight Charts keep the candle under the pointer fixed while zooming time.
+  // Do not set a manual price range when the wheel is over the chart plot.
+  if (x < chart.timeScale().width()) return;
   e.preventDefault();
   e.stopImmediatePropagation();
-  if (rulerEnabled || shiftHeld || rulerDragging) return;
   const delta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? pane.height : 1);
   const factor = Math.exp(Math.max(-240, Math.min(240, delta)) * .0015);
   // [최적화] 휠 이벤트는 프레임당 여러 번 들어옴 -> 배율만 누적하고 다음 프레임에 한 번만 적용
