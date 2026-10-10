@@ -238,8 +238,14 @@
     #unified-chart:fullscreen,#unified-chart.chart-fullscreen-fallback {position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;height:100dvh!important;min-height:0;display:block;flex:none;background:#111827;z-index:1000}
     #unified-chart::backdrop {background:#111827}
     @media(hover:none),(pointer:coarse){#chartFullscreenBtn{opacity:1;pointer-events:auto}}
-    #chartSymbolLabel {position:absolute;left:8px;z-index:9;height:18px;line-height:18px;font-size:13px;font-weight:700;color:#e2e8f0;background:#111827dc;border-radius:3px;padding:0 3px;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .chart-has-symbol .pane-header[data-panel-id="price"]:not(.price-collapsed) {margin-top:22px}
+    #chartIdentityControls {position:absolute;left:8px;z-index:9;display:flex;align-items:center;gap:7px;height:26px;max-width:calc(100% - 16px);font-size:13px;font-weight:700;color:#e2e8f0;background:#111827e8;border-radius:4px;padding:0 3px;pointer-events:auto}
+    #chartSymbolLabel {min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .chart-identity-separator {color:#64748b}
+    #chartIdentityControls select {flex-shrink:0;max-width:120px;height:24px;padding:2px 5px;background:transparent;border:1px solid transparent;border-radius:4px;color:#cbd5e1;font-size:12px;font-weight:600;cursor:pointer}
+    #chartIdentityControls select:hover {background:#263244;border-color:#475569}
+    #chartIdentityControls select:focus-visible {outline:2px solid #a78bfa;outline-offset:1px}
+    #chartIdentityControls option {background:#1f2937;color:#e2e8f0}
+    .chart-has-symbol .pane-header[data-panel-id="price"]:not(.price-collapsed) {margin-top:28px}
     .panel-controls-layer {position:absolute;inset:0;pointer-events:none;z-index:8;overflow:hidden}
     .pane-scale-controls {position:absolute;display:flex;gap:2px;padding:2px;border-radius:4px;background:#111827ee;opacity:0;pointer-events:none;transition:opacity .12s}
     .pane-scale-controls.pane-hover,.pane-scale-controls:has(button:focus-visible) {opacity:1;pointer-events:auto}
@@ -337,15 +343,6 @@
                 </select>
             </div>
             <div>
-                <label>봉 주기</label><br>
-                <select id="intervalSelect">
-                    <option value="15m">15분 </option>
-                    <option value="1h">1시간 </option>
-                    <option value="4h" selected>4시간</option>
-                    <option value="1d">1일 (일봉)</option>
-                </select>
-            </div>
-            <div>
                 <label>1차 경고(%)</label><br>
                 <input type="number" id="warnThresh" value="-0.5" step="0.001">
             </div>
@@ -382,7 +379,18 @@
             <p class="funding-note">하단 막대: 정산 기록 · 노란 점선: 페이지에서 관측한 현재율(미정산). 관측 전 구간은 공백이며 신호 목록은 정산 기록 기준입니다.</p>
           </section>
           <div id="chart-key" style="padding:6px 12px;font-size:12px;min-height:28px">가격 · 거래량 · 정산 펀딩비 · 정산 주기 · RSI Div — 동일 시간축</div>
-          <div id="unified-chart" style="flex:1;min-height:0;position:relative"></div>
+          <div id="unified-chart" style="flex:1;min-height:0;position:relative">
+            <div id="chartIdentityControls" data-chart-identity="true" role="group" aria-label="코인 심볼과 타임프레임" hidden>
+              <span id="chartSymbolLabel" aria-label="현재 차트 코인 심볼"></span>
+              <span class="chart-identity-separator" aria-hidden="true">·</span>
+              <select id="intervalSelect" aria-label="차트 타임프레임" title="차트 타임프레임 변경">
+                <option value="15m">15분</option>
+                <option value="1h">1시간</option>
+                <option value="4h" selected>4시간</option>
+                <option value="1d">1일 (일봉)</option>
+              </select>
+            </div>
+          </div>
           <div style="padding:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px">
             <button id="oldestBtn">최초 데이터</button><button id="latestBtn">최근 데이터</button>
             <input id="historyPosition" type="range" min="0" max="0" value="0" style="flex:1;min-width:100px">
@@ -456,7 +464,7 @@
     <script src="market-api.js?v=20261009-realtime-pane-3"></script>
     <script src="funding.js?v=20261009-realtime-pane-3"></script>
     <script src="indicators.js?v=20261010-pane-scale-1"></script>
-    <script src="app.js?v=20261010-pane-scale-1"></script>
+    <script src="app.js?v=20261010-chart-timeframe-1"></script>
 </body>
 </html>
 
