@@ -98,19 +98,23 @@ document.addEventListener('keyup',e=>{if(e.key==='Shift'){shiftHeld=false;rulerI
 window.addEventListener('blur',()=>{shiftHeld=false;if(rulerDragging){endRulerDrag();rulerLocked=true;}rulerInteraction();});
 const rulerHost=$('unified-chart');
 // Keep the symbol tied to the chart being loaded, rather than an unsubmitted input edit.
-const chartSymbolLabel=document.createElement('div');
-chartSymbolLabel.id='chartSymbolLabel';
-chartSymbolLabel.hidden=true;
-chartSymbolLabel.setAttribute('aria-label','현재 차트 코인 심볼');
-rulerHost.append(chartSymbolLabel);
+const chartIdentityControls=$('chartIdentityControls');
+const chartSymbolLabel=$('chartSymbolLabel');
+for (const type of ['pointerdown', 'dblclick', 'wheel']) {
+  chartIdentityControls.addEventListener(type, e => {
+    e.stopPropagation();
+    if (type === 'wheel') e.preventDefault();
+  });
+}
 function placeChartSymbol(){
   const pane=pricePane();
   const visible=Boolean(chartSymbolLabel.textContent && pane && !studyPanels?.priceCollapsed());
+  chartIdentityControls.hidden=!visible;
   chartSymbolLabel.hidden=!visible;
   rulerHost.classList.toggle('chart-has-symbol',visible);
   if(!visible)return;
-  setStyle(chartSymbolLabel,'top',pane.top+4+'px');
-  setStyle(chartSymbolLabel,'maxWidth',Math.max(0,chart.timeScale().width()-16)+'px');
+  setStyle(chartIdentityControls,'top',pane.top+4+'px');
+  setStyle(chartIdentityControls,'maxWidth',Math.max(0,chart.timeScale().width()-16)+'px');
 }
 
 // 화면에 그려진 패널 위치 (패널 이동·최대화·사용자 크기 조절 반영)
@@ -232,7 +236,7 @@ function flushWheel() {
 // 차트 안의 휠은 라이브러리의 시간축 줌을 사용합니다. 자동 가격축은 보이는 봉에 맞춰 조정됩니다.
 // 오른쪽 가격 축에서만 해당 패널의 가격 범위를 수동 확대/축소합니다.
 rulerHost.addEventListener('wheel', e => {
-  if (e.target instanceof Element && e.target.closest('[data-chart-fullscreen],[data-pane-scale]')) return;
+  if (e.target instanceof Element && e.target.closest('[data-chart-fullscreen],[data-pane-scale],[data-chart-identity]')) return;
   if (!Number.isFinite(e.deltaY) || e.deltaY === 0) return;
   const box = rulerHost.getBoundingClientRect(), x = e.clientX - box.left, y = e.clientY - box.top;
   const pane = getPaneInfoAtY(y);
@@ -258,7 +262,7 @@ rulerHost.addEventListener('wheel', e => {
 
 // 가격축 더블클릭: 해당 패널 가격축만 자동 정렬
 rulerHost.addEventListener('dblclick', e => {
-  if (e.target instanceof Element && e.target.closest('[data-chart-fullscreen],[data-pane-scale]')) return;
+  if (e.target instanceof Element && e.target.closest('[data-chart-fullscreen],[data-pane-scale],[data-chart-identity]')) return;
   if (rulerEnabled || shiftHeld || rulerDragging) return;
   const box = rulerHost.getBoundingClientRect(),
         x = e.clientX - box.left,
@@ -279,7 +283,7 @@ rulerHost.addEventListener('dblclick', e => {
 function pointerPrice(e,clamp=false){const pl=pricePane();if(!pl)return null;const box=rulerHost.getBoundingClientRect();let x=e.clientX-box.left,y=e.clientY-box.top-pl.top;const width=chart.timeScale().width(),height=pl.height;
  if(clamp){x=Math.max(0,Math.min(width-1,x));y=Math.max(0,Math.min(height-1,y));}else if(x<0||x>=width||y<0||y>=height)return null;
  const logical=chart.timeScale().coordinateToLogical(x),price=candles.coordinateToPrice(y);if(logical===null||price===null||price<=0)return null;return {index:Math.round(logical)+windowStart,price};}
-rulerHost.addEventListener('pointerdown',e=>{if(e.target instanceof Element&&e.target.closest('[data-chart-nav],[data-chart-fullscreen],[data-pane-scale]'))return;if(e.button!==0)return;const active=rulerEnabled||e.shiftKey||shiftHeld;if(!active){if(rulerTemporary)clearRuler();return;}const point=pointerPrice(e);if(!point)return;e.preventDefault();e.stopImmediatePropagation();rulerTemporary=!rulerEnabled;rulerStart=point;rulerEnd=point;rulerLocked=false;rulerDragging=true;rulerPointer=e.pointerId;rulerHost.setPointerCapture(e.pointerId);rulerInteraction();schedule();},{capture:true});
+rulerHost.addEventListener('pointerdown',e=>{if(e.target instanceof Element&&e.target.closest('[data-chart-nav],[data-chart-fullscreen],[data-pane-scale],[data-chart-identity]'))return;if(e.button!==0)return;const active=rulerEnabled||e.shiftKey||shiftHeld;if(!active){if(rulerTemporary)clearRuler();return;}const point=pointerPrice(e);if(!point)return;e.preventDefault();e.stopImmediatePropagation();rulerTemporary=!rulerEnabled;rulerStart=point;rulerEnd=point;rulerLocked=false;rulerDragging=true;rulerPointer=e.pointerId;rulerHost.setPointerCapture(e.pointerId);rulerInteraction();schedule();},{capture:true});
 rulerHost.addEventListener('pointermove',e=>{if(!rulerDragging||e.pointerId!==rulerPointer)return;e.preventDefault();e.stopImmediatePropagation();const point=pointerPrice(e,true);if(point){rulerEnd=point;schedule();}},{capture:true});
 rulerHost.addEventListener('pointerup',e=>{if(!rulerDragging||e.pointerId!==rulerPointer)return;e.preventDefault();e.stopImmediatePropagation();const point=pointerPrice(e,true);if(point)rulerEnd=point;rulerLocked=true;endRulerDrag();status('줄자 측정 완료 · 다시 드래그해 측정 / Esc 종료');schedule();},{capture:true});
 rulerHost.addEventListener('pointercancel',()=>{if(rulerDragging){endRulerDrag();clearRuler();}});
@@ -359,7 +363,7 @@ function placeLegendToggle() {
   legendToggle.hidden = Boolean(studyPanels?.priceCollapsed());
   if (legendToggle.hidden) return;
   const top = Math.min(...layout.map(p => p.top));
-  const symbolOffset = !chartSymbolLabel.hidden && pricePane()?.top === top ? 22 : 0;
+  const symbolOffset = !chartIdentityControls.hidden && pricePane()?.top === top ? 28 : 0;
   setStyle(legendToggle, 'top', top + symbolOffset + (legendCollapsed ? 5 : 32) + 'px');
 }
 legendToggle.onclick = e => {
@@ -698,7 +702,7 @@ function focusMinimumFunding() {
 }
 
 async function loadData(){try{thresholds();}catch(e){return status(e.message,true);}const symbol=$('symbolInput').value.trim().toUpperCase();if(!/^[A-Z0-9_-]+$/.test(symbol))return status('유효한 심볼을 입력하세요.',true);
- controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;chartSymbolLabel.textContent=FundingEngine.contract(ex,symbol);chartSymbolLabel.title=ex+' · '+chartSymbolLabel.textContent;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
+ controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;chartSymbolLabel.textContent=FundingEngine.contract(ex,symbol);chartSymbolLabel.title=ex+' · '+chartSymbolLabel.textContent+' · '+$('intervalSelect').selectedOptions[0].text;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
  $('coverage').textContent='선택 거래소 USDT 무기한 선물 · 제공 가능한 이력 끝까지 수집 · 오래된 구간은 하단 슬라이더/최초 데이터로 이동';
  status(`${ex} ${symbol} · 과거 이력 수집 시작`);startFundingUpdates(ex,symbol,int,id);
  let candleEnd=Date.now(),chunks=[],count=0,candleNote='',fundNote='';
