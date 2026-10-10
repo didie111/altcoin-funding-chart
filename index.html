@@ -241,6 +241,13 @@
     #chartSymbolLabel {position:absolute;left:8px;z-index:9;height:18px;line-height:18px;font-size:13px;font-weight:700;color:#e2e8f0;background:#111827dc;border-radius:3px;padding:0 3px;pointer-events:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .chart-has-symbol .pane-header[data-panel-id="price"]:not(.price-collapsed) {margin-top:22px}
     .panel-controls-layer {position:absolute;inset:0;pointer-events:none;z-index:8;overflow:hidden}
+    .pane-scale-controls {position:absolute;display:flex;gap:2px;padding:2px;border-radius:4px;background:#111827ee;opacity:0;pointer-events:none;transition:opacity .12s}
+    .pane-scale-controls.pane-hover,.pane-scale-controls:has(button:focus-visible) {opacity:1;pointer-events:auto}
+    .pane-scale-controls button {width:22px;height:22px;padding:0;border:1px solid #475569;border-radius:3px;background:#263244;color:#cbd5e1;font-size:11px;font-weight:600;line-height:20px}
+    .pane-scale-controls button:hover {background:#475569;color:#fff}
+    .pane-scale-controls button.active {background:#2563eb;border-color:#60a5fa;color:#fff}
+    .pane-scale-controls button:focus-visible {outline:2px solid #a78bfa;outline-offset:1px}
+    @media(hover:none),(pointer:coarse){.pane-scale-controls{opacity:1;pointer-events:auto}}
     .pane-header {position:absolute;left:6px;display:flex;justify-content:space-between;align-items:center;height:25px;gap:6px;pointer-events:none;color:#cbd5e1;font-size:11px}
     .pane-header-left {display:flex;align-items:center;gap:6px;min-width:0;background:#111827dc;border-radius:4px;padding:0 3px}
     .panel-title {pointer-events:auto;background:transparent;padding:3px 2px;font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:inherit}
@@ -356,8 +363,7 @@
                 <label>보기 설정</label><br>
                 <div style="display: flex; gap: 4px;">
                     <button id="btnToggleLines" class="btn-toggle active" title="세로줄 가이드 켜기/끄기">👁️ 세로줄</button>
-                    <button id="btnAutoFit" class="btn-toggle active" title="자동 정렬 & 화면 포커싱">A</button>
-                    <button id="btnLogScale" class="btn-toggle" title="로그 스케일 토글">L</button><button id="btnRuler" class="btn-toggle" title="시작 가격과 끝 가격을 클릭해 변동률 측정">📏 줄자</button>
+                    <button id="btnRuler" class="btn-toggle" title="시작 가격과 끝 가격을 클릭해 변동률 측정">📏 줄자</button>
                     <button id="btnIndicators" class="btn-toggle" title="지표 추가 및 관리" aria-expanded="false">지표 ＋</button>
                 </div>
             </div>
@@ -373,7 +379,7 @@
             <div class="funding-history-row"><button id="fundingRefreshBtn" type="button">현재값 새로고침</button><span id="fundingUpdateStatus"></span></div>
             <details id="fundingComparisons"><summary>거래소별 현재 펀딩비 비교 · 6곳</summary><div id="fundingExchangeGrid"></div><p class="funding-note">USDT 무기한 선물의 거래소별 1회 표시율 · 정산 전 값은 변동 가능 · 조회 실패는 확인 불가로 표시</p></details>
             <div id="fundingApiError" class="funding-api-error" role="status" hidden></div>
-            <p class="funding-note">하단 막대: 정산 기록 · 노란 점/선: 페이지에서 관측한 현재율(미정산). 관측 전 구간은 공백이며 신호 목록은 정산 기록 기준입니다.</p>
+            <p class="funding-note">하단 막대: 정산 기록 · 노란 점선: 페이지에서 관측한 현재율(미정산). 관측 전 구간은 공백이며 신호 목록은 정산 기록 기준입니다.</p>
           </section>
           <div id="chart-key" style="padding:6px 12px;font-size:12px;min-height:28px">가격 · 거래량 · 정산 펀딩비 · 정산 주기 · RSI Div — 동일 시간축</div>
           <div id="unified-chart" style="flex:1;min-height:0;position:relative"></div>
@@ -449,8 +455,8 @@
     </dialog>
     <script src="market-api.js?v=20261009-realtime-pane-3"></script>
     <script src="funding.js?v=20261009-realtime-pane-3"></script>
-    <script src="indicators.js?v=20261009-realtime-pane-3"></script>
-    <script src="app.js?v=20261010-native-wheel-1"></script>
+    <script src="indicators.js?v=20261010-pane-scale-1"></script>
+    <script src="app.js?v=20261010-pane-scale-1"></script>
 </body>
 </html>
 

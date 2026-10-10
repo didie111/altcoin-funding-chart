@@ -730,6 +730,7 @@ class StudyPanelManager {
     rulerHost.append(this.layer);
 
     this.headers = new Map();
+    this.scaleControls = new Map();
     this.buildAddMenu();
     this.bindSettings();
     this.applyOrder();
@@ -756,6 +757,7 @@ class StudyPanelManager {
       if (!this.maximized) {
         this.save();
       }
+      schedule();
     });
 
     rulerHost.addEventListener('pointermove', schedule);
@@ -1056,6 +1058,8 @@ class StudyPanelManager {
     this.order = this.order.filter(v => v !== id);
     this.headers?.get(id)?.remove();
     this.headers?.delete(id);
+    this.scaleControls?.get(id)?.remove();
+    this.scaleControls?.delete(id);
 
     this.refresh();
 
@@ -1534,6 +1538,98 @@ class StudyPanelManager {
     return header;
   }
 
+  toggleScale(id, action) {
+    const p = this.panels.get(id);
+    const series = this.primary(p);
+    if (!series || !this.isVisible(p)) return;
+
+    const scale = series.priceScale();
+    if (action === 'auto') {
+      if (scale.options().autoScale) {
+        scale.applyOptions({autoScale: false});
+      } else {
+        resetCustomPriceRange(series);
+        scale.applyOptions({scaleMargins: {top: 0.12, bottom: 0.12}});
+      }
+    } else if (action === 'log') {
+      const mode = scale.options().mode === LC.PriceScaleMode.Logarithmic
+        ? LC.PriceScaleMode.Normal : LC.PriceScaleMode.Logarithmic;
+      resetCustomPriceRange(series);
+      scale.applyOptions({mode});
+    }
+    schedule();
+  }
+
+  createScaleControls(p) {
+    const controls = document.createElement('div');
+    controls.className = 'pane-scale-controls';
+    controls.dataset.panelUi = 'true';
+    controls.dataset.paneScale = 'true';
+    controls.dataset.panelId = p.id;
+    controls.hidden = true;
+    controls.setAttribute('role', 'group');
+    controls.setAttribute('aria-label', p.title + ' 축 정렬');
+
+    for (const [action, label, title] of [
+      ['auto', 'A', '자동 정렬 켜기 / 끄기'],
+      ['log', 'L', '로그 스케일 켜기 / 끄기']
+    ]) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.dataset.panelScale = action;
+      button.textContent = label;
+      button.title = p.title + ' · ' + title;
+      button.setAttribute('aria-label', button.title);
+      button.onclick = e => {
+        e.stopPropagation();
+        this.toggleScale(p.id, action);
+      };
+      controls.append(button);
+    }
+    for (const type of ['pointerdown', 'dblclick', 'wheel']) {
+      controls.addEventListener(type, e => e.stopPropagation());
+    }
+    this.layer.append(controls);
+    this.scaleControls.set(p.id, controls);
+  }
+
+  positionScaleControls(layout) {
+    const visibleIds = new Set();
+    const left = chart.timeScale().width() + 4 + 'px';
+    for (const item of layout) {
+      const p = this.panelForPane(chart.panes()[item.index]);
+      const controls = this.scaleControls.get(p?.id);
+      if (!controls) continue;
+      visibleIds.add(p.id);
+
+      const options = this.primary(p).priceScale().options();
+      const auto = Boolean(options.autoScale);
+      const log = options.mode === LC.PriceScaleMode.Logarithmic;
+      const hidden = !this.isVisible(p) || item.height < 28;
+      const hover = hoveredPaneIndex === item.index;
+      const top = Math.max(item.top + 2, item.bottom - 28) + 'px';
+      const sig = [left, top, hidden, hover, auto, log].join('|');
+      if (controls.__posSig === sig) continue;
+
+      controls.__posSig = sig;
+      controls.hidden = hidden;
+      controls.style.left = left;
+      controls.style.top = top;
+      controls.classList.toggle('pane-hover', hover);
+      for (const [action, pressed] of [['auto', auto], ['log', log]]) {
+        const button = controls.querySelector('[data-panel-scale="' + action + '"]');
+        button.classList.toggle('active', pressed);
+        button.setAttribute('aria-pressed', String(pressed));
+      }
+    }
+    for (const [id, controls] of this.scaleControls) {
+      if (!visibleIds.has(id)) {
+        controls.hidden = true;
+        controls.__posSig = null;
+      }
+    }
+  }
+
   refresh() {
     this.syncPrimary();
 
@@ -1544,6 +1640,9 @@ class StudyPanelManager {
     for (const p of this.active()) {
       if (!this.headers.has(p.id)) {
         this.header(p);
+      }
+      if (!this.scaleControls.has(p.id)) {
+        this.createScaleControls(p);
       }
     }
 
@@ -1559,6 +1658,7 @@ class StudyPanelManager {
     }
 
     const layout = getPaneLayout();
+    this.positionScaleControls(layout);
     const visibleIds = new Set();
     const collapsed = this.priceCollapsed();
 

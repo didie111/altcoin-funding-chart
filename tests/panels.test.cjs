@@ -34,7 +34,8 @@ test('live funding autoscale includes zero and the full -2% value', () => {
   assert.equal(info.priceRange.maxValue, 0);
   assert.equal(options.autoscaleInfoProvider(() => null), null);
   assert.equal(options.lastValueVisible, true);
-  assert.equal(options.pointMarkersVisible, true);
+  assert.equal(options.pointMarkersVisible, false);
+  assert.equal(options.crosshairMarkerVisible, false);
 });
 test('funding panel deletion and recreation include both historical and live series', () => {
   const h = panelHarness();

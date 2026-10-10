@@ -17,7 +17,7 @@ const candles=chart.addSeries(LC.CandlestickSeries,{upColor:'#22c55e',downColor:
 // indicators.js(StudyPanelManager)가 패널 삭제/재추가 시 아래 변수들을 다시 대입하므로 let 이어야 합니다.
 let volume=chart.addSeries(LC.HistogramSeries,{priceFormat:{type:'volume'},lastValueVisible:false},1);
 let funding=chart.addSeries(LC.HistogramSeries,{priceFormat:{type:'custom',minMove:0.000001,formatter:v=>v.toFixed(6)+'%'},lastValueVisible:false},2);
-function fundingLiveOptions(){return {color:'#fbbf24',lineWidth:2,lineStyle:LC.LineStyle.Dashed,title:'현재',priceFormat:{type:'custom',minMove:.000001,formatter:v=>v.toFixed(6)+'%'},lastValueVisible:true,priceLineVisible:true,priceLineStyle:LC.LineStyle.Dashed,pointMarkersVisible:true,pointMarkersRadius:4,autoscaleInfoProvider:original=>{const info=original();return info?{...info,priceRange:{minValue:Math.min(0,info.priceRange.minValue),maxValue:Math.max(0,info.priceRange.maxValue)}}:null;}};}
+function fundingLiveOptions(){return {color:'#fbbf24',lineWidth:2,lineStyle:LC.LineStyle.Dashed,title:'현재',priceFormat:{type:'custom',minMove:.000001,formatter:v=>v.toFixed(6)+'%'},lastValueVisible:true,priceLineVisible:true,priceLineStyle:LC.LineStyle.Dashed,pointMarkersVisible:false,crosshairMarkerVisible:false,autoscaleInfoProvider:original=>{const info=original();return info?{...info,priceRange:{minValue:Math.min(0,info.priceRange.minValue),maxValue:Math.max(0,info.priceRange.maxValue)}}:null;}};}
 let fundingLive=chart.addSeries(LC.LineSeries,fundingLiveOptions(),2);
 let settlementCycle=chart.addSeries(LC.HistogramSeries,{priceFormat:{type:'custom',minMove:1,formatter:v=>Number(v.toFixed(2))+'시간'},lastValueVisible:false,priceLineVisible:false},3);
 let cycleMarkers=LC.createSeriesMarkers(settlementCycle,[]);
@@ -54,7 +54,7 @@ function drawCycleBands(w,h){if(!all.length||!cycleValues.size||cycleFast.length
 chart.panes()[0].setStretchFactor(6);chart.panes()[1].setStretchFactor(1.5);chart.panes()[2].setStretchFactor(2.5);
 funding.createPriceLine({price:0,color:'#6b7280',lineWidth:1,lineStyle:LC.LineStyle.Dotted,axisLabelVisible:false});
 const markers=LC.createSeriesMarkers(candles,[]);
-let all=[],rates=[],signals=[],mapped=new Map(),unmappedFunding=[],controller,run=0,windowStart=0,windowEnd=0,showLines=true,log=false,busy=false,selectedSignal=null,changingWindow=false;
+let all=[],rates=[],signals=[],mapped=new Map(),unmappedFunding=[],controller,run=0,windowStart=0,windowEnd=0,showLines=true,busy=false,selectedSignal=null,changingWindow=false;
 let selectedGuideVisible=false, selectedGuideTimer, selectedCountdownTimer, selectedGuideDeadline=0;
 const WINDOW=10000, duration={'15m':900,'1h':3600,'4h':14400,'1d':86400};
 let paneScaleSeries=[candles,volume,funding,settlementCycle];
@@ -67,7 +67,7 @@ const date=t=>fullFmt.format(new Date(t*1000));
 const status=(s,error=false)=>{$('status-msg').textContent=s;$('status-msg').classList.toggle('error',error);};
 function schedule(){if(!frame)frame=requestAnimationFrame(()=>{frame=0;draw();});}
 // [최적화] draw 한 번 안에서 getPaneLayout()이 6번 넘게 불리며 매번 getBoundingClientRect(강제 리플로우)를 했음 -> 1회로 축소
-function draw(){paneLayoutCache=computePaneLayout();try{drawInner();}finally{paneLayoutCache=null;}}
+function draw(){paneLayoutCache=computePaneLayout();updatePaneHover();try{drawInner();}finally{paneLayoutCache=null;}}
 // 변경 없는 스타일은 다시 쓰지 않아 불필요한 스타일 재계산을 막음
 function setStyle(el,k,v){const c=el._st||(el._st={});if(c[k]!==v){c[k]=v;el.style[k]=v;}}
 function drawInner(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clientHeight,dpr=devicePixelRatio||1,plotWidth=chart.timeScale().width();
@@ -140,17 +140,21 @@ let hoveredPaneIndex = -1;
 // 최신 차트를 열었을 때의 오른쪽 끝 위치(마지막 봉 기준 봉 수). 이 위치에서 벗어나면 이동한 것으로 판단
 let latestOffset = null;
 let hoverPoint = null, hoverRaf = 0;
+function updatePaneHover() {
+  if (!hoverPoint) { hoveredPaneIndex = -1; return; }
+  const box = rulerHost.getBoundingClientRect();
+  const x = hoverPoint.x - box.left, y = hoverPoint.y - box.top;
+  hoveredPaneIndex = x >= 0 && x <= box.width ? getPaneInfoAtY(y)?.index ?? -1 : -1;
+}
 rulerHost.addEventListener('pointermove', e => {
   hoverPoint = { x: e.clientX, y: e.clientY };
   if (hoverRaf) return;
   hoverRaf = requestAnimationFrame(() => {
     hoverRaf = 0;
     if (!hoverPoint) return;
-    const box = rulerHost.getBoundingClientRect();
-    const x = hoverPoint.x - box.left, y = hoverPoint.y - box.top;
-    const info = x >= 0 && x <= box.width ? getPaneInfoAtY(y) : null;
-    const idx = info ? info.index : -1;
-    if (idx !== hoveredPaneIndex) { hoveredPaneIndex = idx; schedule(); }
+    const previous = hoveredPaneIndex;
+    updatePaneHover();
+    if (previous !== hoveredPaneIndex) schedule();
   });
 });
 rulerHost.addEventListener('pointerleave', () => {
@@ -213,7 +217,6 @@ function zoomPanePrice(pane, localY, factor) {
   }
   if (!Number.isFinite(next.from) || !Number.isFinite(next.to) || next.from >= next.to) return;
   scale.setVisibleRange(next);
-  $('btnAutoFit').classList.remove('active');
 }
 
 let wheelPending = null, wheelRaf = 0;
@@ -229,7 +232,7 @@ function flushWheel() {
 // 차트 안의 휠은 라이브러리의 시간축 줌을 사용합니다. 자동 가격축은 보이는 봉에 맞춰 조정됩니다.
 // 오른쪽 가격 축에서만 해당 패널의 가격 범위를 수동 확대/축소합니다.
 rulerHost.addEventListener('wheel', e => {
-  if (e.target instanceof Element && e.target.closest('[data-chart-fullscreen]')) return;
+  if (e.target instanceof Element && e.target.closest('[data-chart-fullscreen],[data-pane-scale]')) return;
   if (!Number.isFinite(e.deltaY) || e.deltaY === 0) return;
   const box = rulerHost.getBoundingClientRect(), x = e.clientX - box.left, y = e.clientY - box.top;
   const pane = getPaneInfoAtY(y);
@@ -255,7 +258,7 @@ rulerHost.addEventListener('wheel', e => {
 
 // 가격축 더블클릭: 해당 패널 가격축만 자동 정렬
 rulerHost.addEventListener('dblclick', e => {
-  if (e.target instanceof Element && e.target.closest('[data-chart-fullscreen]')) return;
+  if (e.target instanceof Element && e.target.closest('[data-chart-fullscreen],[data-pane-scale]')) return;
   if (rulerEnabled || shiftHeld || rulerDragging) return;
   const box = rulerHost.getBoundingClientRect(),
         x = e.clientX - box.left,
@@ -276,7 +279,7 @@ rulerHost.addEventListener('dblclick', e => {
 function pointerPrice(e,clamp=false){const pl=pricePane();if(!pl)return null;const box=rulerHost.getBoundingClientRect();let x=e.clientX-box.left,y=e.clientY-box.top-pl.top;const width=chart.timeScale().width(),height=pl.height;
  if(clamp){x=Math.max(0,Math.min(width-1,x));y=Math.max(0,Math.min(height-1,y));}else if(x<0||x>=width||y<0||y>=height)return null;
  const logical=chart.timeScale().coordinateToLogical(x),price=candles.coordinateToPrice(y);if(logical===null||price===null||price<=0)return null;return {index:Math.round(logical)+windowStart,price};}
-rulerHost.addEventListener('pointerdown',e=>{if(e.target instanceof Element&&e.target.closest('[data-chart-nav],[data-chart-fullscreen]'))return;if(e.button!==0)return;const active=rulerEnabled||e.shiftKey||shiftHeld;if(!active){if(rulerTemporary)clearRuler();return;}const point=pointerPrice(e);if(!point)return;e.preventDefault();e.stopImmediatePropagation();rulerTemporary=!rulerEnabled;rulerStart=point;rulerEnd=point;rulerLocked=false;rulerDragging=true;rulerPointer=e.pointerId;rulerHost.setPointerCapture(e.pointerId);rulerInteraction();schedule();},{capture:true});
+rulerHost.addEventListener('pointerdown',e=>{if(e.target instanceof Element&&e.target.closest('[data-chart-nav],[data-chart-fullscreen],[data-pane-scale]'))return;if(e.button!==0)return;const active=rulerEnabled||e.shiftKey||shiftHeld;if(!active){if(rulerTemporary)clearRuler();return;}const point=pointerPrice(e);if(!point)return;e.preventDefault();e.stopImmediatePropagation();rulerTemporary=!rulerEnabled;rulerStart=point;rulerEnd=point;rulerLocked=false;rulerDragging=true;rulerPointer=e.pointerId;rulerHost.setPointerCapture(e.pointerId);rulerInteraction();schedule();},{capture:true});
 rulerHost.addEventListener('pointermove',e=>{if(!rulerDragging||e.pointerId!==rulerPointer)return;e.preventDefault();e.stopImmediatePropagation();const point=pointerPrice(e,true);if(point){rulerEnd=point;schedule();}},{capture:true});
 rulerHost.addEventListener('pointerup',e=>{if(!rulerDragging||e.pointerId!==rulerPointer)return;e.preventDefault();e.stopImmediatePropagation();const point=pointerPrice(e,true);if(point)rulerEnd=point;rulerLocked=true;endRulerDrag();status('줄자 측정 완료 · 다시 드래그해 측정 / Esc 종료');schedule();},{capture:true});
 rulerHost.addEventListener('pointercancel',()=>{if(rulerDragging){endRulerDrag();clearRuler();}});
@@ -456,7 +459,6 @@ function resetScales(){
   resetCustomPriceRange(series);
   series.priceScale().applyOptions({autoScale:true,scaleMargins:{top:0.12,bottom:0.12}});
  }
- $('btnAutoFit').classList.add('active');
 }
 function centeredRange(index,span=240){return {from:index-span/2,to:index+span/2};}
 function focusSignal(s,element){selectedSignal=s;selectedGuideVisible=true;clearTimeout(selectedGuideTimer);clearInterval(selectedCountdownTimer);selectedGuideDeadline=performance.now()+5000;updateGuideCountdown();selectedCountdownTimer=setInterval(updateGuideCountdown,100);selectedGuideTimer=setTimeout(()=>{selectedGuideVisible=false;clearInterval(selectedCountdownTimer);guideCountdown.hidden=true;schedule();},5000);for(const el of $('signalListContainer').querySelectorAll('.signal-item')){el.style.outline='';el.setAttribute('aria-current','false');}element.style.outline='2px solid #fbbf24';element.setAttribute('aria-current','true');
@@ -714,8 +716,7 @@ async function loadData(){try{thresholds();}catch(e){return status(e.message,tru
 $('searchBtn').onclick=loadData;$('symbolInput').onkeydown=e=>{if(e.key==='Enter')loadData();};$('stopBtn').onclick=()=>{controller?.abort();stopFundingUpdates();};
 $('oldestBtn').onclick=()=>renderWindow(0);$('latestBtn').onclick=()=>renderWindow(all.length-1);
 let sliderTimer;$('historyPosition').oninput=()=>{clearTimeout(sliderTimer);sliderTimer=setTimeout(()=>renderWindow(+$('historyPosition').value),100);};
-$('btnToggleLines').onclick=function(){showLines=!showLines;this.classList.toggle('active',showLines);schedule();};$('btnLogScale').onclick=function(){log=!log;resetCustomPriceRange(candles);candles.priceScale().applyOptions({mode:log?LC.PriceScaleMode.Logarithmic:LC.PriceScaleMode.Normal});this.classList.toggle('active',log);schedule();};
-$('btnAutoFit').onclick=()=>{resetScales();chart.timeScale().fitContent();schedule();};
+$('btnToggleLines').onclick=function(){showLines=!showLines;this.classList.toggle('active',showLines);schedule();};
 for(const id of ['warnThresh','extThresh'])$(id).onchange=()=>{try{rebuild();renderWindow(+$('historyPosition').value);}catch(e){status(e.message,true);}};
 
 // 지표 패널 매니저 (indicators.js) — 모든 함수/변수 정의가 끝난 뒤 생성
