@@ -13,7 +13,7 @@ function panelHarness() {
   const context = {
     LC: {HistogramSeries: 'histogram', LineSeries: 'line', LineStyle: {Dotted: 1, Dashed: 2}},
     chart: {panes: () => [], addSeries: (type, options, index) => {
-      const series = {type, options, index, createPriceLine: () => {}, getPane: () => pane, applyOptions: values => Object.assign(series.options, values)};
+      const series = {type, options, index, createPriceLine: () => {}, attachPrimitive: () => {}, getPane: () => pane, applyOptions: values => Object.assign(series.options, values)};
       created.push(series); return series;
     }, removeSeries: series => removed.push(series)},
     manualPriceSpans: new WeakMap()
@@ -52,6 +52,28 @@ test('funding panel deletion and recreation include both historical and live ser
   h.manager.create('funding');
   assert.notEqual(h.context.series().fundingLive, first.fundingLive);
   assert.equal(h.manager.panels.get('funding').members.length, 2);
+});
+test('panning outside observed live funding skips an empty price range instead of stopping later panes', () => {
+  const h = panelHarness(), provider = h.context.options().autoscaleInfoProvider;
+  assert.equal(provider(() => ({priceRange: null})), null);
+  assert.equal(provider(() => ({priceRange: null, margins: {above: 3, below: 4}})), null);
+  const valid = provider(() => ({priceRange: {minValue: .005, maxValue: .005}, margins: {above: 3, below: 4}}));
+  assert.equal(valid.priceRange.minValue, 0);
+  assert.equal(valid.priceRange.maxValue, .005);
+  assert.equal(valid.margins.above, 3);
+  assert.equal(valid.margins.below, 4);
+});
+test('RSI autoscale skips empty visible history and retains its normal 0..100 scale', () => {
+  const h = panelHarness();
+  h.manager.panels.set('rsi', {id: 'rsi', title: 'RSI Div', members: [], active: false, hidden: false, stretch: 3});
+  h.manager.settings = vm.runInContext('RsiEngine.normalize()', h.context);
+  h.manager.create('rsi');
+  const provider = h.created[0].options.autoscaleInfoProvider;
+  assert.equal(provider(() => ({priceRange: null})), null);
+  assert.equal(provider(() => null), null);
+  const valid = provider(() => ({priceRange: {minValue: 30, maxValue: 70}}));
+  assert.equal(valid.priceRange.minValue, 0);
+  assert.equal(valid.priceRange.maxValue, 100);
 });
 test('hiding a funding pane hides the current value as well as settled history', () => {
   const h = panelHarness(); h.manager.create('funding');
