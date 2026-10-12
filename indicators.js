@@ -926,7 +926,7 @@ class StudyPanelManager {
           autoscaleInfoProvider: original => {
             const info = original();
 
-            return info
+            return info?.priceRange
               ? {
                   ...info,
                   priceRange: {
