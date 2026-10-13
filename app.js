@@ -627,7 +627,7 @@ async function refreshFundingQuotes(session) {
     try {
       const request = FundingEngine.currentRequest(ex, session.symbol);
       const result = await json(request.url, request.params, fundingRequestSignal(session));
-      const quote = FundingEngine.normalizeCurrent(ex, result, session.symbol, Date.now());
+      const quote = FundingEngine.normalizeCurrent(ex, result, session.symbol, result.__marketFetchedAt ?? Date.now());
       if (!fundingSessionActive(session)) return;
       session.entries.set(ex, {quote, error: null});
       if (ex === session.ex) {
