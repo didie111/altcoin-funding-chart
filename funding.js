@@ -54,7 +54,7 @@ const FundingEngine = (() => {
     // OKX fundingRate belongs to fundingTime; nextFundingTime is the following period.
     if (ex === 'OKX') nextTime = seconds(row.fundingTime);
     const timestamp = seconds(row.ts ?? row.time ?? row.timestamp ?? response.time ?? response.requestTime);
-    const interval = numeric(row.fundingIntervalHour ?? row.fundingRateInterval ?? row.collectCycle);
+    const interval = numeric(row.fundingIntervalHour ?? row.fundingIntervalHours ?? row.fundingRateInterval ?? row.collectCycle);
     let hours = interval !== null && interval > 0 ? interval : null;
     if (ex === 'OKX') {
       const following = seconds(row.nextFundingTime);

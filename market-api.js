@@ -10,14 +10,14 @@ const MarketAPI = (() => {
       signal.addEventListener('abort', abort, {once: true});
     });
   }
-  function createClient({fetch: fetcher = (...args) => globalThis.fetch(...args), now = Date.now, wait = sleep, requestTimeout = 10000} = {}) {
+  function createClient({fetch: fetcher = (...args) => globalThis.fetch(...args), now = Date.now, wait = sleep, requestTimeout = 10000, relayUrl = globalThis.MARKET_RELAY_URL || null} = {}) {
     let bingxQueue = Promise.resolve(), lastBingxStart = null;
-    async function fetchBingx(url, signal) {
+    async function fetchTimed(url, signal, timeout = requestTimeout) {
       const controller = new AbortController();
       const abort = () => controller.abort(signal.reason);
       signal.throwIfAborted();
       signal.addEventListener('abort', abort, {once: true});
-      const timer = setTimeout(() => controller.abort(new DOMException('BingX 응답 제한 초과', 'TimeoutError')), requestTimeout);
+      const timer = setTimeout(() => controller.abort(new DOMException('시장 데이터 응답 제한 초과', 'TimeoutError')), timeout);
       try {
         return await fetcher(url, {signal: controller.signal, cache: 'no-store', credentials: 'omit'});
       } finally {
@@ -41,14 +41,17 @@ const MarketAPI = (() => {
     }
     async function json(base, params = {}, signal = new AbortController().signal) {
       const bingx = new URL(base).hostname === 'open-api.bingx.com';
-      const name = bingx ? 'BingX' : new URL(base).hostname;
+      const mexc = new URL(base).hostname === 'api.mexc.com';
+      const viaRelay = Boolean(relayUrl) && (bingx || mexc);
+      const name = bingx ? 'BingX' : mexc ? 'MEXC' : new URL(base).hostname;
       const fallback = bingx ? base.replace('https://open-api.bingx.com/', 'https://open-api.bingx.pro/') : null;
       for (let attempt = 0; attempt < 4; attempt++) {
         signal.throwIfAborted();
         const request = (endpoint = base) => {
           const query = bingx ? {...params, timestamp: now()} : params;
-          const url = endpoint + '?' + new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined));
-          return bingx ? fetchBingx(url, signal) : fetcher(url, {signal, cache: 'no-store', credentials: 'omit'});
+          const routed = viaRelay ? {...query, exchange: bingx ? 'BINGX' : 'MEXC', path: new URL(base).pathname} : query;
+          const url = (viaRelay ? relayUrl : endpoint) + '?' + new URLSearchParams(Object.entries(routed).filter(([, v]) => v !== undefined));
+          return bingx || viaRelay ? fetchTimed(url, signal, viaRelay ? Math.max(requestTimeout, 15000) : requestTimeout) : fetcher(url, {signal, cache: 'no-store', credentials: 'omit'});
         };
         let response;
         try {
@@ -59,7 +62,7 @@ const MarketAPI = (() => {
               signal.throwIfAborted();
               // Official live backup, only when the primary cannot be reached.
               // HTTP/API errors below keep their original status and never switch hosts.
-              if (!(error instanceof TypeError) && error.name !== 'TimeoutError') throw error;
+              if (viaRelay || (!(error instanceof TypeError) && error.name !== 'TimeoutError')) throw error;
               response = await (await reserveBingx(signal, () => request(fallback))).response;
             }
           } else {
@@ -70,6 +73,11 @@ const MarketAPI = (() => {
           if (attempt === 3) throw Error(name + ' 연결 실패: API 응답을 읽을 수 없습니다. CORS·지역 제한·네트워크 확인 필요');
           await wait(1000 * (attempt + 1), signal);
           continue;
+        }
+        if (viaRelay && !response.ok) {
+          let failure;
+          try {failure = await response.json();} catch {}
+          if (failure?.code === 'RELAY_ERROR') throw Error(failure.message || name + ' 중계 조회 실패');
         }
         if (response.status === 429 || response.status >= 500) {
           if (attempt === 3) throw Error(name + ' HTTP ' + response.status + ': 요청 제한 또는 서버 오류');
@@ -94,6 +102,10 @@ const MarketAPI = (() => {
           throw Error(message);
         }
         if (result.success === false) throw Error(name + ': ' + (result.message || 'API 실패'));
+        if (viaRelay) {
+          const fetchedAt = Number(response.headers?.get('X-Market-Fetched-At'));
+          if (Number.isFinite(fetchedAt) && fetchedAt > 0) Object.defineProperty(result, '__marketFetchedAt', {value: fetchedAt});
+        }
         return result;
       }
       throw Error(name + ': API 실패');

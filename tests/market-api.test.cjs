@@ -5,6 +5,7 @@ const {createClient, candle} = require('../market-api.js');
 const engine = require('../funding.js');
 const host = 'https://open-api.bingx.com/openApi/swap/';
 const stamp = 1791532800000;
+const relayUrl = 'https://relay.test/api/market';
 function response(body, status = 200) {return {ok: status === 200, status, headers: {get: () => null}, json: async () => body};}
 
 test('overlapping BingX current/history/candle requests have fresh timestamps and start at least 1s apart', async () => {
@@ -147,4 +148,45 @@ test('BingX candle array and object timestamps normalize without turning missing
   assert.deepEqual(candle({timestamp: stamp, open: '2', high: '4', low: '1', close: '3', volume: '5'}), expected);
   assert.deepEqual(candle({time: stamp / 1000, open: 2, high: 4, low: 1, close: 3, volume: 5}), expected);
   for (const bad of [[stamp, null, 4, 1, 3, 5], [stamp, 2, 1, 4, 3, 5], [stamp, 2, 4, 1, 3, -1]]) assert.equal(candle(bad), null);
+});
+test('BingX and MEXC use the configured relay with the original contract and real fetch time', async () => {
+  const calls = [];
+  const fetchedAt = stamp - 7000;
+  const client = createClient({relayUrl, now: () => stamp, fetch: async (url, options) => {
+    const parsed = new URL(url); calls.push({parsed, options});
+    const bingx = parsed.searchParams.get('exchange') === 'BINGX';
+    return {...response({code: 0, data: bingx ? {symbol: 'RSR-USDT', lastFundingRate: '-0.015', fundingIntervalHours: 8} : {symbol: 'RSR_USDT', fundingRate: '-0.015', collectCycle: 4}}), headers: {get: name => name === 'X-Market-Fetched-At' ? String(fetchedAt) : null}};
+  }});
+  for (const ex of ['BINGX', 'MEXC']) {
+    const req = engine.currentRequest(ex, 'RSR');
+    const result = await client.json(req.url, req.params);
+    const quote = engine.normalizeCurrent(ex, result, 'RSR', result.__marketFetchedAt);
+    assert.equal(quote.rate, -1.5); assert.equal(quote.fetchedAt, fetchedAt / 1000);
+    assert.equal(quote.hours, ex === 'BINGX' ? 8 : 4);
+  }
+  assert.ok(calls.every(call => call.parsed.origin === 'https://relay.test' && call.options.credentials === 'omit'));
+  assert.equal(calls[0].parsed.searchParams.get('symbol'), 'RSR-USDT');
+  assert.equal(calls[1].parsed.searchParams.get('path'), '/api/v1/contract/funding_rate/RSR_USDT');
+});
+test('other exchange requests stay independent of the BingX/MEXC relay', async () => {
+  const calls = [];
+  const client = createClient({relayUrl, fetch: async url => {calls.push(url); return response({code: 0, data: []});}});
+  for (const ex of ['BINANCE', 'BYBIT', 'BITGET', 'OKX']) {
+    const req = engine.currentRequest(ex, 'RSR'); await client.json(req.url, req.params);
+    assert.ok(calls.at(-1).startsWith(req.url));
+  }
+  assert.ok(calls.every(url => new URL(url).origin !== 'https://relay.test'));
+});
+test('relay failures are reported without silently returning to the blocked browser API path', async () => {
+  let clock = stamp; const calls = [];
+  const client = createClient({relayUrl, now: () => clock, wait: async ms => {clock += ms;}, fetch: async url => {calls.push(url); throw TypeError('Failed to fetch');}});
+  await assert.rejects(client.json(host + 'v2/quote/premiumIndex'), /BingX 연결 실패/);
+  assert.equal(calls.length, 4); assert.ok(calls.every(url => new URL(url).origin === 'https://relay.test'));
+});
+test('relay response errors retain the upstream explanation', async () => {
+  let calls = 0;
+  const client = createClient({relayUrl, fetch: async () => {calls++; return response({code: 'RELAY_ERROR', message: 'MEXC 공식 API가 JSON 대신 접근 제한 응답을 반환했습니다.'}, 502);}});
+  const req = engine.currentRequest('MEXC', 'RSR');
+  await assert.rejects(client.json(req.url, req.params), /MEXC 공식 API가 JSON 대신/);
+  assert.equal(calls, 1);
 });

@@ -157,7 +157,9 @@ function harness(options = {}) {
       if (options.gate) await options.gate;
       if (options.exchangeGates?.[ex]) await options.exchangeGates[ex];
       if (options.error) throw Error('network unavailable');
-      return current(ex, options.rate ?? '-0.015', String(params.symbol ?? params.instId ?? 'KAIA').startsWith('BTC') ? 'BTC' : 'KAIA');
+      const payload = current(ex, options.rate ?? '-0.015', String(params.symbol ?? params.instId ?? 'KAIA').startsWith('BTC') ? 'BTC' : 'KAIA');
+      if (options.fetchedAt) payload.__marketFetchedAt = options.fetchedAt;
+      return payload;
     },
     fundingPage: async () => {if (options.historyGate) await options.historyGate; return options.history ?? [{time: settle / 1000, rate: -.2}];},
     candlePage: async () => {if (options.candleGate) await options.candleGate; return options.candles ?? [{time: now / 1000}];},
@@ -181,6 +183,14 @@ test('live value is shown during backfill and is kept separate from settled rate
   assert.equal(h.live.data[0].value, undefined);
   assert.equal(h.requests.length, 6);
   assert.deepEqual(h.timers.map(row => row.ms), [10000, 60000]);
+});
+test('the funding board uses the relay fetch time rather than relabeling cached quotes as newly fetched', async () => {
+  const fetchedAt = now - 10000;
+  const h = harness({fetchedAt}); h.api.startFundingUpdates('MEXC', 'KAIA', '1h', 1);
+  await flush();
+  const quote = h.api.getSession().entries.get('MEXC').quote;
+  assert.equal(quote.fetchedAt, fetchedAt / 1000);
+  assert.equal(h.api.getSession().liveRows.at(-1).observedAt, fetchedAt / 1000);
 });
 test('live settlement refresh merges new records and keeps the current viewport', async () => {
   const rows = [{time: settle / 1000, rate: .01}, {time: next / 1000, rate: -1.5}];
