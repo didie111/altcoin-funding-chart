@@ -11,6 +11,8 @@ GitHub Pages에서 BingX와 MEXC를 직접 요청하면 브라우저의 출처 �
 
 동일 요청을 합치고 성공한 현재값은 최대 3초, 캔들과 이력은 최대 10초 보관한다. 실패한 응답은 이전 성공값으로 대체하지 않는다. `X-Market-Fetched-At`을 차트에 전달해 실제 조회 시각을 표시한다. BingX 요청은 간격을 두고 timestamp를 생성하며, 네트워크 실패일 때만 공식 보조 주소를 이용한다.
 
+BingX 정산 이력은 endTime만 전달할 때 성공 코드와 null 데이터가 반환되는 것을 확인했다. 90일의 startTime/endTime 구간을 함께 전달해 정산 기록을 조회하고, 가장 오래된 기록의 직전 시각으로 구간을 옮겨 과거 이력을 계속 수집한다. 성공 코드의 null 이력은 빈 정산 기록으로 처리한다.
+
 서버 주소: https://altcoin-market-relay.artfulscout128.chatgpt.site
 
 Sites 프로젝트 ID: `appgprj_6ace001c27188191ac657309f271aa40`

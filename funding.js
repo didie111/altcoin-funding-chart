@@ -67,7 +67,9 @@ const FundingEngine = (() => {
     switch (ex) {
       case 'BINANCE': return {url: 'https://fapi.binance.com/fapi/v1/fundingRate', params: {symbol: s, limit: 1000, startTime: cursor, endTime: now}};
       case 'BYBIT': return {url: 'https://api.bybit.com/v5/market/funding/history', params: {category: 'linear', symbol: s, limit: 200, endTime: cursor}};
-      case 'BINGX': return {url: 'https://open-api.bingx.com/openApi/swap/v2/quote/fundingRate', params: {symbol: s, limit: 1000, endTime: cursor}};
+      // A lone endTime returned code 0/data null in the live API. A bounded
+      // start/end window returns settled records and still permits backward paging.
+      case 'BINGX': {const endTime = cursor ?? now; return {url: 'https://open-api.bingx.com/openApi/swap/v2/quote/fundingRate', params: {symbol: s, limit: 1000, startTime: Math.max(0, endTime - 90 * 86400000), endTime}};}
       case 'BITGET': return {url: 'https://api.bitget.com/api/v2/mix/market/history-fund-rate', params: {symbol: s, productType: 'USDT-FUTURES', pageSize: 100, pageNo: page}};
       case 'MEXC': return {url: 'https://api.mexc.com/api/v1/contract/funding_rate/history', params: {symbol: s, page_size: 1000, page_num: page}};
       case 'OKX': return {url: 'https://www.okx.com/api/v5/public/funding-rate-history', params: {instId: s, limit: 400, after: cursor}};
@@ -80,6 +82,7 @@ const FundingEngine = (() => {
     return [...rows.values()].sort((a, b) => a.time - b.time);
   }
   function normalizeHistory(ex, response, symbol, now = Date.now()) {
+    if (ex === 'BINGX' && String(response.code) === '0' && response.data === null) return [];
     const rows = ex === 'BINANCE' ? response : ex === 'BYBIT' ? response.result?.list : ex === 'MEXC' ? response.data?.resultList : response.data;
     if (!Array.isArray(rows)) throw Error('펀딩비 이력 응답 형식이 올바르지 않습니다.');
     const expected = contract(ex, symbol);

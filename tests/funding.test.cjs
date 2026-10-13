@@ -101,6 +101,20 @@ test('funding cursors use exchange-specific directions and published page limits
   assert.equal(engine.historyRequest('OKX', 'KAIA', settle).params.after, settle);
   assert.equal(engine.historyRequest('OKX', 'KAIA').params.limit, 400);
 });
+test('BingX history uses bounded start/end windows that keep moving backward through settled records', () => {
+  for (const cursor of [now, now - 90 * 86400000]) {
+    const request = engine.historyRequest('BINGX', 'RSR', cursor);
+    assert.equal(request.params.endTime, cursor);
+    assert.equal(request.params.startTime, cursor - 90 * 86400000);
+    assert.equal(request.params.limit, 1000);
+    const payload = request.params.startTime > 0 && request.params.endTime - request.params.startTime <= 90 * 86400000
+      ? {code: 0, data: [{symbol: 'RSR-USDT', fundingTime: cursor - 3600000, fundingRate: '-0.00593600'}]}
+      : {code: 0, data: null};
+    assert.equal(engine.normalizeHistory('BINGX', payload, 'RSR', now).length, 1);
+  }
+  assert.deepEqual(engine.normalizeHistory('BINGX', {code: 0, data: null}, 'RSR'), []);
+  assert.throws(() => engine.normalizeHistory('BINGX', {data: null}, 'RSR'));
+});
 test('MEXC current, historical, candle and cycle requests work only through the replacement official API domain', async () => {
   const requests = [];
   const context = {
