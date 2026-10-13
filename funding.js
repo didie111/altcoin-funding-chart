@@ -40,7 +40,7 @@ const FundingEngine = (() => {
       case 'BYBIT': return {url: 'https://api.bybit.com/v5/market/tickers', params: {category: 'linear', symbol: s}};
       case 'BINGX': return {url: 'https://open-api.bingx.com/openApi/swap/v2/quote/premiumIndex', params: {symbol: s}};
       case 'BITGET': return {url: 'https://api.bitget.com/api/v2/mix/market/current-fund-rate', params: {symbol: s, productType: 'USDT-FUTURES'}};
-      case 'MEXC': return {url: 'https://contract.mexc.com/api/v1/contract/funding_rate/' + s, params: {}};
+      case 'MEXC': return {url: 'https://api.mexc.com/api/v1/contract/funding_rate/' + s, params: {}};
       case 'OKX': return {url: 'https://www.okx.com/api/v5/public/funding-rate', params: {instId: s}};
       default: throw Error('지원하지 않는 거래소입니다.');
     }
@@ -69,7 +69,7 @@ const FundingEngine = (() => {
       case 'BYBIT': return {url: 'https://api.bybit.com/v5/market/funding/history', params: {category: 'linear', symbol: s, limit: 200, endTime: cursor}};
       case 'BINGX': return {url: 'https://open-api.bingx.com/openApi/swap/v2/quote/fundingRate', params: {symbol: s, limit: 1000, endTime: cursor}};
       case 'BITGET': return {url: 'https://api.bitget.com/api/v2/mix/market/history-fund-rate', params: {symbol: s, productType: 'USDT-FUTURES', pageSize: 100, pageNo: page}};
-      case 'MEXC': return {url: 'https://contract.mexc.com/api/v1/contract/funding_rate/history', params: {symbol: s, page_size: 1000, page_num: page}};
+      case 'MEXC': return {url: 'https://api.mexc.com/api/v1/contract/funding_rate/history', params: {symbol: s, page_size: 1000, page_num: page}};
       case 'OKX': return {url: 'https://www.okx.com/api/v5/public/funding-rate-history', params: {instId: s, limit: 400, after: cursor}};
       default: throw Error('지원하지 않는 거래소입니다.');
     }

@@ -10,8 +10,21 @@ const MarketAPI = (() => {
       signal.addEventListener('abort', abort, {once: true});
     });
   }
-  function createClient({fetch: fetcher = (...args) => globalThis.fetch(...args), now = Date.now, wait = sleep} = {}) {
+  function createClient({fetch: fetcher = (...args) => globalThis.fetch(...args), now = Date.now, wait = sleep, requestTimeout = 10000} = {}) {
     let bingxQueue = Promise.resolve(), lastBingxStart = null;
+    async function fetchBingx(url, signal) {
+      const controller = new AbortController();
+      const abort = () => controller.abort(signal.reason);
+      signal.throwIfAborted();
+      signal.addEventListener('abort', abort, {once: true});
+      const timer = setTimeout(() => controller.abort(new DOMException('BingX 응답 제한 초과', 'TimeoutError')), requestTimeout);
+      try {
+        return await fetcher(url, {signal: controller.signal, cache: 'no-store', credentials: 'omit'});
+      } finally {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', abort);
+      }
+    }
     async function reserveBingx(signal, request) {
       const turn = bingxQueue.then(async () => {
         signal.throwIfAborted();
@@ -29,16 +42,29 @@ const MarketAPI = (() => {
     async function json(base, params = {}, signal = new AbortController().signal) {
       const bingx = new URL(base).hostname === 'open-api.bingx.com';
       const name = bingx ? 'BingX' : new URL(base).hostname;
+      const fallback = bingx ? base.replace('https://open-api.bingx.com/', 'https://open-api.bingx.pro/') : null;
       for (let attempt = 0; attempt < 4; attempt++) {
         signal.throwIfAborted();
-        const request = () => {
+        const request = (endpoint = base) => {
           const query = bingx ? {...params, timestamp: now()} : params;
-          const url = base + '?' + new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined));
-          return fetcher(url, {signal, cache: 'no-store', credentials: 'omit'});
+          const url = endpoint + '?' + new URLSearchParams(Object.entries(query).filter(([, v]) => v !== undefined));
+          return bingx ? fetchBingx(url, signal) : fetcher(url, {signal, cache: 'no-store', credentials: 'omit'});
         };
         let response;
         try {
-          response = bingx ? await (await reserveBingx(signal, request)).response : await request();
+          if (bingx) {
+            try {
+              response = await (await reserveBingx(signal, request)).response;
+            } catch (error) {
+              signal.throwIfAborted();
+              // Official live backup, only when the primary cannot be reached.
+              // HTTP/API errors below keep their original status and never switch hosts.
+              if (!(error instanceof TypeError) && error.name !== 'TimeoutError') throw error;
+              response = await (await reserveBingx(signal, () => request(fallback))).response;
+            }
+          } else {
+            response = await request();
+          }
         } catch (error) {
           if (signal.aborted) throw signal.reason;
           if (attempt === 3) throw Error(name + ' 연결 실패: API 응답을 읽을 수 없습니다. CORS·지역 제한·네트워크 확인 필요');
@@ -52,7 +78,12 @@ const MarketAPI = (() => {
           continue;
         }
         if (!response.ok) throw Error(name + ' HTTP ' + response.status);
-        const result = await response.json();
+        let result;
+        try {result = await response.json();}
+        catch (error) {
+          if (signal.aborted) throw signal.reason;
+          throw Error(name + ' 응답 오류: JSON 데이터를 받지 못했습니다. 거래소 접근 제한 또는 API 주소 확인 필요');
+        }
         const code = result.retCode ?? result.code;
         if (code !== undefined && !['0', '00000'].includes(String(code))) {
           const message = name + ' API ' + code + ': ' + (result.retMsg || result.msg || result.message || '요청 실패');
