@@ -502,7 +502,7 @@ async function candlePage(ex,s,int,end,signal,recent=false){const b=baseSymbol(s
  case 'BINGX':j=await json('https://open-api.bingx.com/openApi/swap/v3/quote/klines',{symbol:b+'-USDT',interval:int,limit:recent?3:1000,endTime:end},signal);rows=j.data;break;
  case 'BITGET':j=await json('https://api.bitget.com/api/v2/mix/market/'+(recent?'candles':'history-candles'),{symbol:b+'USDT',productType:'USDT-FUTURES',granularity:{'15m':'15m','1h':'1H','4h':'4H','1d':'1Dutc'}[int],limit:recent?3:200,endTime:end},signal);rows=j.data;break;
  case 'OKX':j=await json('https://www.okx.com/api/v5/market/'+(recent?'candles':'history-candles'),{instId:b+'-USDT-SWAP',bar:{'15m':'15m','1h':'1H','4h':'4H','1d':'1Dutc'}[int],limit:recent?3:300,after:end},signal);rows=j.data.map(r=>[...r.slice(0,5),r[6]]);break;
- case 'MEXC':{const sec=Math.floor(end/1000);j=await json('https://contract.mexc.com/api/v1/contract/kline/'+b+'_USDT',{interval:{'15m':'Min15','1h':'Min60','4h':'Hour4','1d':'Day1'}[int],start:Math.max(0,sec-duration[int]*(recent?2:1999)),end:sec},signal);const d=j.data;return (d.time||[]).map((t,i)=>({time:+t,open:+d.open[i],high:+d.high[i],low:+d.low[i],close:+d.close[i],volume:+d.vol[i]}));}
+ case 'MEXC':{const sec=Math.floor(end/1000);j=await json('https://api.mexc.com/api/v1/contract/kline/'+b+'_USDT',{interval:{'15m':'Min15','1h':'Min60','4h':'Hour4','1d':'Day1'}[int],start:Math.max(0,sec-duration[int]*(recent?2:1999)),end:sec},signal);const d=j.data;return (d.time||[]).map((t,i)=>({time:+t,open:+d.open[i],high:+d.high[i],low:+d.low[i],close:+d.close[i],volume:+d.vol[i]}));}
  }if(!Array.isArray(rows))throw Error('캔들 응답 형식 오류');const normalized=rows.map(candle);if(normalized.some(c=>!c))throw Error(ex+' 캔들 값 또는 시각이 올바르지 않습니다.');return normalized;}
 async function fundingPage(ex,s,cursor,page,signal){
  const request=FundingEngine.historyRequest(ex,s,cursor,page);
@@ -516,7 +516,7 @@ async function fetchOfficialCycle(ex,s,signal){const b=baseSymbol(s);let hours=n
  case 'BYBIT':{const j=await json('https://api.bybit.com/v5/market/instruments-info',{category:'linear',symbol:b+'USDT'},signal);hours=Number(j.result.list[0].fundingInterval)/60;break;}
  case 'OKX':{const j=await json('https://www.okx.com/api/v5/public/funding-rate',{instId:b+'-USDT-SWAP'},signal);hours=(Number(j.data[0].nextFundingTime)-Number(j.data[0].fundingTime))/3600000;break;}
  case 'BITGET':{const j=await json('https://api.bitget.com/api/v2/mix/market/current-fund-rate',{symbol:b+'USDT',productType:'USDT-FUTURES'},signal);hours=Number(j.data[0].fundingRateInterval);break;}
- case 'MEXC':{const j=await json('https://contract.mexc.com/api/v1/contract/funding_rate/'+b+'_USDT',{},signal);hours=Number(j.data.collectCycle);break;}
+ case 'MEXC':{const j=await json('https://api.mexc.com/api/v1/contract/funding_rate/'+b+'_USDT',{},signal);hours=Number(j.data.collectCycle);break;}
  default:return null;}
  }catch(e){if(e.name==='AbortError')throw e;return null;}
  return Number.isFinite(hours)&&hours>0?{hours:Math.round(hours*100)/100,note}:null;}

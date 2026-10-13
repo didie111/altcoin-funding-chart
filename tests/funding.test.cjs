@@ -101,6 +101,34 @@ test('funding cursors use exchange-specific directions and published page limits
   assert.equal(engine.historyRequest('OKX', 'KAIA', settle).params.after, settle);
   assert.equal(engine.historyRequest('OKX', 'KAIA').params.limit, 400);
 });
+test('MEXC current, historical, candle and cycle requests work only through the replacement official API domain', async () => {
+  const requests = [];
+  const context = {
+    FundingEngine: engine, duration: {'15m': 900},
+    json: async (url, params) => {
+      const request = new URL(url); requests.push({request, params});
+      if (request.origin !== 'https://api.mexc.com') throw Error('Retired domain is unavailable');
+      if (request.pathname === '/api/v1/contract/kline/KAIA_USDT') return {data: {time: [now / 1000], open: [2], high: [4], low: [1], close: [3], vol: [5]}};
+      if (request.pathname === '/api/v1/contract/funding_rate/KAIA_USDT') return current('MEXC');
+      if (request.pathname === '/api/v1/contract/funding_rate/history') return history('MEXC');
+      throw Error('Unexpected MEXC endpoint');
+    }
+  };
+  const source = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');
+  vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf('function baseSymbol(s)'), source.indexOf('let fundingSession = null;')), context);
+  const request = engine.currentRequest('MEXC', 'KAIAUSDT');
+  const quote = engine.normalizeCurrent('MEXC', await context.json(request.url, request.params), 'KAIA', now);
+  assert.equal(quote.rate, -1.5);
+  assert.equal(quote.hours, 4);
+  assert.equal((await context.fundingPage('MEXC', 'KAIAUSDT', now, 2))[0].rate, -1.5);
+  assert.deepEqual(JSON.parse(JSON.stringify(await context.candlePage('MEXC', 'KAIAUSDT', '15m', now))), [{time: now / 1000, open: 2, high: 4, low: 1, close: 3, volume: 5}]);
+  assert.equal((await context.fetchOfficialCycle('MEXC', 'KAIAUSDT')).hours, 4);
+  assert.equal(requests.length, 4);
+  assert.equal(requests[1].params.symbol, 'KAIA_USDT');
+  assert.equal(requests[1].params.page_num, 2);
+  assert.equal(requests[2].params.interval, 'Min15');
+});
 function harness(options = {}) {
   const source = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');
   const snippet = source.slice(source.indexOf('let fundingSession = null;'), source.indexOf('async function loadData(){'));
