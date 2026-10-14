@@ -257,6 +257,14 @@
     #unified-chart:fullscreen,#unified-chart.chart-fullscreen-fallback {position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;height:100dvh!important;min-height:0;display:block;flex:none;background:#111827;z-index:1000}
     #unified-chart::backdrop {background:#111827}
     @media(hover:none),(pointer:coarse){#chartFullscreenBtn{opacity:1;pointer-events:auto}}
+    #barCountdown {position:absolute;z-index:7;pointer-events:none;color:white;font-size:11px;font-variant-numeric:tabular-nums;line-height:14px;text-align:center;padding:1px 3px;box-sizing:border-box}
+    #barCountdown span {display:block}
+    #barCountdown[hidden] {display:none}
+    #chartClock {position:absolute;z-index:6;pointer-events:none;background:#111827;color:#cbd5e1;font-size:11px;line-height:20px;padding:0 4px;font-variant-numeric:tabular-nums}
+    #historyLoading {position:absolute;z-index:10;left:50%;top:8px;transform:translateX(-50%);background:#1e293bee;color:#93c5fd;padding:5px 10px;font-size:12px;border:1px solid #334155;border-radius:4px;pointer-events:none}
+    .settings-line-options {display:flex;align-items:center;gap:7px}
+    .settings-line-options input[type=number] {width:60px}
+    .settings-line-options select {max-width:95px}
     #chartIdentityControls {position:absolute;left:8px;z-index:9;display:flex;align-items:center;gap:7px;height:26px;max-width:calc(100% - 16px);font-size:13px;font-weight:700;color:#e2e8f0;background:#111827e8;border-radius:4px;padding:0 3px;pointer-events:auto}
     #chartSymbolLabel {min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .chart-identity-separator {color:#64748b}
@@ -398,7 +406,7 @@
             <p class="funding-note">하단 막대: 정산 기록 · 노란 점선: 페이지에서 관측한 현재율(미정산). 관측 전 구간은 공백이며 신호 목록은 정산 기록 기준입니다.</p>
           </section>
           <div id="chart-key" style="padding:6px 12px;font-size:12px;min-height:28px">가격 · 거래량 · 정산 펀딩비 · RSI Div · 정산 주기 — 동일 시간축</div>
-          <div id="unified-chart" style="flex:1;min-height:0;position:relative">
+          <div id="unified-chart" style="flex:1;min-height:0;position:relative"><div id="historyLoading" hidden role="status"></div>
             <div id="chartIdentityControls" data-chart-identity="true" role="group" aria-label="코인 심볼과 타임프레임" hidden>
               <span id="chartSymbolLabel" aria-label="현재 차트 코인 심볼"></span>
               <span class="chart-identity-separator" aria-hidden="true">·</span>
@@ -469,7 +477,7 @@
           <p class="settings-group">Divergence settings</p>
           <div class="settings-row"><label for="rsiOB">과매수 기준 (Bearish)</label><input id="rsiOB" name="overbought" type="number" min="0" max="100" step="1" required></div>
           <div class="settings-row"><label for="rsiOS">과매도 기준 (Bullish)</label><input id="rsiOS" name="oversold" type="number" min="0" max="100" step="1" required></div>
-          <p class="settings-note">좌우 5봉 피봇 · 오른쪽 5봉 뒤 확인 · 신호 표시는 피봇 봉 위치.<br>피봇 비교 간격은 제공한 Pine 코드의 조건을 사용합니다. 배경 기준선은 원본과 같은 70 / 50 / 30입니다.</p>
+          <p class="settings-note">좌우 5봉 피봇 · 오른쪽 5봉 뒤 확인 · 신호 표시는 피봇 봉 위치.<br>피봇 비교 간격은 제공한 Pine 코드의 조건을 사용합니다. 기준선의 값과 표시·색상·두께·선 모양은 모습 탭에서 변경할 수 있습니다.</p>
           <p class="settings-group">스무딩</p>
           <div class="settings-row"><label for="rsiMAType">이동평균 종류</label><select id="rsiMAType" name="maType"><option>None</option><option>SMA</option><option>SMA + Bollinger Bands</option><option>EMA</option><option>SMMA (RMA)</option><option>WMA</option><option>VWMA</option></select></div>
           <div class="settings-row"><label for="rsiMALength">이동평균 길이</label><input id="rsiMALength" name="maLength" type="number" min="1" step="1" required></div>
@@ -481,6 +489,12 @@
           <div class="settings-row"><label for="rsiLineWidth">RSI 선 두께</label><select id="rsiLineWidth" name="lineWidth"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>
           <div class="settings-row"><label for="rsiShowMA">RSI 이동평균</label><input id="rsiShowMA" name="showMa" type="checkbox"><input name="maColor" type="color" aria-label="RSI 이동평균 색상"></div>
           <div class="settings-row"><label for="rsiShowBB">볼린저 밴드</label><input id="rsiShowBB" name="showBands" type="checkbox"></div>
+          <div class="settings-row"><label for="rsiUpperShow">상단 기준선 (70)</label><div class="settings-line-options"><input id="rsiUpperShow" name="showUpperLine" type="checkbox" aria-label="상단 기준선 표시"><input name="upperLevel" type="number" min="0" max="100" step="1" aria-label="상단 기준선 값" required><input name="upperColor" type="color" aria-label="상단 기준선 색상"></div></div>
+          <div class="settings-row"><label for="rsiUpperWidth">상단 기준선 두께·모양</label><div class="settings-line-options"><select id="rsiUpperWidth" name="upperWidth" aria-label="상단 기준선 두께"><option value="1">1px</option><option value="2">2px</option><option value="3">3px</option><option value="4">4px</option></select><select name="upperStyle" aria-label="상단 기준선 모양"><option value="0">실선</option><option value="1">점선</option><option value="2">파선</option><option value="3">긴 파선</option></select></div></div>
+          <div class="settings-row"><label for="rsiMiddleShow">중간 기준선 (50)</label><div class="settings-line-options"><input id="rsiMiddleShow" name="showMiddleLine" type="checkbox" aria-label="중간 기준선 표시"><input name="middleLevel" type="number" min="0" max="100" step="1" aria-label="중간 기준선 값" required><input name="middleColor" type="color" aria-label="중간 기준선 색상"></div></div>
+          <div class="settings-row"><label for="rsiMiddleWidth">중간 기준선 두께·모양</label><div class="settings-line-options"><select id="rsiMiddleWidth" name="middleWidth" aria-label="중간 기준선 두께"><option value="1">1px</option><option value="2">2px</option><option value="3">3px</option><option value="4">4px</option></select><select name="middleStyle" aria-label="중간 기준선 모양"><option value="0">실선</option><option value="1">점선</option><option value="2">파선</option><option value="3">긴 파선</option></select></div></div>
+          <div class="settings-row"><label for="rsiLowerShow">하단 기준선 (30)</label><div class="settings-line-options"><input id="rsiLowerShow" name="showLowerLine" type="checkbox" aria-label="하단 기준선 표시"><input name="lowerLevel" type="number" min="0" max="100" step="1" aria-label="하단 기준선 값" required><input name="lowerColor" type="color" aria-label="하단 기준선 색상"></div></div>
+          <div class="settings-row"><label for="rsiLowerWidth">하단 기준선 두께·모양</label><div class="settings-line-options"><select id="rsiLowerWidth" name="lowerWidth" aria-label="하단 기준선 두께"><option value="1">1px</option><option value="2">2px</option><option value="3">3px</option><option value="4">4px</option></select><select name="lowerStyle" aria-label="하단 기준선 모양"><option value="0">실선</option><option value="1">점선</option><option value="2">파선</option><option value="3">긴 파선</option></select></div></div>
           <div class="settings-row"><label for="rsiShowFill">배경 및 과매수·과매도 채우기</label><input id="rsiShowFill" name="showFill" type="checkbox"></div>
           <div class="settings-row"><label for="rsiShowBull">Bull 선·라벨</label><input id="rsiShowBull" name="showBull" type="checkbox"><input name="bullColor" type="color" aria-label="Bull 색상"></div>
           <div class="settings-row"><label for="rsiShowBear">Bear 선·라벨</label><input id="rsiShowBear" name="showBear" type="checkbox"><input name="bearColor" type="color" aria-label="Bear 색상"></div>
@@ -509,9 +523,10 @@
     <script src="market-api.js?v=20261013-relay-1"></script>
     <script src="funding.js?v=20261013-relay-1"></script>
     <script src="timeframes.js?v=20261014-navigation-1"></script>
+    <script src="chart-data.js?v=20261015-live-1"></script>
     <script src="date-navigation.js?v=20261014-navigation-1"></script>
-    <script src="indicators.js?v=20261014-navigation-1"></script>
-    <script src="app.js?v=20261014-navigation-3"></script>
+    <script src="indicators.js?v=20261015-live-1"></script>
+    <script src="app.js?v=20261015-live-1"></script>
 </body>
 </html>
 

@@ -11,9 +11,9 @@ const chart = LC.createChart($('unified-chart'), {
  autoSize:true, layout:{background:{type:'solid',color:'#111827'},textColor:'#9ca3af',panes:{separatorColor:'#374151',separatorHoverColor:'#4b5563'}},
  grid:{vertLines:{color:'#1f2937'},horzLines:{color:'#1f2937'}},
  crosshair:{mode:LC.CrosshairMode.Normal},handleScroll:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:{mouseWheel:true,pinch:true,axisPressedMouseMove:{time:true,price:true},axisDoubleClickReset:{time:true,price:false}},rightPriceScale:{minimumWidth:100,borderColor:'#374151'},
- timeScale:{timeVisible:true,secondsVisible:false,rightOffset:3,lockVisibleTimeRangeOnResize:true,tickMarkFormatter:tickLabel},localization:{locale:'ko-KR',timeFormatter:t=>fullFmt.format(new Date(Number(t)*1000))}
+ timeScale:{timeVisible:true,secondsVisible:false,rightOffset:3,shiftVisibleRangeOnNewBar:false,lockVisibleTimeRangeOnResize:true,tickMarkFormatter:tickLabel},localization:{locale:'ko-KR',timeFormatter:t=>fullFmt.format(new Date(Number(t)*1000))}
 });
-const candles=chart.addSeries(LC.CandlestickSeries,{upColor:'#22c55e',downColor:'#ef4444',borderVisible:false,wickUpColor:'#22c55e',wickDownColor:'#ef4444',priceFormat:{type:'price',precision:8,minMove:0.00000001}},0);
+const candles=chart.addSeries(LC.CandlestickSeries,{upColor:'#22c55e',downColor:'#ef4444',borderVisible:false,lastValueVisible:false,wickUpColor:'#22c55e',wickDownColor:'#ef4444',priceFormat:{type:'price',precision:8,minMove:0.00000001}},0);
 // indicators.js(StudyPanelManager)가 패널 삭제/재추가 시 아래 변수들을 다시 대입하므로 let 이어야 합니다.
 let volume=chart.addSeries(LC.HistogramSeries,{priceFormat:{type:'volume'},lastValueVisible:false},1);
 let funding=chart.addSeries(LC.HistogramSeries,{priceFormat:{type:'custom',minMove:0.000001,formatter:v=>v.toFixed(6)+'%'},lastValueVisible:false},2);
@@ -58,6 +58,7 @@ let all=[],rates=[],signals=[],mapped=new Map(),unmappedFunding=[],controller,ru
 let selectedGuideVisible=false, selectedGuideTimer, selectedCountdownTimer, selectedGuideDeadline=0;
 const WINDOW=10000, duration=TimeframeEngine.seconds;
 let dateNavigation=null, navigationController=null, loadedMarket=null, chartDateFocus=null;
+let historyState={id:0,buffer:[],pending:new Set(),exhausted:new Set()};
 let paneScaleSeries=[candles,volume,funding,settlementCycle];
 let studyPanels=null;
 const overlay=document.createElement('canvas');overlay.style.cssText='position:absolute;inset:0;pointer-events:none;z-index:4';$('unified-chart').append(overlay);
@@ -73,7 +74,7 @@ function draw(){paneLayoutCache=computePaneLayout();updatePaneHover();try{drawIn
 function setStyle(el,k,v){const c=el._st||(el._st={});if(c[k]!==v){c[k]=v;el.style[k]=v;}}
 function drawInner(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clientHeight,dpr=devicePixelRatio||1,plotWidth=chart.timeScale().width();
  if(overlay.width!==Math.round(w*dpr)||overlay.height!==Math.round(h*dpr)){overlay.width=Math.round(w*dpr);overlay.height=Math.round(h*dpr);overlay.style.width=w+'px';overlay.style.height=h+'px';}
- ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawCycleBands(w,h);drawRuler(w,h);placeChartSymbol();placeChartNavigation();placeLegendToggle();studyPanels?.position();
+ ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawCycleBands(w,h);drawRuler(w,h);placeChartSymbol();placeChartNavigation();placeChartClock();placeLegendToggle();studyPanels?.position();
  if(selectedSignal&&selectedGuideVisible){const x=chart.timeScale().timeToCoordinate(selectedSignal.time);if(x!==null&&x>=0&&x<=plotWidth){guideCountdown.hidden=false;guideCountdown.style.left=Math.max(65,Math.min(plotWidth-65,x))+'px';ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
  if(!showLines)return;
  const range=chart.timeScale().getVisibleRange();if(!range)return;
@@ -112,6 +113,21 @@ for (const type of ['pointerdown', 'dblclick', 'wheel']) {
     if (type === 'wheel') e.preventDefault();
   });
 }
+const priceClock=document.createElement('div');priceClock.id='barCountdown';priceClock.hidden=true;priceClock.setAttribute('aria-label','현재가 및 봉 마감까지 남은 시간');rulerHost.append(priceClock);
+const wallClock=document.createElement('div');wallClock.id='chartClock';wallClock.setAttribute('aria-label','한국 표준시');rulerHost.append(wallClock);
+const wallTimeFormat=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+function placeChartClock(){
+ const now=Date.now()/1000,latest=all.at(-1),pane=pricePane(),step=duration[loadedMarket?.int],width=chart.timeScale().width();
+ wallClock.textContent=wallTimeFormat.format(new Date())+' UTC+9';setStyle(wallClock,'right','4px');setStyle(wallClock,'bottom','3px');
+ const y=latest?candles.priceToCoordinate(latest.close):null;
+ const live=latest&&step&&latest.time<=now&&latest.time+step>now;
+ priceClock.hidden=!pane||studyPanels?.priceCollapsed()||y===null||y<0||y>pane.height||windowEnd!==all.length;
+ if(priceClock.hidden)return;
+ priceClock.replaceChildren(Object.assign(document.createElement('span'),{textContent:latest.close.toFixed(8)}),Object.assign(document.createElement('span'),{textContent:live?ChartData.countdown(latest.time,step,now):'00:00'}));
+ priceClock.dataset.live=String(Boolean(live));priceClock.title=live?'현재 '+$('intervalSelect').selectedOptions[0].text+' 봉 마감까지 남은 시간':'다음 실시간 캔들 확인 대기';
+ setStyle(priceClock,'left',width+'px');setStyle(priceClock,'width',Math.max(70,rulerHost.clientWidth-width)+'px');setStyle(priceClock,'top',pane.top+Math.max(0,Math.min(pane.height-30,y-13))+'px');setStyle(priceClock,'background',latest.close>=latest.open?'#22c55e':'#ef4444');
+}
+setInterval(()=>{if(!document.hidden)placeChartClock();},1000);
 function placeChartSymbol(){
   const pane=pricePane();
   const visible=Boolean(chartSymbolLabel.textContent && pane && !studyPanels?.priceCollapsed());
@@ -169,7 +185,7 @@ rulerHost.addEventListener('pointermove', e => {
 });
 rulerHost.addEventListener('pointerleave', () => {
   hoverPoint = null;
-  if (hoveredPaneIndex !== -1) { hoveredPaneIndex = -1; schedule(); }
+  hoveredPaneIndex = -1; schedule();
 });
 
 function paneAtY(y) {
@@ -325,6 +341,7 @@ for(const [action,label,title] of [['out','-','축소'],['in','+','확대'],['le
  const button=document.createElement('button');button.type='button';button.dataset.nav=action;button.textContent=label;button.title=title;button.setAttribute('aria-label',title);button.style.cssText='width:24px;height:22px;padding:0;background:#263244;border:1px solid #475569;color:#e2e8f0;border-radius:3px;font-size:16px;line-height:20px';
  button.onclick=e=>{e.stopPropagation();navigateChart(action);};button.onmouseenter=()=>button.style.background='#475569';button.onmouseleave=()=>button.style.background='#263244';chartNavigation.append(button);
 }
+chartNavigation.addEventListener('focusin',schedule);chartNavigation.addEventListener('focusout',schedule);
 chartNavigation.addEventListener('pointerdown',e=>e.stopPropagation());chartNavigation.addEventListener('dblclick',e=>e.stopPropagation());
 // 이동 버튼(-, +, <, >, R): 맨 아래 패널의 오른쪽 가격 축 바로 왼쪽에 표시.
 // 지표 패널이 모두 없으면 맨 아래 패널 = 가격(메인) 차트가 됩니다.
@@ -337,7 +354,8 @@ function placeChartNavigation(){
   const lastRel = all.length - 1 - windowStart;
   const atLatest = !all.length || !range || latestOffset === null ||
     (windowEnd === all.length && Math.abs(range.to - lastRel - latestOffset) <= 2);
-  setStyle(chartNavigation, 'display', atLatest ? 'none' : 'flex');
+  const hovered=hoverPoint!==null || Boolean(chartNavigation.querySelector(':focus-visible'));
+  setStyle(chartNavigation, 'display', !hovered || atLatest ? 'none' : 'flex');
   setStyle(chartNavigation, 'left', Math.max(8, chart.timeScale().width() - 8) + 'px');
   setStyle(chartNavigation, 'top', Math.max(4, bottom - 32) + 'px');
 }
@@ -450,15 +468,18 @@ function rebuild(){const {warn,ext}=thresholds();
 function observedCycles(records){const periods=[];const allowed=[1,2,4,8,12,24];for(let i=1;i<records.length;i++){const seconds=records[i].time-records[i-1].time;const hours=allowed.find(h=>Math.abs(seconds-h*3600)<=60);periods.push({start:records[i-1].time,end:records[i].time,hours:hours??null});}
  for(let i=0;i<periods.length;i++){const p=periods[i],before=periods[i-1],after=periods[i+1];if(before&&after&&before.hours===after.hours&&before.hours&&p.hours>before.hours){p.hours=null;p.gap=true;}}
  return periods;}
+function currentCyclePeriod(){const session=fundingSession,entry=session?.entries.get(session.ex);return ChartData.currentCycle(entry?.quote,officialCycle?.hours,rates);}
+function liveCycleValue(c){const p=currentCyclePeriod(),step=duration[loadedMarket?.int??$('intervalSelect').value];return p&&c.time+step>p.start&&c.time<p.end?{hours:p.hours,current:true,source:p.source}:cycleValues.get(c.time);}
 function rebuildCycles(){cycleHistory=observedCycles(rates);cycleTransitions=[];cycleValues=new Map();let previous=null;
  for(const p of cycleHistory){if(p.hours===null){previous=null;continue;}if(previous!==null&&previous!==p.hours)cycleTransitions.push({time:p.end,from:previous,to:p.hours});previous=p.hours;}
  let i=0;const seconds=duration[$('intervalSelect').value];for(const c of all){while(i<cycleHistory.length&&cycleHistory[i].end<=c.time)i++;let value=null,unknown=false;for(let j=i;j<cycleHistory.length&&cycleHistory[j].start<c.time+seconds;j++){const p=cycleHistory[j];if(p.end<=c.time)continue;if(p.hours===null)unknown=true;else value=value===null?p.hours:Math.min(value,p.hours);}
  if(value!==null)cycleValues.set(c.time,{hours:value,mixed:unknown});}
+ const current=currentCyclePeriod();if(current)for(const c of all){if(c.time+seconds>current.start&&c.time<current.end)cycleValues.set(c.time,{hours:current.hours,current:true,source:current.source});}
  cycleFast=new Uint8Array(all.length);for(let k=0;k<all.length;k++){const v=cycleValues.get(all[k].time);if(v&&v.hours<8)cycleFast[k]=Math.round(v.hours);}
  const latest=cycleHistory.at(-1);
  const official=(officialCycle?.hours?` · 거래소 공식 현재 주기: ${officialCycle.hours}시간${officialCycle.note}`:'')+(otherCycles.length?` · 거래소별 현재 주기: ${otherCycles.map(o=>o.name+' '+o.hours+'시간').join(' / ')}`:'');
  const mismatch=officialCycle?.hours&&latest?.hours&&latest.hours!==officialCycle.hours?` · ⚠ 이력 관측(${latest.hours}시간)과 공식(${officialCycle.hours}시간)이 다름: 최근 주기가 바뀌었거나 거래소 선택을 확인하세요`:'';
- cycleCaption.textContent=`정산 주기(기록 간격 관측): ${latest?.hours?latest.hours+'시간':'확인 불가'}${official}${mismatch} · 전환 ${cycleTransitions.length}회 · 8h 파랑 / 4h 주황 / 1h 빨강 · 일봉 등은 봉 내 최소 간격 · 데이터 누락 시 실제 정책과 다를 수 있음`;updateCycleBadge();}
+ cycleCaption.textContent=`정산 주기(기록 간격 관측): ${latest?.hours?latest.hours+'시간':'확인 불가'}${official}${mismatch} · 최신 미정산 구간: ${current?current.hours+'시간 ('+(current.source==='official'?'공식 현재 주기':'최근 정산 간격 기준')+')':'주기 확인 대기'} · 전환 ${cycleTransitions.length}회 · 8h 파랑 / 4h 주황 / 1h 빨강 · 일봉 등은 봉 내 최소 간격 · 데이터 누락 시 실제 정책과 다를 수 있음`;updateCycleBadge();}
 function cycleColor(h){return h===1?'#ef4444':h===4?'#f59e0b':h===8?'#3b82f6':'#a78bfa';}
 function renderCycles(part){if(!settlementCycle)return;settlementCycle.setData(part.map(c=>{const p=cycleValues.get(c.time);return p?{time:c.time,value:p.hours,color:cycleColor(p.hours)}:{time:c.time};}));
  const map=new Map();for(const t of cycleTransitions){const i=lowerBound(all,t.time);const k=all[i]?.time===t.time?all[i]:all[i-1];if(k&&k.time>=part[0].time&&k.time<=part.at(-1).time)map.set(k.time,{time:k.time,position:'aboveBar',color:cycleColor(t.to),shape:'arrowDown',size:2,text:'⚡ 정산 '+t.from+'h → '+t.to+'h'});}
@@ -477,6 +498,11 @@ function focusSignal(s,element){chartDateFocus=null;selectedSignal=s;selectedGui
  chart.clearCrosshairPosition();
  $('chart-key').textContent=`선택 신호: ${date(s.eventTime)} · ${s.rate.toFixed(6)}% · 노란선: 해당 ${$('intervalSelect').selectedOptions[0].text} 캔들 (${date(s.time)})`;
  status(`신호 이동 완료 · ${date(s.eventTime)} · ${s.rate.toFixed(6)}%`);schedule();}
+function renderSignalMarkers(part){if(!part.length)return;
+ const visible=signals.slice(lowerBound(signals,part[0].time),lowerBound(signals,part.at(-1).time+1));
+ const unique=new Map();for(const s of visible){const old=unique.get(s.time);if(!old||s.rate<old.rate)unique.set(s.time,s);}
+ markers.setMarkers(unique.size<=300?[...unique.values()].map(s=>({time:s.time,position:'aboveBar',color:s.type==='EXTREME'?'#a855f7':'#ef4444',shape:'arrowDown',text:s.rate.toFixed(3)+'%'})):[]);
+}
 function renderWindow(center,focus=true,span=240,preservedRange=null){if(!all.length)return;changingWindow=true;clearTimeout(navTimer);windowStart=windowStartFor(center);windowEnd=Math.min(all.length,windowStart+WINDOW);const part=all.slice(windowStart,windowEnd),{warn,ext}=thresholds();
  candles.setData(part.map(({time,open,high,low,close})=>({time,open,high,low,close})));
  volume?.setData(part.map(c=>({time:c.time,value:c.volume,color:c.close>=c.open?'#22c55e80':'#ef444480'})));
@@ -485,15 +511,13 @@ function renderWindow(center,focus=true,span=240,preservedRange=null){if(!all.le
  if(fundingSessionActive(fundingSession)&&fundingSession.liveRows.length&&all.at(-1).time<fundingSession.liveRows.at(-1).time)void refreshFundingCandles(fundingSession);
  renderCycles(part);
  studyPanels?.render(part);
- const visible=signals.slice(lowerBound(signals,part[0].time),lowerBound(signals,part.at(-1).time+1));
- const unique=new Map();for(const s of visible){const old=unique.get(s.time);if(!old||s.rate<old.rate)unique.set(s.time,s);}
- markers.setMarkers(unique.size<=300?[...unique.values()].map(s=>({time:s.time,position:'aboveBar',color:s.type==='EXTREME'?'#a855f7':'#ef4444',shape:'arrowDown',text:s.rate.toFixed(3)+'%'})):[]);
+ renderSignalMarkers(part);
  $('historyPosition').max=Math.max(0,all.length-1);$('historyPosition').value=Math.max(0,Math.min(all.length-1,center));$('historyInfo').textContent=`${all.length.toLocaleString()}봉 · 화면 구간 ${date(part[0].time)} ~ ${date(part.at(-1).time)}`;
- if(focus){const ix=Math.max(0,Math.min(part.length-1,center-windowStart));resetScales();const rng=centeredRange(ix,Math.min(span,Math.max(20,all.length*1.2)));if(center>=all.length-1)latestOffset=rng.to-ix;chart.timeScale().setVisibleLogicalRange(rng);}else if(preservedRange){chart.timeScale().setVisibleLogicalRange({from:preservedRange.from-windowStart,to:preservedRange.to-windowStart});}requestAnimationFrame(()=>{changingWindow=false;schedule();});}
+ if(focus){const ix=Math.max(0,Math.min(part.length-1,center-windowStart));resetScales();const rng=centeredRange(ix,Math.min(span,Math.max(20,all.length*1.2)));if(center>=all.length-1)latestOffset=rng.to-ix;chart.timeScale().setVisibleLogicalRange(rng);}else if(preservedRange){chart.timeScale().setVisibleLogicalRange({from:preservedRange.from-windowStart,to:preservedRange.to-windowStart});}requestAnimationFrame(()=>{changingWindow=false;schedule();scheduleVisibleHistory();});}
 let listOffset=0;function renderList(){listOffset=0;$('signalListContainer').replaceChildren();$('signalCountTag').textContent=signals.length+'개';appendList();}
 function appendList(){const container=$('signalListContainer');container.querySelector('.more')?.remove();const end=Math.min(signals.length,listOffset+100);const fragment=document.createDocumentFragment();for(;listOffset<end;listOffset++){const s=signals[signals.length-1-listOffset],el=document.createElement('div');el.className='signal-item '+s.type;const text=document.createElement('div');text.textContent=`${date(s.eventTime)} · ${s.rate.toFixed(6)}%`;el.append(text);el.onclick=()=>focusSignal(s,el);fragment.append(el);}container.append(fragment);if(listOffset<signals.length){const b=document.createElement('button');b.className='more';b.textContent='신호 100개 더 보기';b.onclick=appendList;container.append(b);}if(!signals.length)container.textContent='설정 조건에 해당하는 펀딩비 신호 없음';}
 chart.subscribeCrosshairMove(p=>{studyPanels?.updateLegend(p.time??null);if(selectedSignal)return;if(!p.time)return;const setKey=t=>{const el=$('chart-key');if(el.textContent!==t)el.textContent=t;};const c=p.seriesData.get(candles),v=volume?p.seriesData.get(volume):undefined,f=funding?p.seriesData.get(funding):undefined,cycle=settlementCycle?p.seriesData.get(settlementCycle):undefined,live=fundingLive?p.seriesData.get(fundingLive):undefined;setKey(`${date(Number(p.time))} · 종가 ${c?.close??'—'} · 거래량 ${v?.value??'—'} · 정산 펀딩비 ${f?.value!==undefined?f.value.toFixed(6)+'%':'기록 없음'} (봉 내 최저 실현율) · 관측 현재율 ${live?.value!==undefined?live.value.toFixed(6)+'%':'기록 없음'} (미정산) · 정산 간격 ${cycle?.value!==undefined?cycle.value+'시간':'기록 없음'}`);});
-let navTimer;chart.timeScale().subscribeVisibleLogicalRangeChange(r=>{schedule();if(!r||busy||changingWindow)return;clearTimeout(navTimer);navTimer=setTimeout(()=>{const absolute={from:r.from+windowStart,to:r.to+windowStart};const middle=(absolute.from+absolute.to)/2;if(((r.from<20&&windowStart>0)||(r.to>windowEnd-windowStart-20&&windowEnd<all.length))&&windowStartFor(middle)!==windowStart)renderWindow(middle,false,240,absolute);},180);});
+let navTimer;chart.timeScale().subscribeVisibleLogicalRangeChange(r=>{schedule();if(r&&!changingWindow)scheduleVisibleHistory();});
 new ResizeObserver(schedule).observe($('unified-chart'));
 const pause=(ms,signal)=>new Promise((resolve,reject)=>{if(signal.aborted)return reject(new DOMException('중지','AbortError'));const onAbort=()=>{clearTimeout(timer);reject(new DOMException('중지','AbortError'));};const timer=setTimeout(()=>{signal.removeEventListener('abort',onAbort);resolve();},ms);signal.addEventListener('abort',onAbort,{once:true});});
 function url(base,params){return base+'?'+new URLSearchParams(Object.entries(params).filter(([,v])=>v!==undefined));}
@@ -503,7 +527,7 @@ function uniqueSorted(rows){const m=new Map();for(const r of rows)if(Number.isFi
 function baseSymbol(s){return s.replace(/[-_]/g,'').replace(/USDT(?:SWAP)?$/,'');}
 async function candlePage(ex,s,int,end,signal,recent=false){
  const b=baseSymbol(s),plan=TimeframeEngine.plan(ex,int),sourceSeconds=duration[plan.source];
- const limit=recent?3*plan.factor+plan.factor:ex==='BITGET'?200:ex==='OKX'?300:ex==='MEXC'?2000:1000;
+ const limit=recent?Math.min(ex==='BITGET'?200:ex==='OKX'?300:1000,120*plan.factor):ex==='BITGET'?200:ex==='OKX'?300:ex==='MEXC'?2000:1000;
  let j,rows;
  switch(ex){
  case 'BINANCE':j=await json('https://fapi.binance.com/fapi/v1/klines',{symbol:b+'USDT',interval:plan.native,limit,endTime:end},signal);rows=j;break;
@@ -516,7 +540,7 @@ async function candlePage(ex,s,int,end,signal,recent=false){
  }
  if(!Array.isArray(rows))throw Error('캔들 응답 형식 오류');
  const normalized=rows.map(candle);if(normalized.some(c=>!c))throw Error(ex+' 캔들 값 또는 시각이 올바르지 않습니다.');
- return TimeframeEngine.aggregate(normalized,int,plan.source);
+ return TimeframeEngine.aggregate(normalized,int,plan.source).map(bar=>({...bar,fetchedAt:Number(j.__marketFetchedAt??Date.now())}));
 }
 async function fundingPage(ex,s,cursor,page,signal){
  const request=FundingEngine.historyRequest(ex,s,cursor,page);
@@ -536,7 +560,7 @@ async function fetchOfficialCycle(ex,s,signal){const b=baseSymbol(s);let hours=n
  return Number.isFinite(hours)&&hours>0?{hours:Math.round(hours*100)/100,note}:null;}
 let fundingSession = null;
 const fundingCards = new Map();
-const FUNDING_QUOTE_MS = 10000, FUNDING_REFRESH_MS = 60000;
+const FUNDING_QUOTE_MS = 10000, CANDLE_REFRESH_MS=3000, FUNDING_REFRESH_MS = 60000;
 
 function fundingSessionActive(session) {
   return Boolean(session) && fundingSession === session && session.id === run && !session.abort.signal.aborted;
@@ -548,6 +572,7 @@ function stopFundingUpdates() {
   if (!fundingSession) return;
   clearInterval(fundingSession.timer);
   clearInterval(fundingSession.quoteTimer);
+  clearInterval(fundingSession.candleTimer);
   fundingSession.abort.abort();
   renderLiveFunding();
   $('fundingUpdateStatus').textContent = '자동 갱신 중지 · 다시 검색하면 재개';
@@ -568,10 +593,11 @@ function buildFundingCards() {
     fundingCards.set(ex, {card, value, note});
   }
 }
-function renderLiveFunding() {
+function renderLiveFunding(full=true) {
   if (!fundingLive) return;
   const session = fundingSession, entry = session?.entries.get(session.ex);
-  fundingLive.setData(FundingEngine.liveSeriesData(all.slice(windowStart, windowEnd), session?.liveRows ?? []));
+  if(full)fundingLive.setData(FundingEngine.liveSeriesData(all.slice(windowStart, windowEnd), session?.liveRows ?? []));
+  else {const first=all[windowStart]?.time,last=all[windowEnd-1]?.time;for(const row of (session?.liveRows??[]).slice(-2)){if(row.time>=first&&row.time<=last&&TimeframeEngine.indexAt(all,row.time,loadedMarket.int)>=0)fundingLive.update({time:row.time,value:row.rate},row.time<last);}}
   const stale = Boolean(entry?.error || session?.abort.signal.aborted);
   fundingLive.applyOptions({color: stale ? '#94a3b8' : '#fbbf24', title: stale ? '이전값' : '현재'});
   studyPanels?.updateFundingLegend();
@@ -614,7 +640,7 @@ function renderFundingBoard() {
     ui.card.title = row?.error ?? (current ? `${current.symbol} · ${current.nextTime ? '정산 예정 ' + date(current.nextTime) : '정산 시각 확인 불가'}${current.hours ? ' · ' + current.hours + '시간 주기' : ''}` : '');
     if (current && !row.error) healthy++;
   }
-  if (!session.abort.signal.aborted) $('fundingUpdateStatus').textContent = `현재값 ${healthy}/6곳 확인 · 현재값·캔들 10초 / 정산 이력 60초마다 요청${session.pending || session.quotePending.size ? ' · 갱신 중' : ''}`;
+  if (!session.abort.signal.aborted) $('fundingUpdateStatus').textContent = `현재값 ${healthy}/6곳 확인 · 현재값 10초 / 캔들 3초 / 정산 이력 60초마다 요청${session.pending || session.quotePending.size ? ' · 갱신 중' : ''}`;
   studyPanels?.updateFundingLegend();
 }
 function startFundingUpdates(ex, symbol, interval, id) {
@@ -624,8 +650,9 @@ function startFundingUpdates(ex, symbol, interval, id) {
   renderLiveFunding(); renderFundingBoard();
   void refreshFundingSession(session);
   session.quoteTimer = setInterval(() => {
-    if (!document.hidden) {void refreshFundingQuotes(session); void refreshFundingCandles(session);}
+    if (!document.hidden) void refreshFundingQuotes(session);
   }, FUNDING_QUOTE_MS);
+  session.candleTimer=setInterval(()=>{if(!document.hidden)void refreshFundingCandles(session);},CANDLE_REFRESH_MS);
   session.timer = setInterval(() => {
     if (!document.hidden) void refreshFundingSession(session);
   }, FUNDING_REFRESH_MS);
@@ -647,31 +674,68 @@ async function refreshFundingQuotes(session) {
       if (ex === session.ex) {
         session.liveRows = FundingEngine.observeCurrent(session.liveRows, quote, duration[session.interval]);
         if (quote.hours) officialCycle = {hours: quote.hours, note: ''};
-        renderLiveFunding();
+        renderLiveFunding(false);
+        updateCurrentCycleWindow();
         if (all.length && all.at(-1).time < session.liveRows.at(-1).time) void refreshFundingCandles(session);
       }
     } catch (error) {
       if (!fundingSessionActive(session)) return;
       session.entries.set(ex, {quote: session.entries.get(ex)?.quote ?? null, error: fundingError(error)});
-      if (ex === session.ex) renderLiveFunding();
+      if (ex === session.ex) renderLiveFunding(false);
     } finally {
       session.quotePending.delete(ex);
       if (fundingSessionActive(session)) renderFundingBoard();
     }
   }));
 }
+function sameRates(a,b){return a.length===b.length&&a.every((row,i)=>row.time===b[i].time&&row.rate===b[i].rate);}
+function renderFundingStudies(){
+ const part=all.slice(windowStart,windowEnd);if(!part.length)return;const {warn,ext}=thresholds();
+ funding?.setData(part.map(c=>{const f=mapped.get(c.time);return f?{time:c.time,value:f.rate,color:f.rate<=ext?'#a855f7':f.rate<=warn?'#ef4444':'#3b82f6'}:{time:c.time};}));
+ renderCycles(part);renderSignalMarkers(part);schedule();
+}
+function updateCurrentCycleWindow(){
+ if(!all.length)return;
+ const part=all.slice(windowStart,windowEnd),period=currentCyclePeriod();if(!period)return;
+ for(const c of part){if(c.time+duration[loadedMarket.int]<=period.start||c.time>=period.end)continue;
+  cycleValues.set(c.time,{hours:period.hours,current:true,source:period.source});
+  if(period.hours<8)cycleFast[lowerBound(all,c.time)]=Math.round(period.hours);
+  settlementCycle?.update({time:c.time,value:period.hours,color:cycleColor(period.hours)},c.time<part.at(-1).time);
+ }updateCycleBadge();schedule();
+}
 function refreshFundingChart(session, recentCandles = []) {
-  if (!fundingSessionActive(session) || !all.length) return;
-  // Range setters are applied by Lightweight Charts on its next drawing frame.
-  if (changingWindow) {requestAnimationFrame(()=>refreshFundingChart(session,recentCandles));return;}
-  const dateView=chartDateFocus?.id===run?captureChartView():null;
-  const visible = chart.timeScale().getVisibleLogicalRange();
-  const absolute = visible ? {from: visible.from + windowStart, to: visible.to + windowStart} : null;
-  all = uniqueSorted([...all, ...recentCandles]);
-  rates = FundingEngine.merge(rates, session.latestRows.filter(row => row.time >= all[0].time));
-  rebuild();
-  if(dateView)restoreChartView(dateView,false);
-  else renderWindow(absolute ? (absolute.from + absolute.to) / 2 : all.length - 1, false, 240, absolute);
+ if(!fundingSessionActive(session)||!all.length)return;
+ if(changingWindow){requestAnimationFrame(()=>refreshFundingChart(session,recentCandles));return;}
+ const view=captureChartView(),previous=all,oldEnd=windowEnd,oldLast=all[oldEnd-1]?.time;
+ const merged=ChartData.mergeLive(all,recentCandles,duration[session.interval]);all=merged.bars;
+ if(!merged.changed.length&&studyPanels?.cacheBars===previous)studyPanels.cacheBars=all;
+ const nextRates=FundingEngine.merge(rates,session.latestRows.filter(row=>row.time>=all[0].time));
+ const rateChanged=!sameRates(rates,nextRates);rates=nextRates;
+ if(rateChanged)rebuild();
+ const tail=oldEnd===previous.length&&merged.changed.every(c=>c.time>=oldLast-duration[session.interval]*125&&(c.time>=oldLast||previous[lowerBound(previous,c.time)]?.time===c.time))&&all.length-windowStart<=WINDOW+200;
+ if(merged.changed.length&&tail){
+   // All pane updates occur synchronously in one browser task, before its next paint.
+   windowEnd=all.length;
+   const liveValues=new Map(session.liveRows.map(row=>[row.time,row.rate])),{warn,ext}=thresholds();
+   for(const c of merged.changed.sort((a,b)=>a.time-b.time)){
+     if(c.time<all[windowStart].time)continue;const historical=c.time<oldLast;
+     candles.update({time:c.time,open:c.open,high:c.high,low:c.low,close:c.close},historical);
+     volume?.update({time:c.time,value:c.volume,color:c.close>=c.open?'#22c55e80':'#ef444480'},historical);
+     const f=mapped.get(c.time);funding?.update(f?{time:c.time,value:f.rate,color:f.rate<=ext?'#a855f7':f.rate<=warn?'#ef4444':'#3b82f6'}:{time:c.time},historical);
+     fundingLive?.update(liveValues.has(c.time)?{time:c.time,value:liveValues.get(c.time)}:{time:c.time},historical);
+     const cycle=liveCycleValue(c);if(cycle)cycleValues.set(c.time,cycle);
+     settlementCycle?.update(cycle?{time:c.time,value:cycle.hours,color:cycleColor(cycle.hours)}:{time:c.time},historical);
+   }
+   const from=lowerBound(all,merged.changed[0].time);
+   studyPanels?.updateLive(merged.changed,previous,from,oldLast);
+   if(cycleFast.length!==all.length){const next=new Uint8Array(all.length);next.set(cycleFast);cycleFast=next;}
+   for(const c of merged.changed){const v=cycleValues.get(c.time);cycleFast[lowerBound(all,c.time)]=v&&v.hours<8?Math.round(v.hours):0;}
+   const appended=all.length-previous.length;
+   if(appended&&view?.followLatest){const scale=chart.timeScale(),range=scale.getVisibleLogicalRange();if(range)scale.setVisibleLogicalRange({from:range.from+appended,to:range.to+appended});}
+   $('historyPosition').max=all.length-1;$('historyInfo').textContent=`${all.length.toLocaleString()}봉 · 화면 구간 ${date(all[windowStart].time)} ~ ${date(all.at(-1).time)}`;
+ }else if(merged.changed.length){rebuild();restoreChartView(view,false);}
+ if(rateChanged)renderFundingStudies();
+ schedule();
 }
 async function refreshFundingCandles(session) {
   if (!fundingSessionActive(session) || !all.length || session.candlesPending) return;
@@ -724,14 +788,54 @@ function captureChartView(){
  const scale=chart.timeScale(),range=scale.getVisibleLogicalRange();if(!range||!all.length)return null;
  const middle=windowStart+(range.from+range.to)/2,index=Math.max(0,Math.min(all.length-1,Math.round(middle)));
  const centerTime=scale.coordinateToTime?.(scale.width?.()/2);
- return {time:Number.isFinite(centerTime)?centerTime:all[index].time,span:range.to-range.from,followLatest:windowStart+range.to>=all.length-1+(latestOffset??5)-1};
+ const time=Number.isFinite(centerTime)?Number(centerTime):all[index].time;
+ const actual=Number.isFinite(centerTime)?Math.min(all.length-1,lowerBound(all,time)):index;
+ return {time,offset:Number.isFinite(centerTime)?middle-Math.round(middle):middle-index,span:range.to-range.from,followLatest:windowEnd===all.length&&range.to>=all.length-1-windowStart+(latestOffset??5)-1};
 }
 async function settleChartView(id){
  await new Promise(resolve=>requestAnimationFrame(resolve));return id===run;
 }
 function restoreChartView(view,focus=true){
- if(!all.length)return;const index=!view||view.followLatest?all.length-1:Math.min(all.length-1,lowerBound(all,view.time)),span=view?.span??240;
- renderWindow(index,focus,span,focus?null:{from:index-span/2,to:index+span/2});
+ if(!all.length)return;const index=!view||view.followLatest?all.length-1:Math.max(0,Math.min(all.length-1,lowerBound(all,view.time))),span=view?.span??240;
+ const center=index+(view?.offset??0);
+ renderWindow(index,focus,span,focus?null:{from:center-span/2,to:center+span/2});
+}
+async function commitHistoryRows(rows,id){
+ if(id!==run||!rows.length)return false;
+ while(changingWindow){if(!await settleChartView(id))return false;}
+ const view=captureChartView(),before=all.length;
+ all=ChartData.mergeHistory(all,rows);if(all.length===before)return false;
+ rebuild();restoreChartView(view,false);await settleChartView(id);return id===run;
+}
+async function requestChartHistory(request){
+ const market=loadedMarket,state=historyState;
+ if(!market||state.id!==run)return;const key=String(request.end);
+ if(state.pending.has(key)||state.exhausted.has(key))return;
+ state.pending.add(key);$('historyLoading').hidden=false;$('historyLoading').textContent='해당 구간 불러오는 중…';
+ const {ex,symbol,int,id}=market,signal=AbortSignal.any([navigationController.signal,AbortSignal.timeout(20000)]);
+ try{
+   const buffered=state.buffer.filter(page=>page[0].time<=request.to&&page.at(-1).time>=request.from)
+     .flatMap(page=>page.filter(c=>c.time>=request.from&&c.time<=request.to&&c.time*1000<=request.end));
+   const rows=buffered.length?uniqueSorted(buffered):await candlePage(ex,symbol,int,request.end,signal,request.direction==='newer');
+   signal.throwIfAborted();if(id!==run)return;
+   const useful=rows.filter(c=>c.time>=request.from&&c.time<=request.to&&c.time*1000<=request.end);
+   if(!await commitHistoryRows(useful,id)){state.exhausted.add(key);if(!useful.length)status('이 구간의 추가 캔들 기록을 거래소가 제공하지 않습니다.');return;}
+   // Fetch the corresponding settlements as well; prices do not wait for them.
+   const cursor=ex==='BINANCE'?useful[0].time*1000:useful.at(-1).time*1000+duration[int]*1000;
+   try{const history=await fundingPage(ex,symbol,cursor,1,signal);signal.throwIfAborted();if(id!==run)return;
+     const merged=FundingEngine.merge(rates,history.filter(r=>r.time>=useful[0].time-duration[int]&&r.time<=useful.at(-1).time+duration[int]));
+     if(!sameRates(rates,merged)){rates=merged;rebuild();renderFundingStudies();}
+   }catch(error){if(error.name!=='AbortError'&&id===run)status('캔들 이동 완료 · 해당 구간 정산 이력 조회 실패: '+fundingError(error),true);}
+ }catch(error){if(error.name!=='AbortError'&&id===run){status('과거 구간 조회 실패: '+fundingError(error),true);state.exhausted.add(key);setTimeout(()=>state.exhausted.delete(key),15000);}}
+ finally{state.pending.delete(key);if(id===run){$('historyLoading').hidden=!state.pending.size;scheduleVisibleHistory();}}
+}
+function scheduleVisibleHistory(){
+ clearTimeout(navTimer);navTimer=setTimeout(()=>{
+   if(changingWindow||!all.length)return;const range=chart.timeScale().getVisibleLogicalRange();if(!range)return;
+   const absolute={from:range.from+windowStart,to:range.to+windowStart},middle=(absolute.from+absolute.to)/2;
+   if(((range.from<80&&windowStart>0)||(range.to>windowEnd-windowStart-80&&windowEnd<all.length))&&windowStartFor(middle)!==windowStart){renderWindow(middle,false,240,absolute);return;}
+   for(const request of ChartData.historyRequests(all,absolute,duration[loadedMarket.int]))void requestChartHistory(request);
+ },180);
 }
 async function jumpToChartDate(target,signal){
  if(!loadedMarket)throw Error('먼저 코인과 거래소를 선택하세요.');
@@ -759,22 +863,22 @@ async function jumpToChartDate(target,signal){
 }
 
 async function loadData(){try{thresholds();}catch(e){return status(e.message,true);}const symbol=$('symbolInput').value.trim().toUpperCase();if(!/^[A-Z0-9_-]+$/.test(symbol))return status('유효한 심볼을 입력하세요.',true);
- chartDateFocus=null;dateNavigation?.cancel();navigationController?.abort();navigationController=new AbortController();controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;loadedMarket={ex,symbol,int,id};chartSymbolLabel.textContent=FundingEngine.contract(ex,symbol);chartSymbolLabel.title=ex+' · '+chartSymbolLabel.textContent+' · '+$('intervalSelect').selectedOptions[0].text;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
+ chartDateFocus=null;dateNavigation?.cancel();navigationController?.abort();navigationController=new AbortController();controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;loadedMarket={ex,symbol,int,id};historyState={id,buffer:[],pending:new Set(),exhausted:new Set()};$('historyLoading').hidden=true;chartSymbolLabel.textContent=FundingEngine.contract(ex,symbol);chartSymbolLabel.title=ex+' · '+chartSymbolLabel.textContent+' · '+$('intervalSelect').selectedOptions[0].text;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
  $('coverage').textContent='선택 거래소 USDT 무기한 선물 · 제공 가능한 이력 끝까지 수집 · 과거 구간은 날짜로 이동(Alt+G) 또는 하단 슬라이더로 이동 · 전체 이력은 계속 수집';
  status(`${ex} ${symbol} · 과거 이력 수집 시작`);startFundingUpdates(ex,symbol,int,id);
- let candleEnd=Date.now(),chunks=[],count=0,candleNote='',fundNote='';
- try{for(;;){const rows=uniqueSorted(await candlePage(ex,symbol,int,candleEnd,signal)).filter(c=>c.time*1000<=candleEnd);if(!rows.length){candleNote='API 이력 끝';break;}chunks.push(rows);count+=rows.length;status(`${ex} ${symbol} · 캔들 ${count.toLocaleString()}봉 수집 중`);if(chunks.length===1){all=rows;renderWindow(all.length-1);}const next=rows[0].time*1000-1;if(next>=candleEnd){candleNote='API 페이지 진행 불가';break;}candleEnd=next;if(candleEnd<=0){candleNote='이력 끝';break;}await pause(ex==='BINGX'?1150:350,signal);}
+ let candleEnd=Date.now(),chunks=[],count=0,candleNote='',fundNote='';historyState.buffer=chunks;
+ try{for(;;){const rows=uniqueSorted(await candlePage(ex,symbol,int,candleEnd,signal)).filter(c=>c.time*1000<=candleEnd);if(!rows.length){candleNote='API 이력 끝';break;}chunks.push(rows);count+=rows.length;status(`${ex} ${symbol} · 캔들 ${count.toLocaleString()}봉 수집 중`);if(chunks.length===1){const view=chartDateFocus?.id===run?captureChartView():null;all=ChartData.mergeHistory(all,rows);rates=FundingEngine.merge(rates,(fundingSession?.latestRows??[]).filter(f=>f.time>=all[0].time));rebuild();if(view)restoreChartView(view,false);else renderWindow(all.length-1);}else if(!changingWindow){const range=chart.timeScale().getVisibleLogicalRange();if(range&&windowStart+range.from<80&&rows.at(-1).time>=all[0].time-duration[int])await commitHistoryRows(rows,id);}const next=rows[0].time*1000-1;if(next>=candleEnd){candleNote='API 페이지 진행 불가';break;}candleEnd=next;if(candleEnd<=0){candleNote='이력 끝';break;}await pause(ex==='BINGX'?1150:350,signal);}
  }catch(e){candleNote=e.name==='AbortError'?'사용자 중지':e.message;}
- if(id!==run)return;const collectedView=captureChartView();all=uniqueSorted([...chunks.flat(),...all,...(fundingSession?.recentCandles??[])]);if(!all.length){busy=false;renderFundingBoard();return status(`${ex}: ${candleNote||'해당 심볼 데이터 없음'}`,true);}restoreChartView(collectedView);if(!await settleChartView(id))return;
+ if(id!==run)return;const collectedView=captureChartView();all=ChartData.mergeHistory(all,chunks.flat());if(!all.length){busy=false;renderFundingBoard();return status(`${ex}: ${candleNote||'해당 심볼 데이터 없음'}`,true);}rebuild();restoreChartView(collectedView,false);if(!await settleChartView(id))return;
  if(!signal.aborted){let cursor=ex==='BINANCE'?all[0].time*1000:Date.now(),parts=[],previous=-1;
  try{for(let page=1;;page++){const rows=await fundingPage(ex,symbol,cursor,page,signal);if(!rows.length){fundNote='API 이력 끝';break;}const useful=rows.filter(f=>f.time>=all[0].time);parts.push(useful);status(`${ex} · ${all.length.toLocaleString()}봉 / 펀딩비 ${parts.reduce((n,a)=>n+a.length,0).toLocaleString()}건 수집 중`);
  const edge=ex==='BINANCE'?rows.at(-1).time:rows[0].time;if(edge===previous){fundNote='API 페이지 반복: 제공 범위까지만 표시';break;}previous=edge;cursor=ex==='BINANCE'?edge*1000+1:edge*1000-1;if((ex==='BINANCE'&&cursor>=Date.now())||(ex!=='BINANCE'&&edge<=all[0].time)){fundNote='캔들 구간 수집 완료';break;}await pause(ex==='BINGX'?1150:350,signal);}
  }catch(e){fundNote=e.name==='AbortError'?'사용자 중지':e.message;}rates=FundingEngine.merge(uniqueSorted(parts.flat()),rates);}
- if(id!==run)return;rates=FundingEngine.merge(rates,(fundingSession?.latestRows??[]).filter(f=>f.time>=all[0].time));try{officialCycle=await fetchOfficialCycle(ex,symbol,signal);}catch{officialCycle=null;}try{otherCycles=await fetchAllCycles(symbol,signal);}catch{otherCycles=[];}if(id!==run)return;const fundingView=captureChartView();rebuild();restoreChartView(fundingView);busy=false;renderFundingBoard();
+ if(id!==run)return;rates=FundingEngine.merge(rates,(fundingSession?.latestRows??[]).filter(f=>f.time>=all[0].time));try{officialCycle=await fetchOfficialCycle(ex,symbol,signal);}catch{}try{otherCycles=await fetchAllCycles(symbol,signal);}catch{}if(id!==run)return;const fundingView=captureChartView();rebuild();restoreChartView(fundingView,false);busy=false;renderFundingBoard();
  $('coverage').textContent=`캔들: ${date(all[0].time)} ~ ${date(all.at(-1).time)} (${candleNote}) · 펀딩비: ${rates.length?date(rates[0].time)+' ~ '+date(rates.at(-1).time):'확인된 기록 없음'} (${fundNote||'미수집'}) · 선택 거래소의 정산 기록(봉 내 최저율) · 노란선: 페이지에서 관측한 현재 미정산율 · 막대: 정산 기록 · 기록 없는 구간은 공백${unmappedFunding.length?' · 캔들 미연결 '+unmappedFunding.length+'건':''}. ${ex==='OKX'?'OKX 펀딩비 API는 최근 3개월 제공. ':''}${ex==='MEXC'?'거래량 단위: 계약 수. ':'거래량 단위: 기초자산. '}`;
  status(`${ex} ${symbol} · ${all.length.toLocaleString()}봉 / 펀딩비 ${rates.length.toLocaleString()}건`,!rates.length);
 }
-$('searchBtn').onclick=loadData;$('symbolInput').onkeydown=e=>{if(e.key==='Enter')loadData();};$('stopBtn').onclick=()=>{dateNavigation?.cancel();controller?.abort();stopFundingUpdates();};
+$('searchBtn').onclick=loadData;$('symbolInput').onkeydown=e=>{if(e.key==='Enter')loadData();};$('stopBtn').onclick=()=>{controller?.abort();status('과거 전체 수집 중지 · 실시간 갱신과 이동한 구간 조회는 계속됩니다.');};
 $('oldestBtn').onclick=()=>{chartDateFocus=null;renderWindow(0);};$('latestBtn').onclick=()=>{chartDateFocus=null;renderWindow(all.length-1);};
 let sliderTimer;$('historyPosition').oninput=()=>{chartDateFocus=null;clearTimeout(sliderTimer);sliderTimer=setTimeout(()=>renderWindow(+$('historyPosition').value),100);};
 $('btnToggleLines').onclick=function(){showLines=!showLines;this.classList.toggle('active',showLines);schedule();};
