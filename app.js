@@ -709,6 +709,12 @@ function refreshFundingChart(session, recentCandles = []) {
  const rateChanged=!sameRates(rates,nextRates);rates=nextRates;
  if(rateChanged)rebuild();
  if(cycleFast.length!==all.length){const next=new Uint8Array(all.length);next.set(cycleFast.subarray(0,all.length));cycleFast=next;}
+ // Keep the study cache current even while the user is looking at the past.
+ // Returning to the latest bars can then render immediately, without waiting for another quote.
+ if(merged.changed.length){
+   if(studyPanels?.cache)studyPanels.ensureCache(previous,lowerBound(all,merged.changed[0].time));
+   for(const c of merged.changed){const cycle=liveCycleValue(c);if(cycle)cycleValues.set(c.time,cycle);cycleFast[lowerBound(all,c.time)]=cycle&&cycle.hours<8?Math.round(cycle.hours):0;}
+ }
  const visibleChanged=merged.changed.some(c=>c.time>=all[windowStart].time&&c.time<=oldLast);
  const tail=oldEnd===previous.length&&merged.changed.every(c=>c.time>=oldLast-duration[session.interval]*125&&(c.time>=oldLast||previous[lowerBound(previous,c.time)]?.time===c.time))&&all.length-windowStart<=WINDOW+200;
  if(merged.changed.length&&tail){
