@@ -19,7 +19,7 @@ function panelHarness() {
     manualPriceSpans: new WeakMap()
   };
   vm.createContext(context);
-  vm.runInContext(options + '\nlet funding=null,fundingLive=null;\n' + fs.readFileSync(path.join(__dirname, '../indicators.js'), 'utf8') + '\nthis.managerClass=StudyPanelManager;this.series=()=>({funding,fundingLive});this.options=fundingLiveOptions;', context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../timeframes.js'), 'utf8') + '\n' + options + '\nlet funding=null,fundingLive=null;\n' + fs.readFileSync(path.join(__dirname, '../indicators.js'), 'utf8') + '\nthis.managerClass=StudyPanelManager;this.series=()=>({funding,fundingLive});this.options=fundingLiveOptions;', context);
   const manager = Object.create(context.managerClass.prototype);
   manager.panels = new Map([['funding', {id: 'funding', title: '펀딩비 (%)', members: [], active: false, hidden: false, stretch: 2.5}]]);
   manager.settings = {};

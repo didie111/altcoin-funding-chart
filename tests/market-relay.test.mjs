@@ -12,6 +12,22 @@ function request(exchange = 'BINGX', path = '/openApi/swap/v2/quote/premiumIndex
   return new Request('https://relay.test/api/market?' + new URLSearchParams({exchange, path, ...params}), options);
 }
 
+test('new chart intervals pass the relay allowlist while invented interval names remain blocked', async () => {
+  const calls=[];
+  const relay=createMarketRelay({now:()=>stamp,wait:async()=>{},fetch:async url=>{calls.push(new URL(url));return reply({code:0,data:[]});}});
+  for(const interval of ['1m','3m','5m','15m','30m','1h','2h','4h','1d']){
+    assert.equal((await relay.handle(request('BINGX','/openApi/swap/v3/quote/klines',{symbol:'BTC-USDT',interval,limit:'1000',endTime:String(stamp)}))).status,200);
+    assert.equal(calls.at(-1).searchParams.get('interval'),interval);
+  }
+  for(const interval of ['Min1','Min5','Min15','Min30','Min60','Hour4','Day1']){
+    assert.equal((await relay.handle(request('MEXC','/api/v1/contract/kline/BTC_USDT',{interval,start:'1000',end:'2000'}))).status,200);
+    assert.equal(calls.at(-1).searchParams.get('interval'),interval);
+  }
+  const count=calls.length;
+  for(const interval of ['Min3','Hour2','bad','1m&url=attacker'])assert.equal((await relay.handle(request('MEXC','/api/v1/contract/kline/BTC_USDT',{interval}))).status,400);
+  assert.equal(calls.length,count);
+});
+
 test('official current rates preserve decimal values and never forward Origin, cookies or credentials upstream', async () => {
   const calls = [];
   const relay = createMarketRelay({now: () => stamp, fetch: async (url, options) => {

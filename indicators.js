@@ -21,7 +21,7 @@ const RsiEngine = (() => {
     showFill: true,
     showBull: true,
     showBear: true,
-    timeframes: ['15m', '1h', '4h', '1d'],
+    timeframes: Object.keys(TimeframeEngine.seconds),
     alerts: false
   };
 
@@ -674,7 +674,7 @@ class StudyPanelManager {
       }]
     ]);
 
-    this.order = ['price', 'volume', 'funding', 'cycle', 'rsi'];
+    this.order = ['price', 'volume', 'funding', 'rsi', 'cycle'];
     this.maximized = null;
     this.cache = null;
     this.cacheBars = null;
@@ -689,7 +689,9 @@ class StudyPanelManager {
       saved = JSON.parse(localStorage.getItem(this.storageKey));
 
       if (saved?.rsi) {
-        this.settings = RsiEngine.normalize(saved.rsi);
+        const settings={...saved.rsi};
+        if(!saved.navigationVersion && Array.isArray(settings.timeframes) && ['15m','1h','4h','1d'].every(v=>settings.timeframes.includes(v))) settings.timeframes=Object.keys(TimeframeEngine.seconds);
+        this.settings = RsiEngine.normalize(settings);
       }
     } catch {}
 
@@ -723,6 +725,11 @@ class StudyPanelManager {
           ])
         ];
       }
+    }
+
+    if(!saved?.navigationVersion && this.panels.get('rsi').active){
+      this.order=this.order.filter(id=>id!=='rsi');
+      this.order.splice(Math.min(3,this.order.length),0,'rsi');
     }
 
     this.layer = document.createElement('div');
@@ -1848,6 +1855,7 @@ class StudyPanelManager {
       localStorage.setItem(
         this.storageKey,
         JSON.stringify({
+          navigationVersion: 1,
           order: this.order,
           panels,
           rsi: this.settings
