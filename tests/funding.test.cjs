@@ -151,7 +151,7 @@ function harness(options = {}) {
     if (!nodes.has(id)) nodes.set(id, {textContent: '', disabled: false, title: ''});
     return nodes.get(id);
   };
-  const requests = [], renders = [], timers = [], updates=[], rangeUpdates=[], live = {data: [], options: {}};
+  const requests = [], renders = [], timers = [], updates=[], rangeUpdates=[], cacheUpdates=[],live = {data: [], options: {}};
   const fixture=(row)=>({open:10,high:Math.max(11,row.close??10),low:9,close:10,volume:5,...row});
   const updateSeries=name=>({update:row=>updates.push({name,row}),setData:()=>{}});
   const liveUpdate=row=>{const index=live.data.findIndex(bar=>bar.time===row.time);if(index>=0)live.data[index]=row;else live.data.push(row);};
@@ -167,7 +167,7 @@ function harness(options = {}) {
     duration: {'1h': 3600}, windowStart: 0, windowEnd: 2, officialCycle: null,
     candles:updateSeries('price'),volume:updateSeries('volume'),funding:updateSeries('funding'),settlementCycle:updateSeries('cycle'),liveCycleValue:()=>null,currentCyclePeriod:()=>null,cycleColor:()=>'',thresholds:()=>({warn:-.5,ext:-2}),renderCycles:()=>{},renderSignalMarkers:()=>{},
     fundingLive: {update:liveUpdate,setData: rows => {live.data = rows;}, applyOptions: value => {Object.assign(live.options, value);}},
-    studyPanels: {updateFundingLegend: () => {},updateLive:rows=>updates.push({name:'rsi',rows})}, schedule: () => {},
+    studyPanels: {cache:{},ensureCache:(previous,from)=>cacheUpdates.push({previous,from}),updateFundingLegend: () => {},updateLive:rows=>updates.push({name:'rsi',rows})}, schedule: () => {},
     chart: {timeScale: () => ({getVisibleLogicalRange: () => ({from: -10, to: 10}),setVisibleLogicalRange:r=>rangeUpdates.push(r)})},
     json: async (url, params, signal) => {
       requests.push({url, params, signal});
@@ -188,7 +188,7 @@ function harness(options = {}) {
   };
   vm.createContext(context);
   vm.runInContext(snippet + '\nthis.api={startFundingUpdates,stopFundingUpdates,refreshFundingSession,refreshFundingQuotes,renderFundingBoard,fundingLegend,getSession:()=>fundingSession};', context);
-  return {context, nodes, requests, renders, timers, live, updates,rangeUpdates,api: context.api};
+  return {context, nodes, requests, renders, timers, live, updates,rangeUpdates,cacheUpdates,api: context.api};
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 test('live value is shown during backfill and is kept separate from settled rates', async () => {
@@ -337,8 +337,9 @@ test('switching a market disposes all three timers including the fast candle tim
 
 test('a live candle outside a historical render window does not redraw that window or move its date',async()=>{
  const h=harness();h.api.startFundingUpdates('MEXC','KAIA','1h',1);await flush();
- h.context.windowEnd=1;h.context.chartDateFocus={id:1,time:settle/1000,span:180};
+ h.context.windowEnd=1;h.context.liveCycleValue=()=>({hours:8,current:true});h.context.chartDateFocus={id:1,time:settle/1000,span:180};
  h.context.refreshFundingChart(h.api.getSession(),[{time:now/1000+3600,open:10,high:12,low:9,close:11,volume:25}]);
  assert.equal(h.renders.length,0);assert.equal(h.rangeUpdates.length,0);assert.equal(h.context.windowEnd,1);
  assert.equal(h.context.chartDateFocus.time,settle/1000);assert.equal(h.context.all.at(-1).close,11);
+ assert.equal(h.cacheUpdates.length,1);assert.equal(h.context.cycleValues.get(now/1000+3600).hours,8);
 });
