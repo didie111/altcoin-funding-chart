@@ -159,7 +159,7 @@ function harness(options = {}) {
     setInterval: (callback, ms) => {const timer = {callback, ms, stopped: false}; timers.push(timer); return timer;},
     clearInterval: timer => {if (timer) timer.stopped = true;},
     date: t => new Date(t * 1000).toISOString(),
-    run: 1, busy: options.busy ?? true, all: [{time: settle / 1000}, {time: now / 1000}],
+    run: 1, busy: options.busy ?? true, changingWindow: false, requestAnimationFrame: callback=>{timers.push({callback,frame:true});}, all: [{time: settle / 1000}, {time: now / 1000}],
     rates: [{time: settle / 1000, rate: .01}], unmappedFunding: [],
     duration: {'1h': 3600}, windowStart: 0, windowEnd: 2, officialCycle: null,
     fundingLive: {setData: rows => {live.data = rows;}, applyOptions: value => {Object.assign(live.options, value);}},
@@ -295,4 +295,15 @@ test('current candles keep updating while historical backfill is still in progre
   assert.equal(h.api.getSession().recentCandles.at(-1).close, 12);
   assert.equal(h.live.data.at(-1).value, -2);
   assert.ok(h.renders.every(render => render[1] === false));
+});
+
+test('a live refresh waits for a pending date navigation frame instead of preserving obsolete logical indices',async()=>{
+  const h=harness();h.api.startFundingUpdates('BITGET','KAIA','1h',1);await flush();
+  const count=h.renders.length;h.context.changingWindow=true;
+  h.context.refreshFundingChart(h.api.getSession(),[{time:now/1000,close:99}]);
+  assert.equal(h.renders.length,count);
+  assert.notEqual(h.context.all.at(-1).close,99);
+  const frame=h.timers.find(t=>t.frame);assert.ok(frame);
+  h.context.changingWindow=false;frame.callback();
+  assert.equal(h.renders.length,count+1);assert.equal(h.context.all.at(-1).close,99);
 });
