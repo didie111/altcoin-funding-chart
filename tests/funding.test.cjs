@@ -118,7 +118,7 @@ test('BingX history uses bounded start/end windows that keep moving backward thr
 test('MEXC current, historical, candle and cycle requests work only through the replacement official API domain', async () => {
   const requests = [];
   const context = {
-    FundingEngine: engine, duration: {'15m': 900},
+    FundingEngine: engine, TimeframeEngine: require('../timeframes.js'), duration: {'15m': 900}, candle: require('../market-api.js').candle,
     json: async (url, params) => {
       const request = new URL(url); requests.push({request, params});
       if (request.origin !== 'https://api.mexc.com') throw Error('Retired domain is unavailable');

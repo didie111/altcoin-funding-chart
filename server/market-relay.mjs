@@ -4,8 +4,8 @@ const BINGX_PRIMARY = 'https://open-api.bingx.com';
 const BINGX_BACKUP = 'https://open-api.bingx.pro';
 const MEXC_PRIMARY = 'https://api.mexc.com';
 const bingxPaths = new Set(['/openApi/swap/v2/quote/premiumIndex', '/openApi/swap/v2/quote/fundingRate', '/openApi/swap/v3/quote/klines']);
-const intervals = new Set(['15m', '1h', '4h', '1d']);
-const mexcIntervals = new Set(['Min15', 'Min60', 'Hour4', 'Day1']);
+const intervals = new Set(['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']);
+const mexcIntervals = new Set(['Min1', 'Min5', 'Min15', 'Min30', 'Min60', 'Hour4', 'Day1']);
 
 function pause(ms, signal) {
   return new Promise((resolve, reject) => {
