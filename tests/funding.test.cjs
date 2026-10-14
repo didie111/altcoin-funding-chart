@@ -334,3 +334,11 @@ test('switching a market disposes all three timers including the fast candle tim
  h.context.run=2;h.api.startFundingUpdates('MEXC','BTC','1h',2);await flush();
  assert.equal(previous.length,3);assert.ok(previous.every(timer=>timer.stopped));
 });
+
+test('a live candle outside a historical render window does not redraw that window or move its date',async()=>{
+ const h=harness();h.api.startFundingUpdates('MEXC','KAIA','1h',1);await flush();
+ h.context.windowEnd=1;h.context.chartDateFocus={id:1,time:settle/1000,span:180};
+ h.context.refreshFundingChart(h.api.getSession(),[{time:now/1000+3600,open:10,high:12,low:9,close:11,volume:25}]);
+ assert.equal(h.renders.length,0);assert.equal(h.rangeUpdates.length,0);assert.equal(h.context.windowEnd,1);
+ assert.equal(h.context.chartDateFocus.time,settle/1000);assert.equal(h.context.all.at(-1).close,11);
+});
