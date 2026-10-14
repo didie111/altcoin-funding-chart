@@ -349,13 +349,9 @@ function placeChartNavigation(){
   const layout = getPaneLayout().filter(p => p.height > 1);
   if (!layout.length) return;
   const bottom = layout.reduce((a, b) => (b.bottom > a.bottom ? b : a)).bottom;
-  // 최신 차트 기준 위치에서 벗어나 이동했을 때만 버튼 5개(- + < > R) 표시
   const range = chart.timeScale().getVisibleLogicalRange();
-  const lastRel = all.length - 1 - windowStart;
-  const atLatest = !all.length || !range || latestOffset === null ||
-    (windowEnd === all.length && Math.abs(range.to - lastRel - latestOffset) <= 2);
   const hovered=hoverPoint!==null || Boolean(chartNavigation.querySelector(':focus-visible'));
-  setStyle(chartNavigation, 'display', !hovered || atLatest ? 'none' : 'flex');
+  setStyle(chartNavigation, 'display', all.length&&range&&hovered ? 'flex' : 'none');
   setStyle(chartNavigation, 'left', Math.max(8, chart.timeScale().width() - 8) + 'px');
   setStyle(chartNavigation, 'top', Math.max(4, bottom - 32) + 'px');
 }
@@ -712,6 +708,8 @@ function refreshFundingChart(session, recentCandles = []) {
  const nextRates=FundingEngine.merge(rates,session.latestRows.filter(row=>row.time>=all[0].time));
  const rateChanged=!sameRates(rates,nextRates);rates=nextRates;
  if(rateChanged)rebuild();
+ if(cycleFast.length!==all.length){const next=new Uint8Array(all.length);next.set(cycleFast.subarray(0,all.length));cycleFast=next;}
+ const visibleChanged=merged.changed.some(c=>c.time>=all[windowStart].time&&c.time<=oldLast);
  const tail=oldEnd===previous.length&&merged.changed.every(c=>c.time>=oldLast-duration[session.interval]*125&&(c.time>=oldLast||previous[lowerBound(previous,c.time)]?.time===c.time))&&all.length-windowStart<=WINDOW+200;
  if(merged.changed.length&&tail){
    // All pane updates occur synchronously in one browser task, before its next paint.
@@ -733,7 +731,7 @@ function refreshFundingChart(session, recentCandles = []) {
    const appended=all.length-previous.length;
    if(appended&&view?.followLatest){const scale=chart.timeScale(),range=scale.getVisibleLogicalRange();if(range)scale.setVisibleLogicalRange({from:range.from+appended,to:range.to+appended});}
    $('historyPosition').max=all.length-1;$('historyInfo').textContent=`${all.length.toLocaleString()}봉 · 화면 구간 ${date(all[windowStart].time)} ~ ${date(all.at(-1).time)}`;
- }else if(merged.changed.length){rebuild();restoreChartView(view,false);}
+ }else if(merged.changed.length&&visibleChanged){rebuild();restoreChartView(view,false);}
  if(rateChanged)renderFundingStudies();
  schedule();
 }
