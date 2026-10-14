@@ -90,7 +90,7 @@ test('Bitget history 2h uses supported 1H candles; Bybit and OKX 2h use their na
 
 function navigationHarness(){
   const app=fs.readFileSync(path.join(__dirname,'../app.js'),'utf8');
-  const renders=[],context={all:Array.from({length:100},(_,i)=>bar(stamp+i*60)),windowStart:0,latestOffset:5,
+  const renders=[],context={all:Array.from({length:100},(_,i)=>bar(stamp+i*60)),windowStart:0,latestOffset:5,chartDateFocus:null,run:1,
     chart:{timeScale:()=>({getVisibleLogicalRange:()=>({from:10,to:30})})},renderWindow:(...args)=>renders.push(args),lowerBound:(a,t)=>a.findIndex(b=>b.time>=t)};
   vm.createContext(context);vm.runInContext(app.slice(app.indexOf('function captureChartView()'),app.indexOf('async function jumpToChartDate(')),context);
   return {context,renders};
@@ -124,4 +124,18 @@ test('history completion waits for deferred chart range changes before capturing
   assert.equal(context.nextView,undefined);
   applyRange();frame();await pending;
   assert.equal(context.nextView.time,stamp+20*60);
+});
+
+test('a chosen date remains the anchor across delayed SDK indices and both history completion renders',()=>{
+  const h=navigationHarness();h.context.chartDateFocus={id:1,time:stamp+20*60,span:180};
+  h.context.chart={timeScale:()=>({getVisibleLogicalRange:()=>({from:1000,to:1180})})};
+  h.context.all=[...Array.from({length:200},(_,i)=>bar(stamp-(200-i)*60)),...h.context.all];
+  for(let pass=0;pass<2;pass++){
+    const view=h.context.captureChartView();assert.equal(view.time,stamp+20*60);h.context.restoreChartView(view);
+  }
+  assert.deepEqual(h.renders.map(row=>row[0]),[220,220]);
+});
+test('after manual navigation, view capture uses the timestamp actually drawn at screen center',()=>{
+  const h=navigationHarness();h.context.chart={timeScale:()=>({width:()=>1000,coordinateToTime:x=>{assert.equal(x,500);return stamp+55*60;},getVisibleLogicalRange:()=>({from:10,to:30})})};
+  assert.equal(h.context.captureChartView().time,stamp+55*60);
 });
