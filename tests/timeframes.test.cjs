@@ -102,3 +102,26 @@ test('finishing background history keeps a date-centered view after older bars c
   h.context.restoreChartView(view);
   assert.equal(h.renders[0][0],220);assert.equal(h.renders[0][2],20);
 });
+
+test('history completion waits for deferred chart range changes before capturing its date again',async()=>{
+  const app=fs.readFileSync(path.join(__dirname,'../app.js'),'utf8'),h=navigationHarness();
+  let applyRange,frame;
+  const context=h.context;
+  context.id=context.run=1;context.signal=new AbortController().signal;
+  context.chunks=[Array.from({length:200},(_,i)=>bar(stamp-(200-i)*60))];
+  context.fundingSession=null;context.busy=true;context.uniqueSorted=engine.sorted;
+  context.requestAnimationFrame=callback=>{frame=callback;};
+  context.renderWindow=(index,focus,span)=>{
+    // Lightweight Charts defers setVisibleLogicalRange until its drawing frame.
+    context.windowStart=index-50;
+    context.chart={timeScale:()=>({getVisibleLogicalRange:()=>({from:170,to:190})})};
+    applyRange=()=>{context.chart={timeScale:()=>({getVisibleLogicalRange:()=>({from:40,to:60})})};};
+  };
+  const begin=app.indexOf('if(id!==run)return;const collectedView=captureChartView();');
+  const end=app.indexOf(' if(!signal.aborted)',begin);
+  vm.runInContext('this.finish=async()=>{'+app.slice(begin,end)+';this.nextView=captureChartView();};',context);
+  const pending=context.finish();
+  assert.equal(context.nextView,undefined);
+  applyRange();frame();await pending;
+  assert.equal(context.nextView.time,stamp+20*60);
+});
