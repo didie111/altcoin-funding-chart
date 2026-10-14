@@ -27,7 +27,7 @@ function wheelHarness() {
       style: {}
     },
     getPaneInfoAtY: y => panes.find(pane => y >= pane.top && y < pane.bottom),
-    rulerEnabled: false, shiftHeld: false, rulerDragging: false,
+    rulerEnabled: false, shiftHeld: false, rulerDragging: false, chartDateFocus: null,
     holdPriceAxisWidth: () => {},
     zoomPanePrice: (pane, y, factor) => priceChanges.push({pane: pane.series.name, y, factor}),
     requestAnimationFrame: callback => {frames.set(++frameId, callback); return frameId;},

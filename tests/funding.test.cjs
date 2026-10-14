@@ -159,7 +159,7 @@ function harness(options = {}) {
     setInterval: (callback, ms) => {const timer = {callback, ms, stopped: false}; timers.push(timer); return timer;},
     clearInterval: timer => {if (timer) timer.stopped = true;},
     date: t => new Date(t * 1000).toISOString(),
-    run: 1, busy: options.busy ?? true, changingWindow: false, requestAnimationFrame: callback=>{timers.push({callback,frame:true});}, all: [{time: settle / 1000}, {time: now / 1000}],
+    run: 1, chartDateFocus: null, busy: options.busy ?? true, changingWindow: false, requestAnimationFrame: callback=>{timers.push({callback,frame:true});}, all: [{time: settle / 1000}, {time: now / 1000}],
     rates: [{time: settle / 1000, rate: .01}], unmappedFunding: [],
     duration: {'1h': 3600}, windowStart: 0, windowEnd: 2, officialCycle: null,
     fundingLive: {setData: rows => {live.data = rows;}, applyOptions: value => {Object.assign(live.options, value);}},
@@ -306,4 +306,13 @@ test('a live refresh waits for a pending date navigation frame instead of preser
   const frame=h.timers.find(t=>t.frame);assert.ok(frame);
   h.context.changingWindow=false;frame.callback();
   assert.equal(h.renders.length,count+1);assert.equal(h.context.all.at(-1).close,99);
+});
+
+test('live candle refresh retains the selected date while leaving manual price scales intact',async()=>{
+  const h=harness();h.api.startFundingUpdates('BITGET','KAIA','1h',1);await flush();
+  h.context.chartDateFocus={id:1,time:settle/1000,span:180};
+  h.context.refreshFundingChart(h.api.getSession(),[{time:now/1000+3600,close:100}]);
+  const latest=h.renders.at(-1);
+  assert.equal(latest[0],0);assert.equal(latest[1],false);assert.equal(latest[2],180);
+  assert.equal(latest[3].from,-90);assert.equal(latest[3].to,90);
 });

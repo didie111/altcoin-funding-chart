@@ -57,7 +57,7 @@ const markers=LC.createSeriesMarkers(candles,[]);
 let all=[],rates=[],signals=[],mapped=new Map(),unmappedFunding=[],controller,run=0,windowStart=0,windowEnd=0,showLines=true,busy=false,selectedSignal=null,changingWindow=false;
 let selectedGuideVisible=false, selectedGuideTimer, selectedCountdownTimer, selectedGuideDeadline=0;
 const WINDOW=10000, duration=TimeframeEngine.seconds;
-let dateNavigation=null, navigationController=null, loadedMarket=null;
+let dateNavigation=null, navigationController=null, loadedMarket=null, chartDateFocus=null;
 let paneScaleSeries=[candles,volume,funding,settlementCycle];
 let studyPanels=null;
 const overlay=document.createElement('canvas');overlay.style.cssText='position:absolute;inset:0;pointer-events:none;z-index:4';$('unified-chart').append(overlay);
@@ -98,6 +98,11 @@ document.addEventListener('keydown',e=>{if(typingTarget(e.target))return;if(e.ke
 document.addEventListener('keyup',e=>{if(e.key==='Shift'){shiftHeld=false;rulerInteraction();}});
 window.addEventListener('blur',()=>{shiftHeld=false;if(rulerDragging){endRulerDrag();rulerLocked=true;}rulerInteraction();});
 const rulerHost=$('unified-chart');
+// A chosen date remains stable during backfill until the user navigates the chart.
+rulerHost.addEventListener('pointerdown',event=>{
+ if(event.button!==0||rulerEnabled||event.shiftKey||event.target.closest?.('[data-panel-ui],[data-chart-nav],[data-chart-identity],[data-chart-fullscreen],[data-pane-scale]'))return;
+ if(event.clientX-rulerHost.getBoundingClientRect().left<chart.timeScale().width())chartDateFocus=null;
+});
 // Keep the symbol tied to the chart being loaded, rather than an unsubmitted input edit.
 const chartIdentityControls=$('chartIdentityControls');
 const chartSymbolLabel=$('chartSymbolLabel');
@@ -249,7 +254,7 @@ rulerHost.addEventListener('wheel', e => {
   }
   // Let Lightweight Charts keep the candle under the pointer fixed while zooming time.
   // Do not set a manual price range when the wheel is over the chart plot.
-  if (x < chart.timeScale().width()) return;
+  if (x < chart.timeScale().width()) {chartDateFocus=null;return;}
   e.preventDefault();
   e.stopImmediatePropagation();
   const delta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? pane.height : 1);
@@ -313,7 +318,7 @@ function moveChartRange(range){if(!all.length)return;const absolute={from:range.
  {const hv=String(Math.max(0,Math.min(all.length-1,Math.round(middle))));if($('historyPosition').value!==hv)$('historyPosition').value=hv;}schedule();}
 function navigationRange(range,action){const span=Math.max(8,range.to-range.from),center=(range.from+range.to)/2;if(action==='left'||action==='right'){const shift=span*.25*(action==='left'?-1:1);return {from:range.from+shift,to:range.to+shift};}
  const width=Math.max(8,Math.min(Math.max(10000,all.length*1.5),span*(action==='in'?.8:1.25)));return {from:center-width/2,to:center+width/2};}
-function navigateChart(action){if(!all.length)return;
+function navigateChart(action){if(!all.length)return;chartDateFocus=null;
  if(action==='reset'){resetScales();const span=Math.min(180,Math.max(20,all.length*1.2)),end=all.length-1;latestOffset=5;moveChartRange({from:end-span+5-windowStart,to:end+5-windowStart});}
  else {const range=chart.timeScale().getVisibleLogicalRange();if(range)moveChartRange(navigationRange(range,action));}}
 for(const [action,label,title] of [['out','-','축소'],['in','+','확대'],['left','<','이전 구간으로 이동'],['right','>','다음 구간으로 이동'],['reset','R','최근 차트로 이동 및 화면 초기화']]){
@@ -466,7 +471,7 @@ function resetScales(){
  }
 }
 function centeredRange(index,span=240){return {from:index-span/2,to:index+span/2};}
-function focusSignal(s,element){selectedSignal=s;selectedGuideVisible=true;clearTimeout(selectedGuideTimer);clearInterval(selectedCountdownTimer);selectedGuideDeadline=performance.now()+5000;updateGuideCountdown();selectedCountdownTimer=setInterval(updateGuideCountdown,100);selectedGuideTimer=setTimeout(()=>{selectedGuideVisible=false;clearInterval(selectedCountdownTimer);guideCountdown.hidden=true;schedule();},5000);for(const el of $('signalListContainer').querySelectorAll('.signal-item')){el.style.outline='';el.setAttribute('aria-current','false');}element.style.outline='2px solid #fbbf24';element.setAttribute('aria-current','true');
+function focusSignal(s,element){chartDateFocus=null;selectedSignal=s;selectedGuideVisible=true;clearTimeout(selectedGuideTimer);clearInterval(selectedCountdownTimer);selectedGuideDeadline=performance.now()+5000;updateGuideCountdown();selectedCountdownTimer=setInterval(updateGuideCountdown,100);selectedGuideTimer=setTimeout(()=>{selectedGuideVisible=false;clearInterval(selectedCountdownTimer);guideCountdown.hidden=true;schedule();},5000);for(const el of $('signalListContainer').querySelectorAll('.signal-item')){el.style.outline='';el.setAttribute('aria-current','false');}element.style.outline='2px solid #fbbf24';element.setAttribute('aria-current','true');
  const old=chart.timeScale().getVisibleLogicalRange();const span=old?Math.max(80,Math.min(600,old.to-old.from)):240;
  renderWindow(lowerBound(all,s.time),true,span);
  chart.clearCrosshairPosition();
@@ -659,12 +664,14 @@ function refreshFundingChart(session, recentCandles = []) {
   if (!fundingSessionActive(session) || !all.length) return;
   // Range setters are applied by Lightweight Charts on its next drawing frame.
   if (changingWindow) {requestAnimationFrame(()=>refreshFundingChart(session,recentCandles));return;}
+  const dateView=chartDateFocus?.id===run?captureChartView():null;
   const visible = chart.timeScale().getVisibleLogicalRange();
   const absolute = visible ? {from: visible.from + windowStart, to: visible.to + windowStart} : null;
   all = uniqueSorted([...all, ...recentCandles]);
   rates = FundingEngine.merge(rates, session.latestRows.filter(row => row.time >= all[0].time));
   rebuild();
-  renderWindow(absolute ? (absolute.from + absolute.to) / 2 : all.length - 1, false, 240, absolute);
+  if(dateView)restoreChartView(dateView,false);
+  else renderWindow(absolute ? (absolute.from + absolute.to) / 2 : all.length - 1, false, 240, absolute);
 }
 async function refreshFundingCandles(session) {
   if (!fundingSessionActive(session) || !all.length || session.candlesPending) return;
@@ -713,16 +720,18 @@ function focusMinimumFunding() {
 }
 
 function captureChartView(){
- const range=chart.timeScale().getVisibleLogicalRange();if(!range||!all.length)return null;
+ if(chartDateFocus?.id===run)return {...chartDateFocus,followLatest:false};
+ const scale=chart.timeScale(),range=scale.getVisibleLogicalRange();if(!range||!all.length)return null;
  const middle=windowStart+(range.from+range.to)/2,index=Math.max(0,Math.min(all.length-1,Math.round(middle)));
- return {time:all[index].time,span:range.to-range.from,followLatest:windowStart+range.to>=all.length-1+(latestOffset??5)-1};
+ const centerTime=scale.coordinateToTime?.(scale.width?.()/2);
+ return {time:Number.isFinite(centerTime)?centerTime:all[index].time,span:range.to-range.from,followLatest:windowStart+range.to>=all.length-1+(latestOffset??5)-1};
 }
 async function settleChartView(id){
  await new Promise(resolve=>requestAnimationFrame(resolve));return id===run;
 }
-function restoreChartView(view){
- if(!all.length)return;const index=!view||view.followLatest?all.length-1:Math.min(all.length-1,lowerBound(all,view.time));
- renderWindow(index,true,view?.span??240);
+function restoreChartView(view,focus=true){
+ if(!all.length)return;const index=!view||view.followLatest?all.length-1:Math.min(all.length-1,lowerBound(all,view.time)),span=view?.span??240;
+ renderWindow(index,focus,span,focus?null:{from:index-span/2,to:index+span/2});
 }
 async function jumpToChartDate(target,signal){
  if(!loadedMarket)throw Error('먼저 코인과 거래소를 선택하세요.');
@@ -731,7 +740,7 @@ async function jumpToChartDate(target,signal){
  requestSignal.throwIfAborted();
  const span=Math.max(60,Math.min(180,chart.timeScale().getVisibleLogicalRange()?.to-chart.timeScale().getVisibleLogicalRange()?.from||180));
  let index=TimeframeEngine.indexAt(all,target,int);
- if(index>=0){selectedSignal=null;clearRuler();renderWindow(index,true,span);status('날짜 이동 완료 · '+date(target));return;}
+ if(index>=0){chartDateFocus={id,time:target,span};selectedSignal=null;clearRuler();renderWindow(index,true,span);status('날짜 이동 완료 · '+date(target));return;}
  const end=Math.min(Date.now(),Math.floor((target+(Math.ceil(span/2)+10)*duration[int])*1000));
  const cursor=ex==='BINANCE'?Math.max(0,(target-3*86400)*1000):end;
  const [candlesResult,historyResult]=await Promise.allSettled([
@@ -742,7 +751,7 @@ async function jumpToChartDate(target,signal){
  if(candlesResult.status==='rejected')throw candlesResult.reason;
  const rows=candlesResult.value;
  if(!rows.length)throw Error('해당 날짜의 '+$('intervalSelect').selectedOptions[0].text+' 기록을 거래소가 제공하지 않습니다. 상장일·보관 범위를 확인하세요.');
- all=uniqueSorted([...all,...rows]);
+ chartDateFocus={id,time:target,span};all=uniqueSorted([...all,...rows]);
  if(historyResult.status==='fulfilled')rates=FundingEngine.merge(rates,historyResult.value.filter(row=>row.time>=rows[0].time&&row.time<rows.at(-1).time+duration[int]));
  rebuild();index=TimeframeEngine.indexAt(all,target,int);selectedSignal=null;clearRuler();renderWindow(index,true,span);
  $('coverage').textContent='날짜 조회: '+date(target)+' · 주변 캔들 '+date(rows[0].time)+' ~ '+date(rows.at(-1).time)+' · 거래소가 제공하는 실제 기록. 정산 기록이 없는 구간은 공백입니다.'+(historyResult.status==='rejected'?' · 이 구간의 정산 기록 조회 실패: '+fundingError(historyResult.reason):'');
@@ -750,7 +759,7 @@ async function jumpToChartDate(target,signal){
 }
 
 async function loadData(){try{thresholds();}catch(e){return status(e.message,true);}const symbol=$('symbolInput').value.trim().toUpperCase();if(!/^[A-Z0-9_-]+$/.test(symbol))return status('유효한 심볼을 입력하세요.',true);
- dateNavigation?.cancel();navigationController?.abort();navigationController=new AbortController();controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;loadedMarket={ex,symbol,int,id};chartSymbolLabel.textContent=FundingEngine.contract(ex,symbol);chartSymbolLabel.title=ex+' · '+chartSymbolLabel.textContent+' · '+$('intervalSelect').selectedOptions[0].text;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
+ chartDateFocus=null;dateNavigation?.cancel();navigationController?.abort();navigationController=new AbortController();controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;loadedMarket={ex,symbol,int,id};chartSymbolLabel.textContent=FundingEngine.contract(ex,symbol);chartSymbolLabel.title=ex+' · '+chartSymbolLabel.textContent+' · '+$('intervalSelect').selectedOptions[0].text;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
  $('coverage').textContent='선택 거래소 USDT 무기한 선물 · 제공 가능한 이력 끝까지 수집 · 과거 구간은 날짜로 이동(Alt+G) 또는 하단 슬라이더로 이동 · 전체 이력은 계속 수집';
  status(`${ex} ${symbol} · 과거 이력 수집 시작`);startFundingUpdates(ex,symbol,int,id);
  let candleEnd=Date.now(),chunks=[],count=0,candleNote='',fundNote='';
@@ -766,8 +775,8 @@ async function loadData(){try{thresholds();}catch(e){return status(e.message,tru
  status(`${ex} ${symbol} · ${all.length.toLocaleString()}봉 / 펀딩비 ${rates.length.toLocaleString()}건`,!rates.length);
 }
 $('searchBtn').onclick=loadData;$('symbolInput').onkeydown=e=>{if(e.key==='Enter')loadData();};$('stopBtn').onclick=()=>{dateNavigation?.cancel();controller?.abort();stopFundingUpdates();};
-$('oldestBtn').onclick=()=>renderWindow(0);$('latestBtn').onclick=()=>renderWindow(all.length-1);
-let sliderTimer;$('historyPosition').oninput=()=>{clearTimeout(sliderTimer);sliderTimer=setTimeout(()=>renderWindow(+$('historyPosition').value),100);};
+$('oldestBtn').onclick=()=>{chartDateFocus=null;renderWindow(0);};$('latestBtn').onclick=()=>{chartDateFocus=null;renderWindow(all.length-1);};
+let sliderTimer;$('historyPosition').oninput=()=>{chartDateFocus=null;clearTimeout(sliderTimer);sliderTimer=setTimeout(()=>renderWindow(+$('historyPosition').value),100);};
 $('btnToggleLines').onclick=function(){showLines=!showLines;this.classList.toggle('active',showLines);schedule();};
 for(const id of ['warnThresh','extThresh'])$(id).onchange=()=>{try{rebuild();renderWindow(+$('historyPosition').value);}catch(e){status(e.message,true);}};
 
