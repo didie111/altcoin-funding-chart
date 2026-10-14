@@ -90,7 +90,7 @@ test('Bitget history 2h uses supported 1H candles; Bybit and OKX 2h use their na
 
 function navigationHarness(){
   const app=fs.readFileSync(path.join(__dirname,'../app.js'),'utf8');
-  const renders=[],context={all:Array.from({length:100},(_,i)=>bar(stamp+i*60)),windowStart:0,latestOffset:5,chartDateFocus:null,run:1,
+  const renders=[],context={all:Array.from({length:100},(_,i)=>bar(stamp+i*60)),windowStart:0,windowEnd:100,latestOffset:5,chartDateFocus:null,run:1,
     chart:{timeScale:()=>({getVisibleLogicalRange:()=>({from:10,to:30})})},renderWindow:(...args)=>renders.push(args),lowerBound:(a,t)=>a.findIndex(b=>b.time>=t)};
   vm.createContext(context);vm.runInContext(app.slice(app.indexOf('function captureChartView()'),app.indexOf('async function jumpToChartDate(')),context);
   return {context,renders};
@@ -109,7 +109,7 @@ test('history completion waits for deferred chart range changes before capturing
   const context=h.context;
   context.id=context.run=1;context.signal=new AbortController().signal;
   context.chunks=[Array.from({length:200},(_,i)=>bar(stamp-(200-i)*60))];
-  context.fundingSession=null;context.busy=true;context.uniqueSorted=engine.sorted;
+  context.fundingSession=null;context.busy=true;context.uniqueSorted=engine.sorted;context.ChartData=require('../chart-data.js');context.rebuild=()=>{};
   context.requestAnimationFrame=callback=>{frame=callback;};
   context.renderWindow=(index,focus,span)=>{
     // Lightweight Charts defers setVisibleLogicalRange until its drawing frame.

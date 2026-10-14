@@ -14,6 +14,11 @@ const RsiEngine = (() => {
     maColor: '#facc15',
     bullColor: '#4caf50',
     bearColor: '#ef4444',
+    upperLevel:70, middleLevel:50, lowerLevel:30,
+    upperColor:'#787b86', middleColor:'#787b86', lowerColor:'#787b86',
+    upperWidth:1, middleWidth:1, lowerWidth:1,
+    upperStyle:2, middleStyle:2, lowerStyle:2,
+    showUpperLine:true, showMiddleLine:true, showLowerLine:true,
     lineWidth: 2,
     showRsi: true,
     showMa: true,
@@ -54,12 +59,18 @@ const RsiEngine = (() => {
       throw Error('BB 표준편차 배수는 0.001~50 범위입니다.');
     }
 
-    for (const key of ['rsiColor', 'maColor', 'bullColor', 'bearColor']) {
+    for (const key of ['rsiColor', 'maColor', 'bullColor', 'bearColor','upperColor','middleColor','lowerColor']) {
       if (!/^#[0-9a-f]{6}$/i.test(s[key])) {
         s[key] = defaults[key];
       }
     }
 
+    for(const key of ['upper','middle','lower']){
+      if(!Number.isFinite(s[key+'Level'])||s[key+'Level']<0||s[key+'Level']>100)throw Error('RSI 기준선은 0~100 범위로 입력하세요.');
+      s[key+'Width']=[1,2,3,4].includes(s[key+'Width'])?s[key+'Width']:1;
+      s[key+'Style']=[0,1,2,3].includes(s[key+'Style'])?s[key+'Style']:2;
+    }
+    if(s.lowerLevel>=s.upperLevel)throw Error('하단 기준선은 상단 기준선보다 작아야 합니다.');
     s.lineWidth = [1, 2, 3, 4].includes(s.lineWidth) ? s.lineWidth : 2;
     s.timeframes = Array.isArray(s.timeframes)
       ? s.timeframes.filter(v => defaults.timeframes.includes(v))
@@ -67,6 +78,7 @@ const RsiEngine = (() => {
 
     for (const key of [
       'divergence',
+      'showUpperLine','showMiddleLine','showLowerLine',
       'showRsi',
       'showMa',
       'showBands',
@@ -324,6 +336,19 @@ const RsiEngine = (() => {
   function calculate(bars, input = {}) {
     const settings = normalize(input);
     const n = bars.length;
+    const step=settings.barSeconds;
+    if(step>0&&!input.segment){
+      const boundaries=[0];for(let i=1;i<n;i++)if(bars[i].time-bars[i-1].time>step*1.5)boundaries.push(i);
+      if(boundaries.length>1){
+        const result={rsi:empty(n),ma:empty(n),upper:empty(n),lower:empty(n),up:empty(n),down:empty(n),bullCond:new Uint8Array(n),bearCond:new Uint8Array(n),signals:[],settings};boundaries.push(n);
+        for(let k=0;k<boundaries.length-1;k++){
+          const begin=boundaries[k],part=calculate(bars.slice(begin,boundaries[k+1]),{...settings,segment:true});
+          for(const key of ['rsi','ma','upper','lower','up','down','bullCond','bearCond'])result[key].set(part[key],begin);
+          for(const signal of part.signals)result.signals.push({...signal,fromIndex:signal.fromIndex+begin,toIndex:signal.toIndex+begin,confirmedIndex:signal.confirmedIndex+begin});
+        }
+        return result;
+      }
+    }
     const changes = empty(n);
     const gains = empty(n);
     const losses = empty(n);
@@ -385,9 +410,42 @@ const RsiEngine = (() => {
       ma,
       upper,
       lower,
+      up,down,
       ...pivots(rsi, bars, settings),
       settings
     };
+  }
+
+  function sourceValue(b,s){return s.source==='hl2'?(b.high+b.low)/2:s.source==='hlc3'?(b.high+b.low+b.close)/3:s.source==='ohlc4'?(b.open+b.high+b.low+b.close)/4:s.source==='hlcc4'?(b.high+b.low+b.close*2)/4:b[s.source];}
+  function update(cache,bars,from){
+    const s=cache.settings,n=bars.length;
+    if((s.barSeconds>0&&bars.slice(from).some((bar,k)=>bar.time-bars[from+k-1].time>s.barSeconds*1.5))||from<=s.length||!Number.isFinite(cache.up?.[from-1])||!Number.isFinite(cache.down?.[from-1]))return calculate(bars,s);
+    for(const key of ['rsi','ma','upper','lower','up','down']){
+      if(cache[key].length!==n){const next=empty(n);next.set(cache[key].subarray(0,n));cache[key]=next;}
+    }
+    for(const key of ['bullCond','bearCond']){if(cache[key].length!==n){const next=new Uint8Array(n);next.set(cache[key].subarray(0,n));cache[key]=next;}cache[key].fill(0,from);}
+    for(let i=from;i<n;i++){
+      const change=sourceValue(bars[i],s)-sourceValue(bars[i-1],s);
+      const up=Math.max(change,0)/s.length+(1-1/s.length)*cache.up[i-1],down=Math.max(-change,0)/s.length+(1-1/s.length)*cache.down[i-1];
+      cache.up[i]=up;cache.down[i]=down;cache.rsi[i]=down===0?100:up===0?0:100-100/(1+up/down);
+      const value=cache.rsi[i],type=s.maType,length=s.maLength;
+      let ma=NaN,samples=[];
+      if(type==='EMA')ma=Number.isFinite(cache.ma[i-1])?2/(length+1)*value+(1-2/(length+1))*cache.ma[i-1]:value;
+      else if(type==='SMMA (RMA)'&&Number.isFinite(cache.ma[i-1]))ma=value/length+(1-1/length)*cache.ma[i-1];
+      else if(type!=='None'){
+        for(let j=i;j>=0&&samples.length<length;j--)if(Number.isFinite(cache.rsi[j]))samples.push(j);
+        if(samples.length===length){samples.reverse();let sum=0,weight=0;for(let k=0;k<samples.length;k++){const j=samples[k],w=type==='WMA'?k+1:type==='VWMA'?bars[j].volume:1;sum+=cache.rsi[j]*w;weight+=w;}ma=weight?sum/weight:NaN;}
+      }
+      cache.ma[i]=ma;cache.upper[i]=cache.lower[i]=NaN;
+      if(type==='SMA + Bollinger Bands'&&samples.length===length){let sum=0,squares=0;for(const j of samples){sum+=cache.rsi[j];squares+=cache.rsi[j]**2;}const sd=Math.sqrt(Math.max(0,squares/length-(sum/length)**2));cache.upper[i]=ma+sd*s.bbMult;cache.lower[i]=ma-sd*s.bbMult;}
+    }
+    // Any pivot affected by a modified bar confirms at that bar or later.
+    // The Pine comparison is limited to 60 bars, so 80 bars retain all valid predecessors.
+    const begin=Math.max(0,from-80),tail=pivots(cache.rsi.subarray(begin),bars.slice(begin),s);
+    cache.signals=cache.signals.filter(signal=>signal.confirmedIndex<from);
+    for(const signal of tail.signals){const confirmedIndex=signal.confirmedIndex+begin;if(confirmedIndex<from)continue;cache.signals.push({...signal,fromIndex:signal.fromIndex+begin,toIndex:signal.toIndex+begin,confirmedIndex});}
+    for(let i=from;i<n;i++){cache.bullCond[i]=tail.bullCond[i-begin];cache.bearCond[i]=tail.bearCond[i-begin];}
+    return cache;
   }
 
   return {
@@ -399,7 +457,8 @@ const RsiEngine = (() => {
     average,
     standardDeviation,
     pivots,
-    calculate
+    calculate,
+    update
   };
 })();
 
@@ -471,8 +530,8 @@ class RsiPanePrimitive {
 
     if (layer === 'bottom') {
       if (s.showFill) {
-        const top = y(70);
-        const bottom = y(30);
+        const top = y(s.upperLevel);
+        const bottom = y(s.lowerLevel);
 
         if (top !== null && bottom !== null) {
           ctx.fillStyle = '#7e57c21a';
@@ -529,8 +588,8 @@ class RsiPanePrimitive {
 
       if (s.showFill && s.showRsi) {
         const y100 = y(100);
-        const y70 = y(70);
-        const y30 = y(30);
+        const y70 = y(s.upperLevel);
+        const y30 = y(s.lowerLevel);
         const y0 = y(0);
 
         if (
@@ -981,15 +1040,9 @@ class StudyPanelManager {
 
       p.members = [rsi, ma, upper, lower];
 
-      for (const level of [70, 50, 30]) {
-        rsi.createPriceLine({
-          price: level,
-          color: level === 50 ? '#787b8680' : '#787b86',
-          lineWidth: 1,
-          lineStyle: LC.LineStyle.Dashed,
-          axisLabelVisible: false
-        });
-      }
+      p.referenceLines=['upper','middle','lower'].map(key=>rsi.createPriceLine({
+        price:this.settings[key+'Level'],color:this.settings[key+'Color'],lineWidth:this.settings[key+'Width'],lineStyle:this.settings[key+'Style'],lineVisible:this.settings['show'+key[0].toUpperCase()+key.slice(1)+'Line'],axisLabelVisible:false
+      }));
 
       p.primitive = new RsiPanePrimitive(() => ({
         cache: this.cache,
@@ -1283,7 +1336,7 @@ class StudyPanelManager {
     schedule();
   }
 
-  ensureCache() {
+  ensureCache(previous=null,from=null) {
     const s = this.settings;
     const key = JSON.stringify([
       s.length,
@@ -1300,7 +1353,8 @@ class StudyPanelManager {
       return;
     }
 
-    this.cache = RsiEngine.calculate(all, s);
+    this.cache = previous&&this.cacheBars===previous&&this.cacheKey===key&&from!==null
+      ? RsiEngine.update(this.cache,all,from) : RsiEngine.calculate(all,{...s,barSeconds:TimeframeEngine.seconds[$('intervalSelect').value]});
     this.cacheBars = all;
     this.cacheKey = key;
 
@@ -1359,6 +1413,21 @@ class StudyPanelManager {
     this.applyVisibility();
     p.primitive.update();
     this.updateLegend();
+  }
+
+  updateLive(rows,previous,from,oldLast){
+    const p=this.panels.get('rsi');if(!p.active)return;
+    this.ensureCache(previous,from);
+    const arrays=[this.cache.rsi,this.cache.ma,this.cache.upper,this.cache.lower];
+    // RSI/averages may also change for the small number of bars after a correction.
+    for(let i=Math.max(windowStart,from);i<windowEnd;i++){
+      const bar=all[i];p.members.forEach((series,k)=>series.update(Number.isFinite(arrays[k][i])?{time:bar.time,value:arrays[k][i]}:{time:bar.time},bar.time<oldLast));
+    }
+    this.applyVisibility();p.primitive.update();this.updateLegend();
+  }
+  applyReferenceLines(){
+    const p=this.panels.get('rsi');if(!p.active)return;
+    ['upper','middle','lower'].forEach((key,i)=>p.referenceLines[i].applyOptions({price:this.settings[key+'Level'],color:this.settings[key+'Color'],lineWidth:this.settings[key+'Width'],lineStyle:this.settings[key+'Style'],lineVisible:this.settings['show'+key[0].toUpperCase()+key.slice(1)+'Line']}));
   }
 
   clearData() {
@@ -1975,7 +2044,8 @@ class StudyPanelManager {
         'overbought',
         'oversold',
         'bbMult',
-        'lineWidth'
+        'lineWidth',
+        'upperLevel','middleLevel','lowerLevel','upperWidth','middleWidth','lowerWidth','upperStyle','middleStyle','lowerStyle'
       ]) {
         next[key] = Number(f.elements.namedItem(key).value);
       }
@@ -1986,13 +2056,14 @@ class StudyPanelManager {
         'rsiColor',
         'maColor',
         'bullColor',
-        'bearColor'
+        'bearColor','upperColor','middleColor','lowerColor'
       ]) {
         next[key] = f.elements.namedItem(key).value;
       }
 
       for (const key of [
         'divergence',
+        'showUpperLine','showMiddleLine','showLowerLine',
         'showRsi',
         'showMa',
         'showBands',
@@ -2028,6 +2099,7 @@ class StudyPanelManager {
         this.render(all.slice(windowStart, windowEnd));
       }
 
+      this.applyReferenceLines();
       this.applyVisibility();
       this.refresh();
       this.save();

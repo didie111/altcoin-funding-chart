@@ -136,7 +136,7 @@ test('MEXC current, historical, candle and cycle requests work only through the 
   assert.equal(quote.rate, -1.5);
   assert.equal(quote.hours, 4);
   assert.equal((await context.fundingPage('MEXC', 'KAIAUSDT', now, 2))[0].rate, -1.5);
-  assert.deepEqual(JSON.parse(JSON.stringify(await context.candlePage('MEXC', 'KAIAUSDT', '15m', now))), [{time: now / 1000, open: 2, high: 4, low: 1, close: 3, volume: 5}]);
+  assert.deepEqual(JSON.parse(JSON.stringify((await context.candlePage('MEXC', 'KAIAUSDT', '15m', now)).map(({fetchedAt,...bar})=>bar))), [{time: now / 1000, open: 2, high: 4, low: 1, close: 3, volume: 5}]);
   assert.equal((await context.fetchOfficialCycle('MEXC', 'KAIAUSDT')).hours, 4);
   assert.equal(requests.length, 4);
   assert.equal(requests[1].params.symbol, 'KAIA_USDT');
@@ -151,20 +151,24 @@ function harness(options = {}) {
     if (!nodes.has(id)) nodes.set(id, {textContent: '', disabled: false, title: ''});
     return nodes.get(id);
   };
-  const requests = [], renders = [], timers = [], live = {data: [], options: {}};
+  const requests = [], renders = [], timers = [], updates=[], rangeUpdates=[], live = {data: [], options: {}};
+  const fixture=(row)=>({open:10,high:Math.max(11,row.close??10),low:9,close:10,volume:5,...row});
+  const updateSeries=name=>({update:row=>updates.push({name,row}),setData:()=>{}});
+  const liveUpdate=row=>{const index=live.data.findIndex(bar=>bar.time===row.time);if(index>=0)live.data[index]=row;else live.data.push(row);};
   class Clock extends Date {static now() {return now;}}
   const context = {
-    FundingEngine: engine, AbortController, AbortSignal, Date: Clock, Map,
+    FundingEngine: engine, TimeframeEngine:require('../timeframes.js'),ChartData:require('../chart-data.js'),AbortController, AbortSignal, Date: Clock, Map,
     $: node, document: {hidden: false},
     setInterval: (callback, ms) => {const timer = {callback, ms, stopped: false}; timers.push(timer); return timer;},
     clearInterval: timer => {if (timer) timer.stopped = true;},
     date: t => new Date(t * 1000).toISOString(),
-    run: 1, chartDateFocus: null, busy: options.busy ?? true, changingWindow: false, requestAnimationFrame: callback=>{timers.push({callback,frame:true});}, all: [{time: settle / 1000}, {time: now / 1000}],
+    run: 1, chartDateFocus: null, busy: options.busy ?? true, changingWindow: false, requestAnimationFrame: callback=>{timers.push({callback,frame:true});}, all: [fixture({time: settle / 1000}),fixture({time: now / 1000})],loadedMarket:{int:'1h'},latestOffset:5,WINDOW:10000,cycleValues:new Map(),cycleFast:new Uint8Array(2),mapped:new Map(),
     rates: [{time: settle / 1000, rate: .01}], unmappedFunding: [],
     duration: {'1h': 3600}, windowStart: 0, windowEnd: 2, officialCycle: null,
-    fundingLive: {setData: rows => {live.data = rows;}, applyOptions: value => {Object.assign(live.options, value);}},
-    studyPanels: {updateFundingLegend: () => {}}, schedule: () => {},
-    chart: {timeScale: () => ({getVisibleLogicalRange: () => ({from: -10, to: 10})})},
+    candles:updateSeries('price'),volume:updateSeries('volume'),funding:updateSeries('funding'),settlementCycle:updateSeries('cycle'),liveCycleValue:()=>null,currentCyclePeriod:()=>null,cycleColor:()=>'',thresholds:()=>({warn:-.5,ext:-2}),renderCycles:()=>{},renderSignalMarkers:()=>{},
+    fundingLive: {update:liveUpdate,setData: rows => {live.data = rows;}, applyOptions: value => {Object.assign(live.options, value);}},
+    studyPanels: {updateFundingLegend: () => {},updateLive:rows=>updates.push({name:'rsi',rows})}, schedule: () => {},
+    chart: {timeScale: () => ({getVisibleLogicalRange: () => ({from: -10, to: 10}),setVisibleLogicalRange:r=>rangeUpdates.push(r)})},
     json: async (url, params, signal) => {
       requests.push({url, params, signal});
       const ex = engine.exchanges.find(([ex]) => url === engine.currentRequest(ex, 'KAIA').url)?.[0] ?? 'MEXC';
@@ -176,7 +180,7 @@ function harness(options = {}) {
       return payload;
     },
     fundingPage: async () => {if (options.historyGate) await options.historyGate; return options.history ?? [{time: settle / 1000, rate: -.2}];},
-    candlePage: async () => {if (options.candleGate) await options.candleGate; return options.candles ?? [{time: now / 1000}];},
+    candlePage: async () => {if (options.candleGate) await options.candleGate; return (options.candles ?? [{time: now / 1000}]).map(fixture);},
     uniqueSorted: rows => engine.merge(rows),
     rebuild: () => {}, renderWindow: (...args) => renders.push(args),
     lowerBound: (rows, time) => rows.findIndex(row => row.time >= time),
@@ -184,7 +188,7 @@ function harness(options = {}) {
   };
   vm.createContext(context);
   vm.runInContext(snippet + '\nthis.api={startFundingUpdates,stopFundingUpdates,refreshFundingSession,refreshFundingQuotes,renderFundingBoard,fundingLegend,getSession:()=>fundingSession};', context);
-  return {context, nodes, requests, renders, timers, live, api: context.api};
+  return {context, nodes, requests, renders, timers, live, updates,rangeUpdates,api: context.api};
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
 test('live value is shown during backfill and is kept separate from settled rates', async () => {
@@ -196,7 +200,7 @@ test('live value is shown during backfill and is kept separate from settled rate
   assert.equal(h.live.data.at(-1).value, -1.5);
   assert.equal(h.live.data[0].value, undefined);
   assert.equal(h.requests.length, 6);
-  assert.deepEqual(h.timers.map(row => row.ms), [10000, 60000]);
+  assert.deepEqual(h.timers.map(row => row.ms), [10000,3000,60000]);
 });
 test('the funding board uses the relay fetch time rather than relabeling cached quotes as newly fetched', async () => {
   const fetchedAt = now - 10000;
@@ -211,12 +215,8 @@ test('live settlement refresh merges new records and keeps the current viewport'
   const h = harness({busy: false, history: rows}); h.api.startFundingUpdates('MEXC', 'KAIA', '1h', 1);
   await flush();
   assert.equal(h.context.rates.at(-1).rate, -1.5);
-  assert.ok(h.renders.length > 0);
-  for (const render of h.renders) {
-    assert.equal(render[1], false);
-    assert.equal(render[3].from, -10);
-    assert.equal(render[3].to, 10);
-  }
+  assert.equal(h.renders.length,0);
+  assert.equal(h.rangeUpdates.length,0); // settlement refresh must not move the price viewport
 });
 test('failed quote requests are unavailable rather than zero', async () => {
   const h = harness({error: true}); h.api.startFundingUpdates('MEXC', 'KAIA', '1h', 1);
@@ -305,14 +305,32 @@ test('a live refresh waits for a pending date navigation frame instead of preser
   assert.notEqual(h.context.all.at(-1).close,99);
   const frame=h.timers.find(t=>t.frame);assert.ok(frame);
   h.context.changingWindow=false;frame.callback();
-  assert.equal(h.renders.length,count+1);assert.equal(h.context.all.at(-1).close,99);
+  assert.equal(h.renders.length,count);assert.equal(h.context.all.at(-1).close,99);
+  assert.ok(h.updates.some(row=>row.name==='price'&&row.row.close===99));
 });
 
 test('live candle refresh retains the selected date while leaving manual price scales intact',async()=>{
   const h=harness();h.api.startFundingUpdates('BITGET','KAIA','1h',1);await flush();
   h.context.chartDateFocus={id:1,time:settle/1000,span:180};
   h.context.refreshFundingChart(h.api.getSession(),[{time:now/1000+3600,close:100}]);
-  const latest=h.renders.at(-1);
-  assert.equal(latest[0],0);assert.equal(latest[1],false);assert.equal(latest[2],180);
-  assert.equal(latest[3].from,-90);assert.equal(latest[3].to,90);
+  assert.equal(h.renders.length,0);assert.equal(h.rangeUpdates.length,0);
+  assert.equal(h.context.chartDateFocus.time,settle/1000);
+  assert.ok(h.updates.some(row=>row.name==='price'&&row.row.time===now/1000+3600));
+});
+
+test('a new minute updates price, volume, funding time points, cycle and RSI together without replacing price data',async()=>{
+ const h=harness();h.api.startFundingUpdates('MEXC','KAIA','1h',1);await flush();h.updates.length=0;
+ h.context.duration['1m']=60;h.context.loadedMarket.int='1m';h.api.getSession().interval='1m';
+ const time=now/1000+60;
+ h.context.refreshFundingChart(h.api.getSession(),[{time,open:10,high:12,low:9,close:11,volume:25}]);
+ assert.deepEqual(h.updates.map(item=>item.name),['price','volume','funding','cycle','rsi']);
+ assert.ok(h.updates.slice(0,4).every(item=>item.row.time===time));
+ assert.equal(h.updates[4].rows[0].time,time);assert.equal(h.renders.length,0);
+ assert.equal(h.context.windowEnd,h.context.all.length);
+});
+
+test('switching a market disposes all three timers including the fast candle timer',async()=>{
+ const h=harness();h.api.startFundingUpdates('MEXC','KAIA','1h',1);await flush();const previous=h.timers.slice();
+ h.context.run=2;h.api.startFundingUpdates('MEXC','BTC','1h',2);await flush();
+ assert.equal(previous.length,3);assert.ok(previous.every(timer=>timer.stopped));
 });
