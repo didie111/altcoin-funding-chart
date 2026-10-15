@@ -162,15 +162,18 @@ function getPaneInfoAtY(y) {
 }
 
 // 마우스가 올라가 있는 패널(메인/지표) 추적 -> 해당 패널의 위/아래/최대화 버튼만 표시
-let hoveredPaneIndex = -1;
+let hoveredPaneIndex = -1, hoveredPriceAxisPaneIndex = -1;
 // 최신 차트를 열었을 때의 오른쪽 끝 위치(마지막 봉 기준 봉 수). 이 위치에서 벗어나면 이동한 것으로 판단
 let latestOffset = null;
 let hoverPoint = null, hoverRaf = 0;
 function updatePaneHover() {
-  if (!hoverPoint) { hoveredPaneIndex = -1; return; }
+  hoveredPaneIndex = hoveredPriceAxisPaneIndex = -1;
+  if (!hoverPoint) return;
   const box = rulerHost.getBoundingClientRect();
   const x = hoverPoint.x - box.left, y = hoverPoint.y - box.top;
-  hoveredPaneIndex = x >= 0 && x <= box.width ? getPaneInfoAtY(y)?.index ?? -1 : -1;
+  if (x < 0 || x >= box.width) return;
+  hoveredPaneIndex = getPaneInfoAtY(y)?.index ?? -1;
+  if (x >= chart.timeScale().width()) hoveredPriceAxisPaneIndex = hoveredPaneIndex;
 }
 rulerHost.addEventListener('pointermove', e => {
   hoverPoint = { x: e.clientX, y: e.clientY };
@@ -178,14 +181,14 @@ rulerHost.addEventListener('pointermove', e => {
   hoverRaf = requestAnimationFrame(() => {
     hoverRaf = 0;
     if (!hoverPoint) return;
-    const previous = hoveredPaneIndex;
+    const previous = hoveredPaneIndex, previousAxis = hoveredPriceAxisPaneIndex;
     updatePaneHover();
-    if (previous !== hoveredPaneIndex) schedule();
+    if (previous !== hoveredPaneIndex || previousAxis !== hoveredPriceAxisPaneIndex) schedule();
   });
 });
 rulerHost.addEventListener('pointerleave', () => {
   hoverPoint = null;
-  hoveredPaneIndex = -1; schedule();
+  hoveredPaneIndex = hoveredPriceAxisPaneIndex = -1; schedule();
 });
 
 function paneAtY(y) {
@@ -343,14 +346,15 @@ for(const [action,label,title] of [['out','-','축소'],['in','+','확대'],['le
 }
 chartNavigation.addEventListener('focusin',schedule);chartNavigation.addEventListener('focusout',schedule);
 chartNavigation.addEventListener('pointerdown',e=>e.stopPropagation());chartNavigation.addEventListener('dblclick',e=>e.stopPropagation());
-// 이동 버튼(-, +, <, >, R): 맨 아래 패널의 오른쪽 가격 축 바로 왼쪽에 표시.
+// 이동 버튼(-, +, <, >, R): 맨 아래 패널 전체(가격 축 포함)에 마우스를 올릴 때만 표시.
 // 지표 패널이 모두 없으면 맨 아래 패널 = 가격(메인) 차트가 됩니다.
 function placeChartNavigation(){
   const layout = getPaneLayout().filter(p => p.height > 1);
-  if (!layout.length) return;
-  const bottom = layout.reduce((a, b) => (b.bottom > a.bottom ? b : a)).bottom;
+  if (!layout.length) { setStyle(chartNavigation, 'display', 'none'); return; }
+  const bottomPane = layout.reduce((a, b) => (b.bottom > a.bottom ? b : a));
+  const bottom = bottomPane.bottom;
   const range = chart.timeScale().getVisibleLogicalRange();
-  const hovered=hoverPoint!==null || Boolean(chartNavigation.querySelector(':focus-visible'));
+  const hovered=hoveredPaneIndex===bottomPane.index || Boolean(chartNavigation.querySelector(':focus-visible'));
   setStyle(chartNavigation, 'display', all.length&&range&&hovered ? 'flex' : 'none');
   setStyle(chartNavigation, 'left', Math.max(8, chart.timeScale().width() - 8) + 'px');
   setStyle(chartNavigation, 'top', Math.max(4, bottom - 32) + 'px');
