@@ -1682,7 +1682,7 @@ class StudyPanelManager {
       const auto = Boolean(options.autoScale);
       const log = options.mode === LC.PriceScaleMode.Logarithmic;
       const hidden = !this.isVisible(p) || item.height < 28;
-      const hover = hoveredPaneIndex === item.index;
+      const hover = hoveredPriceAxisPaneIndex === item.index;
       const top = Math.max(item.top + 2, item.bottom - 28) + 'px';
       const sig = [left, top, hidden, hover, auto, log].join('|');
       if (controls.__posSig === sig) continue;
@@ -1691,7 +1691,7 @@ class StudyPanelManager {
       controls.hidden = hidden;
       controls.style.left = left;
       controls.style.top = top;
-      controls.classList.toggle('pane-hover', hover);
+      controls.classList.toggle('axis-hover', hover);
       for (const [action, pressed] of [['auto', auto], ['log', log]]) {
         const button = controls.querySelector('[data-panel-scale="' + action + '"]');
         button.classList.toggle('active', pressed);
