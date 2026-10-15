@@ -52,93 +52,93 @@ function targetFor(input) {
   return {exchange, path, params, current, origin: bingx ? BINGX_PRIMARY : MEXC_PRIMARY, key: exchange + path + '?' + params};
 }
 
-export function createMarketRelay({fetch: fetcher = (...args) => globalThis.fetch(...args), now = Date.now, wait = pause, requestTimeout = 7000} = {}) {
-  const cache = new Map(), pending = new Map();
-  let bingxQueue = Promise.resolve(), lastBingxStart = null;
+// Only completed, serialized replies and numeric reservation times cross request boundaries.
+// A canceled Worker invocation must never leave a Promise for the next visitor to await.
+function abortable(task, signal) {
+  signal.throwIfAborted();
+  return new Promise((resolve,reject)=>{
+    const abort=()=>reject(signal.reason);
+    signal.addEventListener('abort',abort,{once:true});
+    Promise.resolve().then(()=>{signal.throwIfAborted();return task();}).then(
+      value=>{signal.removeEventListener('abort',abort);resolve(value);},
+      error=>{signal.removeEventListener('abort',abort);reject(error);}
+    );
+  });
+}
+function loopbackOrigin(origin) {
+  try {const url=new URL(origin);return ['http:','https:'].includes(url.protocol)&&['localhost','127.0.0.1','[::1]'].includes(url.hostname)&&url.origin===origin;}catch{return false;}
+}
+export function createMarketRelay({fetch: fetcher = (...args) => globalThis.fetch(...args), now = Date.now, wait = pause, requestTimeout = 5000} = {}) {
+  const cache = new Map();
+  let nextBingxStart = 0;
   async function request(target, origin, signal) {
-    const start = async () => {
-      signal.throwIfAborted();
-      const params = new URLSearchParams(target.params);
-      if (target.exchange === 'BINGX') params.set('timestamp', String(now()));
-      const timeout = AbortSignal.timeout(requestTimeout);
-      const combined = AbortSignal.any([signal, timeout]);
-      try {
-        const response = await fetcher(origin + target.path + (params.size ? '?' + params : ''), {
-          signal: combined, headers: {Accept: 'application/json'}, redirect: 'manual', cache: 'no-store'
-        });
-        if (response.status >= 300 && response.status < 400) throw Error(target.exchange + ' API가 다른 주소로 리디렉션했습니다: HTTP ' + response.status);
-        const body = await response.text();
-        if (body.length > 2 * 1024 * 1024) throw Error('거래소 응답이 허용 크기를 초과했습니다.');
-        let data;
-        try {data = JSON.parse(body);} catch {
-          if (!response.ok) {
-            data = {code: 'UPSTREAM_HTTP_ERROR', message: target.exchange + ' HTTP ' + response.status};
-            return {body: JSON.stringify(data), status: response.status, source: origin, fetchedAt: now(), retryAfter: response.headers.get('retry-after'), data};
-          }
-          throw Error(target.exchange + '가 JSON 대신 접근 제한 또는 비정상 응답을 반환했습니다.');
+    if(target.exchange==='BINGX'){
+      const clock=now(),slot=Math.max(clock,nextBingxStart),delay=slot-clock;
+      if(delay>2300)throw Error('BingX 요청이 몰려 있습니다. 잠시 후 다시 조회합니다.');
+      nextBingxStart=slot+1150;
+      if(delay>0)await abortable(()=>wait(delay,signal),signal);
+    }
+    signal.throwIfAborted();
+    const params = new URLSearchParams(target.params);
+    if (target.exchange === 'BINGX') params.set('timestamp', String(now()));
+    const timeout = AbortSignal.timeout(requestTimeout);
+    const combined = AbortSignal.any([signal, timeout]);
+    return await abortable(async()=>{
+      const response = await fetcher(origin + target.path + (params.size ? '?' + params : ''), {
+        signal: combined, headers: {Accept: 'application/json'}, redirect: 'manual', cache: 'no-store'
+      });
+      if (response.status >= 300 && response.status < 400) throw Error(target.exchange + ' API가 다른 주소로 리디렉션했습니다: HTTP ' + response.status);
+      const body = await response.text();
+      if (body.length > 2 * 1024 * 1024) throw Error('거래소 응답이 허용 크기를 초과했습니다.');
+      let data;
+      try {data = JSON.parse(body);} catch {
+        if (!response.ok) {
+          data = {code: 'UPSTREAM_HTTP_ERROR', message: target.exchange + ' HTTP ' + response.status};
+          return {body: JSON.stringify(data), status: response.status, source: origin, fetchedAt: now(), retryAfter: response.headers.get('retry-after'), data};
         }
-        if (!data || typeof data !== 'object') throw Error('거래소 응답 형식이 올바르지 않습니다.');
-        return {body, status: response.status, source: origin, fetchedAt: now(), retryAfter: response.headers.get('retry-after'), data};
-      } catch (error) {
-        signal.throwIfAborted();
-        if (timeout.aborted) throw timeout.reason;
-        throw error;
+        throw Error(target.exchange + '가 JSON 대신 접근 제한 또는 비정상 응답을 반환했습니다.');
       }
-    };
-    if (target.exchange !== 'BINGX') return await start();
-    const turn = bingxQueue.then(async () => {
-      signal.throwIfAborted();
-      const delay = lastBingxStart === null ? 0 : lastBingxStart + 1150 - now();
-      if (delay > 0) await wait(delay, signal);
-      signal.throwIfAborted(); lastBingxStart = now();
-      return {response: start()};
-    });
-    bingxQueue = turn.catch(() => {});
-    return await (await turn).response;
+      if (!data || typeof data !== 'object') throw Error('거래소 응답 형식이 올바르지 않습니다.');
+      return {body, status: response.status, source: origin, fetchedAt: now(), retryAfter: response.headers.get('retry-after'), data};
+    },combined);
   }
-
-  async function load(target) {
+  async function load(target,signal) {
     const saved = cache.get(target.key);
     if (saved?.expires > now()) return saved.reply;
-    if (pending.has(target.key)) return await pending.get(target.key);
-    // One visitor leaving the page must not cancel a shared request for others.
-    const signal = new AbortController().signal;
-    const job = (async () => {
-      let reply;
-      try {reply = await request(target, target.origin, signal);} catch (error) {
-        signal.throwIfAborted();
-        if (target.exchange !== 'BINGX' || (!(error instanceof TypeError) && error.name !== 'TimeoutError')) throw error;
-        reply = await request(target, BINGX_BACKUP, signal);
-      }
-      const code = reply.data.code;
-      if (reply.status === 200 && reply.data.success !== false && (code === undefined || ['0', '00000'].includes(String(code)))) {
-        cache.delete(target.key);
-        cache.set(target.key, {reply, expires: now() + (target.current ? 3000 : 10000)});
-        while (cache.size > 32) cache.delete(cache.keys().next().value);
-      }
-      return reply;
-    })();
-    pending.set(target.key, job);
-    try {return await job;} finally {pending.delete(target.key);}
+    let reply;
+    try {reply = await request(target, target.origin, signal);} catch (error) {
+      signal.throwIfAborted();
+      if (target.exchange !== 'BINGX' || (!(error instanceof TypeError) && error.name !== 'TimeoutError')) throw error;
+      reply = await request(target, BINGX_BACKUP, signal);
+    }
+    signal.throwIfAborted();
+    const code = reply.data.code;
+    if (reply.status === 200 && reply.data.success !== false && (code === undefined || ['0', '00000'].includes(String(code)))) {
+      cache.delete(target.key);
+      cache.set(target.key, {reply, expires: now() + (target.current ? 3000 : 10000)});
+      while (cache.size > 32) cache.delete(cache.keys().next().value);
+    }
+    return reply;
   }
 
   async function handle(request) {
     const input = new URL(request.url), origin = request.headers.get('origin');
     const headers = {
-      'Access-Control-Allow-Origin': PAGE_ORIGIN,
+      'Access-Control-Allow-Origin': origin&&(origin===PAGE_ORIGIN||origin===input.origin||loopbackOrigin(origin))?origin:PAGE_ORIGIN,
       'Access-Control-Allow-Methods': 'GET, OPTIONS',
       'Access-Control-Expose-Headers': 'X-Market-Fetched-At, X-Market-Source',
       'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Vary': 'Origin'
     };
     const errorResponse = (message, status) => new Response(JSON.stringify({code: 'RELAY_ERROR', message}), {status, headers});
-    if (origin && origin !== PAGE_ORIGIN && origin !== input.origin) return errorResponse('허용되지 않은 요청 출처입니다.', 403);
+    if (origin && origin !== PAGE_ORIGIN && origin !== input.origin && !loopbackOrigin(origin)) return errorResponse('허용되지 않은 요청 출처입니다.', 403);
     if (request.method === 'OPTIONS') return new Response(null, {status: 204, headers});
     if (request.method !== 'GET') return errorResponse('조회 요청만 지원합니다.', 405);
     let target;
     try {target = targetFor(input);} catch (error) {return errorResponse(error.message, 400);}
     try {
       request.signal.throwIfAborted();
-      const reply = await load(target);
+      const signal=AbortSignal.any([request.signal,AbortSignal.timeout(requestTimeout*2+2300)]);
+      const reply = await load(target,signal);
       headers['X-Market-Fetched-At'] = String(reply.fetchedAt);
       headers['X-Market-Source'] = reply.source;
       if (reply.retryAfter) headers['Retry-After'] = reply.retryAfter;

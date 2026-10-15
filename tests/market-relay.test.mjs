@@ -13,8 +13,8 @@ function request(exchange = 'BINGX', path = '/openApi/swap/v2/quote/premiumIndex
 }
 
 test('new chart intervals pass the relay allowlist while invented interval names remain blocked', async () => {
-  const calls=[];
-  const relay=createMarketRelay({now:()=>stamp,wait:async()=>{},fetch:async url=>{calls.push(new URL(url));return reply({code:0,data:[]});}});
+  const calls=[];let clock=stamp;
+  const relay=createMarketRelay({now:()=>clock,wait:async ms=>{clock+=ms;},fetch:async url=>{calls.push(new URL(url));return reply({code:0,data:[]});}});
   for(const interval of ['1m','3m','5m','15m','30m','1h','2h','4h','1d']){
     assert.equal((await relay.handle(request('BINGX','/openApi/swap/v3/quote/klines',{symbol:'BTC-USDT',interval,limit:'1000',endTime:String(stamp)}))).status,200);
     assert.equal(calls.at(-1).searchParams.get('interval'),interval);
@@ -115,12 +115,12 @@ test('a timed-out primary can recover through the official backup', async () => 
   try {assert.equal((await relay.handle(request())).status, 200);} finally {clearTimeout(alive);}
   assert.deepEqual(calls, [primary, backup]);
 });
-test('simultaneous reads share one request, retain the real fetch time, and expired cache does not hide failures', async () => {
+test('completed replies retain the real fetch time, and expired cache does not hide failures', async () => {
   let clock = stamp, calls = 0;
   const relay = createMarketRelay({now: () => clock, wait: async ms => {clock += ms;}, fetch: async () => {
     calls++; if (calls > 1) throw Error('upstream unavailable'); return reply();
   }});
-  const results = await Promise.all([relay.handle(request()), relay.handle(request())]);
+  const results = [await relay.handle(request()), await relay.handle(request())];
   assert.equal(calls, 1);
   for (const result of results) assert.equal(Number(result.headers.get('X-Market-Fetched-At')), stamp);
   clock += 3001;
@@ -134,4 +134,47 @@ test('MEXC history pagination and candles retain their official paths and parame
   assert.equal((await relay.handle(request('MEXC', '/api/v1/contract/kline/RSR_USDT', {interval: 'Min15', start: '1000', end: '2000'}))).status, 200);
   assert.equal(calls[0].searchParams.get('page_num'), '2'); assert.equal(calls[0].searchParams.get('page_size'), '1000');
   assert.equal(calls[1].searchParams.get('interval'), 'Min15'); assert.equal(calls[1].searchParams.get('start'), '1000');
+});
+
+
+test('canceling a visitor never leaves a shared pending request that blocks the next visitor',async()=>{
+  let calls=0;
+  const relay=createMarketRelay({requestTimeout:30,fetch:async()=>{calls++;return calls===1?new Promise(()=>{}):reply(mexcPayload);}});
+  const controller=new AbortController();
+  const first=relay.handle(request('MEXC','/api/v1/contract/funding_rate/RSR_USDT',{}, {signal:controller.signal}));
+  await new Promise(resolve=>setImmediate(resolve));controller.abort();
+  const alive=setTimeout(()=>{},100);
+  try{
+    assert.equal((await first).status,502);
+    const second=await relay.handle(request('MEXC','/api/v1/contract/funding_rate/RSR_USDT',{}));
+    assert.equal(second.status,200);assert.equal(calls,2);
+  }finally{clearTimeout(alive);}
+});
+test('a fetch ignoring AbortSignal still reaches the relay deadline and cannot poison later requests',async()=>{
+  let calls=0;const relay=createMarketRelay({requestTimeout:5,fetch:async()=>++calls===1?new Promise(()=>{}):reply(mexcPayload)});
+  const alive=setTimeout(()=>{},100);
+  try{
+    assert.equal((await relay.handle(request('MEXC','/api/v1/contract/funding_rate/RSR_USDT',{}))).status,502);
+    assert.equal((await relay.handle(request('MEXC','/api/v1/contract/funding_rate/RSR_USDT',{}))).status,200);
+  }finally{clearTimeout(alive);}
+});
+test('canceling one BingX queue wait cannot hold another request behind an unresolved promise',async()=>{
+  let clock=stamp,waiting=0;const relay=createMarketRelay({now:()=>clock,requestTimeout:30,wait:async ms=>{if(++waiting===1)return new Promise(()=>{});clock+=ms;},fetch:async()=>reply()});
+  await relay.handle(request());
+  const controller=new AbortController();
+  const first=relay.handle(request('BINGX',undefined,{symbol:'BTC-USDT'},{signal:controller.signal}));
+  await new Promise(resolve=>setImmediate(resolve));controller.abort();
+  const alive=setTimeout(()=>{},100);
+  try{
+    assert.equal((await first).status,502);
+    assert.equal((await relay.handle(request('BINGX',undefined,{symbol:'ETH-USDT'}))).status,200);
+  }finally{clearTimeout(alive);}
+});
+test('local development origins are reflected exactly while lookalike hosts remain blocked',async()=>{
+  const relay=createMarketRelay({fetch:async()=>reply(mexcPayload)});
+  for(const origin of ['http://localhost:3000','http://127.0.0.1:8000','http://[::1]:5173']){
+    const result=await relay.handle(request('MEXC','/api/v1/contract/funding_rate/RSR_USDT',{}, {headers:{Origin:origin}}));
+    assert.equal(result.status,200);assert.equal(result.headers.get('Access-Control-Allow-Origin'),origin);
+  }
+  for(const origin of ['http://localhost.attacker.test','http://127.0.0.1.attacker.test','https://attacker.test'])assert.equal((await relay.handle(request('MEXC','/api/v1/contract/funding_rate/RSR_USDT',{}, {headers:{Origin:origin}}))).status,403);
 });
