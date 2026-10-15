@@ -65,7 +65,7 @@ test('cancelling a date lookup discards an already in-flight response',async()=>
 function candleHarness(response){
   const app=fs.readFileSync(path.join(__dirname,'../app.js'),'utf8'),calls=[];
   const context={TimeframeEngine:engine,duration:engine.seconds,baseSymbol:s=>s.replace(/[-_]/g,'').replace(/USDT$/,''),candle:api.candle,
-    json:async(url,params)=>{calls.push({url,params});return response;}};
+    json:async(url,params)=>{calls.push({url,params});return typeof response==='function'?response(url,params):response;}};
   vm.createContext(context);vm.runInContext(app.slice(app.indexOf('async function candlePage('),app.indexOf('async function fundingPage(')),context);
   return {calls,page:context.candlePage};
 }
@@ -86,6 +86,15 @@ test('Bitget history 2h uses supported 1H candles; Bybit and OKX 2h use their na
     const h=candleHarness(response);await h.page(exchange,'BTC','2h',stamp*1000+20000000,new AbortController().signal);
     assert.equal(h.calls[0].params[key],value);
   }
+});
+
+test('Bitget latest candles omit the rounded endTime cursor that excludes the forming minute',async()=>{
+  const h=candleHarness({data:[[stamp*1000,10,12,9,11,4]]});
+  await h.page('BITGET','BTC','1m',stamp*1000+30000,new AbortController().signal,true);
+  assert.equal(h.calls[0].params.endTime,undefined);
+  assert.equal(h.calls[0].url,'https://api.bitget.com/api/v2/mix/market/candles');
+  await h.page('BITGET','BTC','1m',stamp*1000-1,new AbortController().signal,false);
+  assert.equal(h.calls[1].params.endTime,stamp*1000);
 });
 
 function navigationHarness(){
@@ -138,4 +147,13 @@ test('a chosen date remains the anchor across delayed SDK indices and both histo
 test('after manual navigation, view capture uses the timestamp actually drawn at screen center',()=>{
   const h=navigationHarness();h.context.chart={timeScale:()=>({width:()=>1000,coordinateToTime:x=>{assert.equal(x,500);return stamp+55*60;},getVisibleLogicalRange:()=>({from:10,to:30})})};
   assert.equal(h.context.captureChartView().time,stamp+55*60);
+});
+
+test('Bitget rounded exclusive history cursors do not skip a minute between consecutive pages',async()=>{
+  const source=Array.from({length:500},(_,i)=>bar(stamp-i*60));
+  const h=candleHarness((url,params)=>({data:source.filter(row=>row.time*1000<Math.floor(params.endTime/60000)*60000).slice(0,200).map(row=>[row.time*1000,row.open,row.high,row.low,row.close,row.volume])}));
+  const first=await h.page('BITGET','BTC','1m',stamp*1000+30000,new AbortController().signal);
+  const next=await h.page('BITGET','BTC','1m',first[0].time*1000-1,new AbortController().signal);
+  const merged=engine.sorted([...next,...first]);
+  assert.equal(merged.length,400);assert.ok(merged.slice(1).every((row,i)=>row.time-merged[i].time===60));
 });

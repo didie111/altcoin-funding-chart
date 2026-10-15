@@ -529,7 +529,7 @@ async function candlePage(ex,s,int,end,signal,recent=false){
  case 'BINANCE':j=await json('https://fapi.binance.com/fapi/v1/klines',{symbol:b+'USDT',interval:plan.native,limit,endTime:end},signal);rows=j;break;
  case 'BYBIT':j=await json('https://api.bybit.com/v5/market/kline',{category:'linear',symbol:b+'USDT',interval:plan.native,limit,end},signal);rows=j.result.list;break;
  case 'BINGX':j=await json('https://open-api.bingx.com/openApi/swap/v3/quote/klines',{symbol:b+'-USDT',interval:plan.native,limit,endTime:end},signal);rows=j.data;break;
- case 'BITGET':j=await json('https://api.bitget.com/api/v2/mix/market/'+(recent?'candles':'history-candles'),{symbol:b+'USDT',productType:'USDT-FUTURES',granularity:plan.native,limit,endTime:end},signal);rows=j.data;break;
+ case 'BITGET':j=await json('https://api.bitget.com/api/v2/mix/market/'+(recent?'candles':'history-candles'),{symbol:b+'USDT',productType:'USDT-FUTURES',granularity:plan.native,limit,endTime:recent?undefined:Math.ceil(end/(sourceSeconds*1000))*sourceSeconds*1000},signal);rows=j.data;break;
  case 'OKX':j=await json('https://www.okx.com/api/v5/market/'+(recent?'candles':'history-candles'),{instId:b+'-USDT-SWAP',bar:plan.native,limit,after:end},signal);rows=j.data.map(r=>[...r.slice(0,5),r[6]]);break;
  case 'MEXC':{const sec=Math.floor(end/1000);j=await json('https://api.mexc.com/api/v1/contract/kline/'+b+'_USDT',{interval:plan.native,start:Math.max(0,sec-sourceSeconds*(limit-1)),end:sec},signal);const d=j.data;
  rows=(d.time||[]).map((t,i)=>({time:t,open:d.open[i],high:d.high[i],low:d.low[i],close:d.close[i],volume:d.vol[i]}));break;}
