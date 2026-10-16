@@ -60,7 +60,7 @@ const WINDOW=10000, duration=TimeframeEngine.seconds;
 let dateNavigation=null, navigationController=null, loadedMarket=null, chartDateFocus=null;
 let historyState={id:0,buffer:[],pending:new Set(),exhausted:new Set()};
 let paneScaleSeries=[candles,volume,funding,settlementCycle];
-let studyPanels=null;
+let studyPanels=null,chartDrawings=null;
 const overlay=document.createElement('canvas');overlay.style.cssText='position:absolute;inset:0;pointer-events:none;z-index:4';$('unified-chart').append(overlay);
 const guideCountdown=document.createElement('div');guideCountdown.hidden=true;guideCountdown.style.cssText='position:absolute;top:12px;pointer-events:none;z-index:6;padding:7px 12px;background:#fbbf24;color:#111827;border:2px solid #fffbeb;border-radius:8px;font-size:14px;font-weight:800;white-space:nowrap;box-shadow:0 2px 10px #000b;transform:translateX(-50%)';guideCountdown.setAttribute('role','timer');guideCountdown.setAttribute('aria-label','선택 신호 기준선 남은 시간');$('unified-chart').append(guideCountdown);
 function updateGuideCountdown(){const seconds=Math.max(0,Math.ceil((selectedGuideDeadline-performance.now())/1000));const label='기준선 '+seconds+'초';if(guideCountdown.textContent!==label)guideCountdown.textContent=label;}
@@ -74,7 +74,7 @@ function draw(){paneLayoutCache=computePaneLayout();updatePaneHover();try{drawIn
 function setStyle(el,k,v){const c=el._st||(el._st={});if(c[k]!==v){c[k]=v;el.style[k]=v;}}
 function drawInner(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clientHeight,dpr=devicePixelRatio||1,plotWidth=chart.timeScale().width();
  if(overlay.width!==Math.round(w*dpr)||overlay.height!==Math.round(h*dpr)){overlay.width=Math.round(w*dpr);overlay.height=Math.round(h*dpr);overlay.style.width=w+'px';overlay.style.height=h+'px';}
- ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawCycleBands(w,h);drawRuler(w,h);placeChartSymbol();placeChartNavigation();placeChartClock();placeLegendToggle();studyPanels?.position();
+ ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawCycleBands(w,h);drawRuler(w,h);placeChartSymbol();placeChartNavigation();placeChartClock();placeLegendToggle();studyPanels?.position();chartDrawings?.render();
  if(selectedSignal&&selectedGuideVisible){const x=chart.timeScale().timeToCoordinate(selectedSignal.time);if(x!==null&&x>=0&&x<=plotWidth){guideCountdown.hidden=false;guideCountdown.style.left=Math.max(65,Math.min(plotWidth-65,x))+'px';ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
  if(!showLines)return;
  const range=chart.timeScale().getVisibleRange();if(!range)return;
@@ -90,18 +90,18 @@ const rulerBtn=$('btnRuler');rulerBtn.className='btn-toggle';rulerBtn.textConten
 const rulerLabel=document.createElement('div');rulerLabel.hidden=true;rulerLabel.style.cssText='position:absolute;pointer-events:none;z-index:7;background:#2563eb;color:#fff;border:1px solid #93c5fd;padding:8px 12px;border-radius:4px;font-size:13px;font-weight:700;line-height:1.6;text-align:center;white-space:pre-line;box-shadow:0 2px 8px #0009;max-width:280px';$('unified-chart').append(rulerLabel);
 function priceChange(start,end){if(!Number.isFinite(start)||!Number.isFinite(end)||start<=0)return null;return {difference:end-start,percent:(end-start)/start*100};}
 function clearRuler(){rulerStart=null;rulerEnd=null;rulerLocked=false;rulerTemporary=false;rulerLabel.hidden=true;schedule();}
-function rulerInteraction(){const active=rulerEnabled||shiftHeld||rulerDragging;chart.applyOptions({handleScroll:active?false:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:active?false:{mouseWheel:true,pinch:true,axisPressedMouseMove:{time:true,price:true},axisDoubleClickReset:{time:true,price:false}}});$('unified-chart').style.cursor=active?'crosshair':'';}
+function rulerInteraction(){const active=rulerEnabled||shiftHeld||rulerDragging||(typeof chartDrawings!=='undefined'&&Boolean(chartDrawings?.capturesChart()));chart.applyOptions({handleScroll:active?false:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:active?false:{mouseWheel:true,pinch:true,axisPressedMouseMove:{time:true,price:true},axisDoubleClickReset:{time:true,price:false}}});$('unified-chart').style.cursor=active?'crosshair':'';}
 function endRulerDrag(){if(rulerPointer!==null&&$('unified-chart').hasPointerCapture(rulerPointer))$('unified-chart').releasePointerCapture(rulerPointer);rulerDragging=false;rulerPointer=null;rulerInteraction();}
 function toggleRuler(enabled){endRulerDrag();rulerEnabled=enabled;rulerBtn.classList.toggle('active',enabled);rulerBtn.setAttribute('aria-pressed',String(enabled));clearRuler();rulerInteraction();if(enabled)status('줄자: 가격 차트에서 누른 채 드래그하세요. Shift+드래그도 가능 · Esc 종료');}
 rulerBtn.onclick=()=>toggleRuler(!rulerEnabled);
 function typingTarget(t){return t instanceof Element&&Boolean(t.closest('input,textarea,select,[contenteditable="true"]'));}
-document.addEventListener('keydown',e=>{if(typingTarget(e.target))return;if(e.key==='Shift'&&!shiftHeld){shiftHeld=true;rulerInteraction();}if(e.key==='Escape'){shiftHeld=false;toggleRuler(false);}});
+document.addEventListener('keydown',e=>{if(typingTarget(e.target))return;if(e.key==='Shift'&&!shiftHeld&&!chartDrawings?.capturesChart()){shiftHeld=true;rulerInteraction();}if(e.key==='Escape'){shiftHeld=false;toggleRuler(false);}});
 document.addEventListener('keyup',e=>{if(e.key==='Shift'){shiftHeld=false;rulerInteraction();}});
 window.addEventListener('blur',()=>{shiftHeld=false;if(rulerDragging){endRulerDrag();rulerLocked=true;}rulerInteraction();});
 const rulerHost=$('unified-chart');
 // A chosen date remains stable during backfill until the user navigates the chart.
 rulerHost.addEventListener('pointerdown',event=>{
- if(event.button!==0||rulerEnabled||event.shiftKey||event.target.closest?.('[data-panel-ui],[data-chart-nav],[data-chart-identity],[data-chart-fullscreen],[data-pane-scale]'))return;
+ if(event.button!==0||rulerEnabled||event.shiftKey||event.target.closest?.('[data-panel-ui],[data-chart-nav],[data-chart-identity],[data-chart-fullscreen],[data-pane-scale],[data-drawing-ui]'))return;
  if(event.clientX-rulerHost.getBoundingClientRect().left<chart.timeScale().width())chartDateFocus=null;
 });
 // Keep the symbol tied to the chart being loaded, rather than an unsubmitted input edit.
@@ -135,8 +135,7 @@ function placeChartSymbol(){
   chartSymbolLabel.hidden=!visible;
   rulerHost.classList.toggle('chart-has-symbol',visible);
   if(!visible)return;
-  setStyle(chartIdentityControls,'top',pane.top+4+'px');
-  setStyle(chartIdentityControls,'maxWidth',Math.max(0,chart.timeScale().width()-16)+'px');
+  setStyle(chartIdentityControls,'maxWidth',Math.max(0,chart.timeScale().width()-160)+'px');
 }
 
 // 화면에 그려진 패널 위치 (패널 이동·최대화·사용자 크기 조절 반영)
@@ -261,7 +260,7 @@ function flushWheel() {
 // 차트 안의 휠은 라이브러리의 시간축 줌을 사용합니다. 자동 가격축은 보이는 봉에 맞춰 조정됩니다.
 // 오른쪽 가격 축에서만 해당 패널의 가격 범위를 수동 확대/축소합니다.
 rulerHost.addEventListener('wheel', e => {
-  if (e.target instanceof Element && e.target.closest('[data-chart-fullscreen],[data-pane-scale],[data-chart-identity]')) return;
+  if (e.target instanceof Element && e.target.closest('[data-chart-fullscreen],[data-pane-scale],[data-chart-identity],[data-drawing-ui]')) return;
   if (!Number.isFinite(e.deltaY) || e.deltaY === 0) return;
   const box = rulerHost.getBoundingClientRect(), x = e.clientX - box.left, y = e.clientY - box.top;
   const pane = getPaneInfoAtY(y);
@@ -287,7 +286,7 @@ rulerHost.addEventListener('wheel', e => {
 
 // 가격축 더블클릭: 해당 패널 가격축만 자동 정렬
 rulerHost.addEventListener('dblclick', e => {
-  if (e.target instanceof Element && e.target.closest('[data-chart-fullscreen],[data-pane-scale],[data-chart-identity]')) return;
+  if (e.target instanceof Element && e.target.closest('[data-chart-fullscreen],[data-pane-scale],[data-chart-identity],[data-drawing-ui]')) return;
   if (rulerEnabled || shiftHeld || rulerDragging) return;
   const box = rulerHost.getBoundingClientRect(),
         x = e.clientX - box.left,
@@ -308,7 +307,7 @@ rulerHost.addEventListener('dblclick', e => {
 function pointerPrice(e,clamp=false){const pl=pricePane();if(!pl)return null;const box=rulerHost.getBoundingClientRect();let x=e.clientX-box.left,y=e.clientY-box.top-pl.top;const width=chart.timeScale().width(),height=pl.height;
  if(clamp){x=Math.max(0,Math.min(width-1,x));y=Math.max(0,Math.min(height-1,y));}else if(x<0||x>=width||y<0||y>=height)return null;
  const logical=chart.timeScale().coordinateToLogical(x),price=candles.coordinateToPrice(y);if(logical===null||price===null||price<=0)return null;return {index:Math.round(logical)+windowStart,price};}
-rulerHost.addEventListener('pointerdown',e=>{if(e.target instanceof Element&&e.target.closest('[data-chart-nav],[data-chart-fullscreen],[data-pane-scale],[data-chart-identity]'))return;if(e.button!==0)return;const active=rulerEnabled||e.shiftKey||shiftHeld;if(!active){if(rulerTemporary)clearRuler();return;}const point=pointerPrice(e);if(!point)return;e.preventDefault();e.stopImmediatePropagation();rulerTemporary=!rulerEnabled;rulerStart=point;rulerEnd=point;rulerLocked=false;rulerDragging=true;rulerPointer=e.pointerId;rulerHost.setPointerCapture(e.pointerId);rulerInteraction();schedule();},{capture:true});
+rulerHost.addEventListener('pointerdown',e=>{if(e.target instanceof Element&&e.target.closest('[data-chart-nav],[data-chart-fullscreen],[data-pane-scale],[data-chart-identity],[data-drawing-ui]'))return;if(e.button!==0||chartDrawings?.capturesChart())return;const active=rulerEnabled||e.shiftKey||shiftHeld;if(!active){if(rulerTemporary)clearRuler();return;}const point=pointerPrice(e);if(!point)return;e.preventDefault();e.stopImmediatePropagation();rulerTemporary=!rulerEnabled;rulerStart=point;rulerEnd=point;rulerLocked=false;rulerDragging=true;rulerPointer=e.pointerId;rulerHost.setPointerCapture(e.pointerId);rulerInteraction();schedule();},{capture:true});
 rulerHost.addEventListener('pointermove',e=>{if(!rulerDragging||e.pointerId!==rulerPointer)return;e.preventDefault();e.stopImmediatePropagation();const point=pointerPrice(e,true);if(point){rulerEnd=point;schedule();}},{capture:true});
 rulerHost.addEventListener('pointerup',e=>{if(!rulerDragging||e.pointerId!==rulerPointer)return;e.preventDefault();e.stopImmediatePropagation();const point=pointerPrice(e,true);if(point)rulerEnd=point;rulerLocked=true;endRulerDrag();status('줄자 측정 완료 · 다시 드래그해 측정 / Esc 종료');schedule();},{capture:true});
 rulerHost.addEventListener('pointercancel',()=>{if(rulerDragging){endRulerDrag();clearRuler();}});
@@ -387,7 +386,7 @@ function placeLegendToggle() {
   legendToggle.hidden = Boolean(studyPanels?.priceCollapsed());
   if (legendToggle.hidden) return;
   const top = Math.min(...layout.map(p => p.top));
-  const symbolOffset = !chartIdentityControls.hidden && pricePane()?.top === top ? 28 : 0;
+  const symbolOffset = 0;
   setStyle(legendToggle, 'top', top + symbolOffset + (legendCollapsed ? 5 : 32) + 'px');
 }
 legendToggle.onclick = e => {
@@ -409,13 +408,14 @@ chartFullscreenBtn.id = 'chartFullscreenBtn';
 chartFullscreenBtn.type = 'button';
 chartFullscreenZone.append(chartFullscreenBtn);
 rulerHost.append(chartFullscreenZone);
+const chartWorkspace=$('chartWorkspace');
 let chartFullscreenPending = false;
 function isChartFullscreen() {
-  return document.fullscreenElement === rulerHost || rulerHost.classList.contains('chart-fullscreen-fallback');
+  return document.fullscreenElement === chartWorkspace || chartWorkspace.classList.contains('chart-fullscreen-fallback');
 }
 function syncChartFullscreen() {
   const active = isChartFullscreen();
-  rulerHost.classList.toggle('chart-is-fullscreen', active);
+  chartWorkspace.classList.toggle('chart-is-fullscreen', active);
   const label = active ? '차트 전체화면 종료' : '가격 차트와 모든 지표 전체화면';
   chartFullscreenBtn.title = label;
   chartFullscreenBtn.setAttribute('aria-label', label);
@@ -432,15 +432,15 @@ async function toggleChartFullscreen() {
   chartFullscreenBtn.disabled = true;
   try {
     if (isChartFullscreen()) {
-      if (document.fullscreenElement === rulerHost) await document.exitFullscreen();
-      rulerHost.classList.remove('chart-fullscreen-fallback');
+      if (document.fullscreenElement === chartWorkspace) await document.exitFullscreen();
+      chartWorkspace.classList.remove('chart-fullscreen-fallback');
     } else {
       // Pane-only maximization is a separate control; include the full layout here.
       studyPanels?.restoreMaximized();
-      if (document.fullscreenEnabled && rulerHost.requestFullscreen) {
-        try {await rulerHost.requestFullscreen();}
-        catch {rulerHost.classList.add('chart-fullscreen-fallback');}
-      } else rulerHost.classList.add('chart-fullscreen-fallback');
+      if (document.fullscreenEnabled && chartWorkspace.requestFullscreen) {
+        try {await chartWorkspace.requestFullscreen();}
+        catch {chartWorkspace.classList.add('chart-fullscreen-fallback');}
+      } else chartWorkspace.classList.add('chart-fullscreen-fallback');
     }
   } finally {
     chartFullscreenPending = false;
@@ -894,6 +894,13 @@ for(const id of ['warnThresh','extThresh'])$(id).onchange=()=>{try{rebuild();ren
 
 // 지표 패널 매니저 (indicators.js) — 모든 함수/변수 정의가 끝난 뒤 생성
 studyPanels=new StudyPanelManager();buildFundingCards();
+chartDrawings=bindChartDrawings({
+ host:rulerHost,workspace:chartWorkspace,chart,
+ data:()=>all,market:()=>loadedMarket,windowStart:()=>windowStart,step:()=>duration[loadedMarket?.int]||60,
+ layout:()=>getPaneLayout().map(p=>{const panel=studyPanels.panelForPane(chart.panes()[p.index]);return {...p,id:panel?.id,visible:Boolean(panel&&studyPanels.isVisible(panel))};}),
+ schedule,status,formatTime:date,interaction:rulerInteraction,cursor:id=>chart.applyOptions({crosshair:{mode:['pointer','dot'].includes(id)?LC.CrosshairMode.Hidden:LC.CrosshairMode.Normal}}),beforeTool:()=>{if(rulerEnabled)toggleRuler(false);},
+ zoom:item=>{const [a,b]=item.points,from=DrawingEngine.timeLogical(all,Math.min(a.time,b.time),duration[loadedMarket.int])-windowStart,to=DrawingEngine.timeLogical(all,Math.max(a.time,b.time),duration[loadedMarket.int])-windowStart;if(to-from<2)return;moveChartRange({from,to});const pane=getPaneLayout().find(p=>studyPanels.panelForPane(chart.panes()[p.index])?.id===item.pane);if(pane&&a.price!==b.price){pane.series.priceScale().setVisibleRange({from:Math.min(a.price,b.price),to:Math.max(a.price,b.price)});}schedule();}
+});
 dateNavigation=bindDateNavigation({currentTime:()=>Math.min(Date.now()/1000,captureChartView()?.time??Date.now()/1000),jump:jumpToChartDate});
 $('fundingRefreshBtn').onclick=()=>{if(fundingSession&&!fundingSession.abort.signal.aborted)void refreshFundingSession(fundingSession);else loadData();};
 $('fundingMinimumBtn').onclick=focusMinimumFunding;
