@@ -1,16 +1,16 @@
-(function(root,factory){'use strict';const api=factory(typeof module==='object'&&module.exports?require('./drawing-engine.js'):root.DrawingEngine);if(typeof module==='object'&&module.exports)module.exports=api;else root.DrawingRenderer=api;})(typeof globalThis!=='undefined'?globalThis:this,function(E){
+(function(root,factory){'use strict';const api=factory(typeof module==='object'&&module.exports?require('./drawing-engine.js'):root.DrawingEngine,typeof module==='object'&&module.exports?require('./ruler-settings.js'):root.RulerSettings);if(typeof module==='object'&&module.exports)module.exports=api;else root.DrawingRenderer=api;})(typeof globalThis!=='undefined'?globalThis:this,function(E,S){
 'use strict';
 const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const vwapCache=new WeakMap();
 const n=v=>Number.isFinite(v)?Math.round(Math.max(-1e7,Math.min(1e7,v))*100)/100:0;
 function geometry(item,env){
  const {width:w,height:h,project,rows=[]}=env,points=item.points.map(project);if(points.some(p=>!p||!Number.isFinite(p.x)||!Number.isFinite(p.y)))return null;
- const segments=[],boxes=[],parts=[],color=item.color||'#60a5fa',lineWidth=item.width||2,dash=item.dash===1?'2 4':item.dash===2?'8 5':'',fill=item.fill??.12;
+ const segments=[],boxes=[],parts=[],color=item.tool==='ruler'?S.colorFor(item.points[0].price,item.points.at(-1).price,env.rulerColors):item.color||'#60a5fa',lineWidth=item.width||2,dash=item.dash===1?'2 4':item.dash===2?'8 5':'',fill=item.fill??.12;
  const attrs=(c=color,sw=lineWidth)=>`stroke="${esc(c)}" stroke-width="${n(sw)}" fill="none" stroke-linecap="round" stroke-linejoin="round"${dash?' stroke-dasharray="'+dash+'"':''}`;
  const path=(d,c=color,sw=lineWidth,extra='')=>parts.push(`<path d="${d}" ${attrs(c,sw)} ${extra}/>`);
  const line=(a,b,c=color,sw=lineWidth,mode='segment')=>{const clip=E.extendLine(a,b,w,h,mode);if(!clip)return;const [p,q]=clip;segments.push([p,q]);path(`M${n(p.x)} ${n(p.y)}L${n(q.x)} ${n(q.y)}`,c,sw);};
  const text=(x,y,value,c=color,size=item.fontSize||12,bg=false)=>{const lines=String(value).split('\n').slice(0,12),tw=Math.max(...lines.map(t=>[...t].length))*size*.65+12,th=lines.length*(size+4)+8;
-  if(x+tw<0||x>w||y+th<0||y>h)return;if(bg)parts.push(`<rect x="${n(x)}" y="${n(y)}" width="${n(tw)}" height="${n(th)}" rx="4" fill="#172033" fill-opacity=".94" stroke="${esc(c)}"/>`);lines.forEach((s,i)=>parts.push(`<text x="${n(x+6)}" y="${n(y+size+4+i*(size+4))}" fill="${esc(c)}" font-size="${size}" font-family="sans-serif">${esc(s)}</text>`));boxes.push({x,y,width:tw,height:th});};
+  if(x+tw<0||x>w||y+th<0||y>h)return;if(bg)parts.push(`<rect x="${n(x)}" y="${n(y)}" width="${n(tw)}" height="${n(th)}" rx="4" fill="${item.tool==='ruler'?esc(c):'#172033'}" fill-opacity=".94" stroke="${esc(c)}"/>`);lines.forEach((s,i)=>parts.push(`<text x="${n(x+6)}" y="${n(y+size+4+i*(size+4))}" fill="${bg&&item.tool==='ruler'?'#fff':esc(c)}" font-size="${size}" font-family="sans-serif">${esc(s)}</text>`));boxes.push({x,y,width:tw,height:th});};
  const poly=(ps,closed=false,c=color,opacity=fill)=>{if(ps.length<2)return;const d=ps.map((p,i)=>(i?'L':'M')+n(p.x)+' '+n(p.y)).join('')+(closed?'Z':'');parts.push(`<path d="${d}" ${attrs(c)}${closed?` style="fill:${esc(c)};fill-opacity:${opacity}"`:''}/>`);for(let i=1;i<ps.length;i++)segments.push([ps[i-1],ps[i]]);if(closed)segments.push([ps.at(-1),ps[0]]);};
  const rect=(a,b,c=color,opacity=fill)=>{const x=Math.min(a.x,b.x),y=Math.min(a.y,b.y),width=Math.abs(b.x-a.x),height=Math.abs(b.y-a.y);poly([{x,y},{x:x+width,y},{x:x+width,y:y+height},{x,y:y+height}],true,c,opacity);if(opacity>0)boxes.push({x,y,width,height});};
  const arrow=(a,b,c=color)=>{line(a,b,c);const angle=Math.atan2(b.y-a.y,b.x-a.x),r=9;line(b,{x:b.x-r*Math.cos(angle-.45),y:b.y-r*Math.sin(angle-.45)},c);line(b,{x:b.x-r*Math.cos(angle+.45),y:b.y-r*Math.sin(angle+.45)},c);};
