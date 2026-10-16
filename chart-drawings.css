@@ -66,3 +66,12 @@
 @media(max-width:650px){#drawingToolLabel{display:none}.drawing-object-toolbar{left:4px;transform:none;gap:1px}.drawing-object-toolbar button{width:25px}#chartTopbar{gap:4px}#chartTopbar #chartIdentityControls{max-width:calc(100% - 112px)}#drawingToolbar{width:40px}.drawing-tool-group [data-drawing-group]{width:30px!important}#drawingToolbar .drawing-utility{width:33px}}
 
 #drawingFavorites{overflow-x:auto;scrollbar-width:thin}#drawingFavorites button{flex-shrink:0}
+
+#drawingToolbar .drawing-ruler-tool{height:32px;width:33px}
+.ruler-colors-button{width:30px;height:28px;padding:3px!important;font-size:15px}
+.ruler-colors-description{font-size:12px;color:#aebad0;line-height:1.6;margin-bottom:14px}
+.ruler-color-row{display:flex;align-items:center;gap:12px}
+.ruler-color-row input[type=color]{height:36px;width:64px;padding:3px;cursor:pointer}
+.ruler-color-row input[type=text]{width:120px;text-transform:none;font-family:monospace;font-size:14px;font-weight:400}
+#rulerColorsDialog label{margin-bottom:8px}
+#rulerColorsDialog [data-defaults]{margin-right:auto;background:#36445b}

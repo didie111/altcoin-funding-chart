@@ -85,14 +85,15 @@ function drawInner(){const w=$('unified-chart').clientWidth,h=$('unified-chart')
  if(any){ctx.setLineDash([3,4]);ctx.lineWidth=1;ctx.strokeStyle='#ef444480';ctx.stroke(pathWarn);ctx.strokeStyle='#a855f780';ctx.stroke(pathExt);}
 }
 
+const rulerColors=RulerSettings.create();
 let rulerEnabled=false,rulerStart=null,rulerEnd=null,rulerLocked=false,shiftHeld=false,rulerTemporary=false,rulerDragging=false,rulerPointer=null;
 const rulerBtn=$('btnRuler');rulerBtn.className='btn-toggle';rulerBtn.textContent='📏 줄자';rulerBtn.title='드래그로 측정 · Shift+드래그: 임시 줄자 · Esc 종료';rulerBtn.setAttribute('aria-pressed','false');
-const rulerLabel=document.createElement('div');rulerLabel.hidden=true;rulerLabel.style.cssText='position:absolute;pointer-events:none;z-index:7;background:#2563eb;color:#fff;border:1px solid #93c5fd;padding:8px 12px;border-radius:4px;font-size:13px;font-weight:700;line-height:1.6;text-align:center;white-space:pre-line;box-shadow:0 2px 8px #0009;max-width:280px';$('unified-chart').append(rulerLabel);
+const rulerLabel=document.createElement('div');rulerLabel.id='rulerMeasurementLabel';rulerLabel.hidden=true;rulerLabel.style.cssText='position:absolute;pointer-events:none;z-index:7;background:#2563eb;color:#fff;border:1px solid #93c5fd;padding:8px 12px;border-radius:4px;font-size:13px;font-weight:700;line-height:1.6;text-align:center;white-space:pre-line;box-shadow:0 2px 8px #0009;max-width:280px';$('unified-chart').append(rulerLabel);
 function priceChange(start,end){if(!Number.isFinite(start)||!Number.isFinite(end)||start<=0)return null;return {difference:end-start,percent:(end-start)/start*100};}
 function clearRuler(){rulerStart=null;rulerEnd=null;rulerLocked=false;rulerTemporary=false;rulerLabel.hidden=true;schedule();}
 function rulerInteraction(){const active=rulerEnabled||shiftHeld||rulerDragging||(typeof chartDrawings!=='undefined'&&Boolean(chartDrawings?.capturesChart()));chart.applyOptions({handleScroll:active?false:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:active?false:{mouseWheel:true,pinch:true,axisPressedMouseMove:{time:true,price:true},axisDoubleClickReset:{time:true,price:false}}});$('unified-chart').style.cursor=active?'crosshair':'';}
 function endRulerDrag(){if(rulerPointer!==null&&$('unified-chart').hasPointerCapture(rulerPointer))$('unified-chart').releasePointerCapture(rulerPointer);rulerDragging=false;rulerPointer=null;rulerInteraction();}
-function toggleRuler(enabled){endRulerDrag();rulerEnabled=enabled;rulerBtn.classList.toggle('active',enabled);rulerBtn.setAttribute('aria-pressed',String(enabled));clearRuler();rulerInteraction();if(enabled)status('줄자: 가격 차트에서 누른 채 드래그하세요. Shift+드래그도 가능 · Esc 종료');}
+function toggleRuler(enabled){if(enabled&&chartDrawings?.capturesChart())chartDrawings.setTool('cross');endRulerDrag();rulerEnabled=enabled;rulerBtn.classList.toggle('active',enabled);rulerBtn.setAttribute('aria-pressed',String(enabled));clearRuler();rulerInteraction();if(enabled)status('줄자: 가격 차트에서 누른 채 드래그하세요. Shift+드래그도 가능 · Esc 종료');}
 rulerBtn.onclick=()=>toggleRuler(!rulerEnabled);
 function typingTarget(t){return t instanceof Element&&Boolean(t.closest('input,textarea,select,[contenteditable="true"]'));}
 document.addEventListener('keydown',e=>{if(typingTarget(e.target))return;if(e.key==='Shift'&&!shiftHeld&&!chartDrawings?.capturesChart()){shiftHeld=true;rulerInteraction();}if(e.key==='Escape'){shiftHeld=false;toggleRuler(false);}});
@@ -318,7 +319,7 @@ function drawRuler(w,h){rulerLabel.hidden=true;if(!(rulerEnabled||rulerTemporary
  const pl=pricePane();if(!pl)return;
  const x1=chart.timeScale().logicalToCoordinate(rulerStart.index-windowStart),x2=chart.timeScale().logicalToCoordinate(rulerEnd.index-windowStart),y1=candles.priceToCoordinate(rulerStart.price),y2=candles.priceToCoordinate(rulerEnd.price);
  if([x1,x2,y1,y2].some(v=>v===null))return;const change=priceChange(rulerStart.price,rulerEnd.price);if(!change)return;
- const color=change.percent>=0?'#3b82f6':'#ef4444';const ph=pl.height,plotWidth=chart.timeScale().width();ctx.save();ctx.translate(0,pl.top);ctx.beginPath();ctx.rect(0,0,plotWidth,ph);ctx.clip();ctx.setLineDash([]);ctx.strokeStyle=color;ctx.fillStyle=change.percent>=0?'#3b82f633':'#ef444433';ctx.lineWidth=1.5;ctx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.strokeRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.beginPath();const mx=(x1+x2)/2,my=(y1+y2)/2;ctx.moveTo(x1,my);ctx.lineTo(x2,my);ctx.moveTo(mx,y1);ctx.lineTo(mx,y2);ctx.stroke();for(const [ax,ay,dx,dy] of [[x2,my,-Math.sign(x2-x1)*6,0],[mx,y2,0,-Math.sign(y2-y1)*6]]){ctx.beginPath();ctx.moveTo(ax+dx+(dy?4:0),ay+dy+(dx?4:0));ctx.lineTo(ax,ay);ctx.lineTo(ax+dx-(dy?4:0),ay+dy-(dx?4:0));ctx.stroke();}
+ const color=rulerColors.color(rulerStart.price,rulerEnd.price);const ph=pl.height,plotWidth=chart.timeScale().width();ctx.save();ctx.translate(0,pl.top);ctx.beginPath();ctx.rect(0,0,plotWidth,ph);ctx.clip();ctx.setLineDash([]);ctx.strokeStyle=color;ctx.fillStyle=color+'33';ctx.lineWidth=1.5;ctx.fillRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.strokeRect(Math.min(x1,x2),Math.min(y1,y2),Math.abs(x2-x1),Math.abs(y2-y1));ctx.beginPath();const mx=(x1+x2)/2,my=(y1+y2)/2;ctx.moveTo(x1,my);ctx.lineTo(x2,my);ctx.moveTo(mx,y1);ctx.lineTo(mx,y2);ctx.stroke();for(const [ax,ay,dx,dy] of [[x2,my,-Math.sign(x2-x1)*6,0],[mx,y2,0,-Math.sign(y2-y1)*6]]){ctx.beginPath();ctx.moveTo(ax+dx+(dy?4:0),ay+dy+(dx?4:0));ctx.lineTo(ax,ay);ctx.lineTo(ax+dx-(dy?4:0),ay+dy-(dx?4:0));ctx.stroke();}
  for(const [x,y] of [[x1,y1],[x2,y2]]){ctx.beginPath();ctx.fillStyle=color;ctx.arc(x,y,4,0,Math.PI*2);ctx.fill();}ctx.restore();
 
  const details=measureDetails(rulerStart,rulerEnd),sign=change.percent>=0?'+':'';rulerLabel.textContent=`${change.difference>=0?'+':''}${change.difference.toPrecision(6)} (${sign}${change.percent.toFixed(2)}%)\n${details.bars}봉 · ${details.period}\n거래량 ${new Intl.NumberFormat('ko-KR',{notation:'compact',maximumFractionDigits:2}).format(details.volume)}`;
@@ -894,8 +895,9 @@ for(const id of ['warnThresh','extThresh'])$(id).onchange=()=>{try{rebuild();ren
 
 // 지표 패널 매니저 (indicators.js) — 모든 함수/변수 정의가 끝난 뒤 생성
 studyPanels=new StudyPanelManager();buildFundingCards();
+rulerColors.bind({workspace:chartWorkspace,buttonAfter:rulerBtn,onChange:schedule,onStatus:status});
 chartDrawings=bindChartDrawings({
- host:rulerHost,workspace:chartWorkspace,chart,
+ host:rulerHost,workspace:chartWorkspace,chart,rulerColors,
  data:()=>all,market:()=>loadedMarket,windowStart:()=>windowStart,step:()=>duration[loadedMarket?.int]||60,
  layout:()=>getPaneLayout().map(p=>{const panel=studyPanels.panelForPane(chart.panes()[p.index]);return {...p,id:panel?.id,visible:Boolean(panel&&studyPanels.isVisible(panel))};}),
  schedule,status,formatTime:date,interaction:rulerInteraction,cursor:id=>chart.applyOptions({crosshair:{mode:['pointer','dot'].includes(id)?LC.CrosshairMode.Hidden:LC.CrosshairMode.Normal}}),beforeTool:()=>{if(rulerEnabled)toggleRuler(false);},
