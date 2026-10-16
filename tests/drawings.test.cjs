@@ -48,3 +48,8 @@ test('filled shape selection and thin line selection work without catching dista
 test('undo stack is bounded while the latest changes remain reversible',()=>{
  const s=new E.Store(storage());s.switchMarket('BTC');s.add(make());for(let i=0;i<140;i++)s.update('one',{text:String(i)});assert.equal(s.past.length,100);s.undo();assert.equal(s.state.items[0].text,'138');
 });
+test('offscreen text remains attached to its price and timestamp instead of sticking to the viewport edge',()=>{
+ const item={...make('text','text'),points:[{time:100,price:20}],text:'anchored note',fontSize:14};
+ const hidden=R.geometry(item,{width:500,height:300,project:()=>({x:-1000,y:100})});assert.equal(hidden.svg,'');
+ const visible=R.geometry(item,{width:500,height:300,project:()=>({x:200,y:100})});assert.match(visible.svg,/x="206"/);assert.match(visible.svg,/anchored note/);
+});
