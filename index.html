@@ -254,8 +254,6 @@
     #chartFullscreenZone:hover #chartFullscreenBtn,#chartFullscreenZone:focus-within #chartFullscreenBtn,.chart-is-fullscreen #chartFullscreenBtn {opacity:1;pointer-events:auto}
     #chartFullscreenBtn:hover {background:#475569}
     #chartFullscreenBtn:focus-visible {outline:2px solid #a78bfa;outline-offset:2px}
-    #unified-chart:fullscreen,#unified-chart.chart-fullscreen-fallback {position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;height:100dvh!important;min-height:0;display:block;flex:none;background:#111827;z-index:1000}
-    #unified-chart::backdrop {background:#111827}
     @media(hover:none),(pointer:coarse){#chartFullscreenBtn{opacity:1;pointer-events:auto}}
     #barCountdown {position:absolute;z-index:7;pointer-events:none;color:white;font-size:11px;font-variant-numeric:tabular-nums;line-height:14px;text-align:center;padding:1px 3px;box-sizing:border-box}
     #barCountdown span {display:block}
@@ -353,6 +351,7 @@
     .funding-card span {overflow-wrap:anywhere}
     @media(max-width:850px){#fundingExchangeGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
     </style>
+    <link rel="stylesheet" href="chart-drawings.css?v=20261016-drawings-1">
 </head>
 <body>
 
@@ -406,7 +405,8 @@
             <p class="funding-note">하단 막대: 정산 기록 · 노란 점선: 페이지에서 관측한 현재율(미정산). 관측 전 구간은 공백이며 신호 목록은 정산 기록 기준입니다.</p>
           </section>
           <div id="chart-key" style="padding:6px 12px;font-size:12px;min-height:28px">가격 · 거래량 · 정산 펀딩비 · RSI Div · 정산 주기 — 동일 시간축</div>
-          <div id="unified-chart" style="flex:1;min-height:0;position:relative"><div id="historyLoading" hidden role="status"></div>
+          <div id="chartWorkspace">
+            <div id="chartTopbar">
             <div id="chartIdentityControls" data-chart-identity="true" role="group" aria-label="코인 심볼과 타임프레임" hidden>
               <span id="chartSymbolLabel" aria-label="현재 차트 코인 심볼"></span>
               <span class="chart-identity-separator" aria-hidden="true">·</span>
@@ -421,6 +421,15 @@
                 <option value="4h" selected>4시간</option>
                 <option value="1d">1일 (일봉)</option>
               </select>
+            </div>
+              <span id="drawingToolLabel" aria-live="polite">크로스</span>
+              <div id="drawingHistoryControls" role="toolbar" aria-label="그리기 실행 이력"></div>
+            </div>
+            <div id="chartBody">
+              <aside id="drawingToolbar" aria-label="그리기 도구"></aside>
+          <div id="unified-chart" style="flex:1;min-height:0;position:relative"><div id="historyLoading" hidden role="status"></div>
+
+          </div>
             </div>
           </div>
           <div style="padding:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px">
@@ -526,7 +535,10 @@
     <script src="chart-data.js?v=20261015-live-1"></script>
     <script src="date-navigation.js?v=20261014-navigation-1"></script>
     <script src="indicators.js?v=20261015-hover-1"></script>
-    <script src="app.js?v=20261015-hover-1"></script>
+    <script src="drawing-engine.js?v=20261016-drawings-1"></script>
+    <script src="drawing-renderer.js?v=20261016-drawings-1"></script>
+    <script src="chart-drawings.js?v=20261016-drawings-1"></script>
+    <script src="app.js?v=20261016-drawings-1"></script>
 </body>
 </html>
 
