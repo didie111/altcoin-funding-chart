@@ -122,15 +122,571 @@
             position: relative;
         }
 
-        /* 신호 목록 사이드바 */
+        /* 신호 목록 및 스캐너 사이드바 */
         #signal-sidebar {
-            width: 310px;
+            width: 330px;
             background-color: #1f2937;
             border-left: 1px solid #374151;
             display: flex;
             flex-direction: column;
             z-index: 10;
+            overflow: hidden;
         }
+        .sidebar-tab-bar {
+            display: flex;
+            background-color: #111827;
+            border-bottom: 1px solid #374151;
+        }
+        .sidebar-tab-btn {
+            flex: 1;
+            background: transparent;
+            color: #9ca3af;
+            border: none;
+            border-radius: 0;
+            padding: 9px 2px;
+            font-size: 10.5px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            border-bottom: 2px solid transparent;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            white-space: nowrap;
+        }
+        .sidebar-tab-btn:hover {
+            color: #f3f4f6;
+            background-color: #1e293b;
+        }
+        .sidebar-tab-btn.active {
+            color: #60a5fa;
+            border-bottom-color: #3b82f6;
+            background-color: #1f2937;
+        }
+        .sidebar-tab-btn span {
+            background-color: #374151;
+            color: #cbd5e1;
+            padding: 1px 6px;
+            border-radius: 10px;
+            font-size: 10px;
+        }
+        .sidebar-tab-btn.active span {
+            background-color: #2563eb;
+            color: #fff;
+        }
+        .sidebar-panel {
+            flex: 1;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .sidebar-panel.active {
+            display: flex;
+        }
+
+        /* 5일 급등락 스캐너 스타일 */
+        .scanner-filter-box {
+            padding: 10px 12px;
+            background-color: #182232;
+            border-bottom: 1px solid #374151;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .scanner-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .scanner-input-group {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .scanner-input-group label {
+            font-size: 10px;
+            color: #94a3b8;
+            font-weight: 600;
+        }
+        .scanner-input-group input {
+            width: 100%;
+            padding: 5px 8px;
+            font-size: 12px;
+        }
+        .scanner-filter-btns {
+            display: flex;
+            gap: 4px;
+            flex: 1;
+        }
+        .btn-filter-dir {
+            flex: 1;
+            padding: 5px 4px;
+            font-size: 11px;
+            font-weight: 600;
+            background-color: #374151;
+            color: #cbd5e1;
+            border-radius: 4px;
+        }
+        .btn-filter-dir.active {
+            background-color: #2563eb;
+            color: #fff;
+        }
+        .btn-scan {
+            background-color: #10b981;
+            color: #fff;
+            padding: 5px 10px;
+            font-size: 11px;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .btn-scan:hover {
+            background-color: #059669;
+        }
+        .btn-scan.scanning {
+            background-color: #f59e0b;
+            cursor: wait;
+        }
+        .scanner-status-bar {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 10px;
+            color: #94a3b8;
+        }
+        .scanner-progress-bar {
+            height: 3px;
+            background-color: #334155;
+            border-radius: 2px;
+            overflow: hidden;
+            display: none;
+        }
+        .scanner-progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #3b82f6, #10b981);
+            transition: width 0.1s ease;
+        }
+        .scanner-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .scanner-card {
+            background: #263346;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            padding: 9px 12px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .scanner-card:hover {
+            background: #2e3e55;
+            border-color: #60a5fa;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        .scanner-card.selected {
+            border-color: #fbbf24;
+            background: #2c384e;
+            box-shadow: 0 0 0 1px #fbbf24;
+        }
+        .scanner-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .scanner-symbol {
+            font-size: 13px;
+            font-weight: 800;
+            color: #f3f4f6;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .scanner-symbol .base {
+            color: #60a5fa;
+        }
+        .scanner-badge {
+            font-size: 12px;
+            font-weight: 800;
+            padding: 2px 8px;
+            border-radius: 12px;
+            color: #fff;
+        }
+        .scanner-badge.gain {
+            background: linear-gradient(135deg, #16a34a, #22c55e);
+            box-shadow: 0 2px 6px rgba(34, 197, 94, 0.3);
+        }
+        .scanner-badge.loss {
+            background: linear-gradient(135deg, #dc2626, #ef4444);
+            box-shadow: 0 2px 6px rgba(239, 68, 68, 0.3);
+        }
+        .scanner-prices-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: #cbd5e1;
+        }
+        .scanner-prices-row .price-val {
+            font-weight: 700;
+            color: #f9fafb;
+        }
+        .scanner-details-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 10px;
+            color: #94a3b8;
+            padding-top: 3px;
+            border-top: 1px dashed #374151;
+        }
+        .scanner-empty-msg {
+            color: #9ca3af;
+            font-size: 12px;
+            text-align: center;
+            padding: 30px 15px;
+            line-height: 1.6;
+        }
+
+        /* 펀딩비 순위 랭킹 패널 스타일 */
+        .funding-rank-filter-box {
+            padding: 10px 12px;
+            background-color: #182232;
+            border-bottom: 1px solid #374151;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .funding-rank-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-funding-sort {
+            flex: 1;
+            padding: 5px 4px;
+            font-size: 11px;
+            font-weight: 700;
+            background-color: #374151;
+            color: #cbd5e1;
+            border-radius: 4px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-align: center;
+        }
+        .btn-funding-sort.active {
+            background-color: #2563eb;
+            color: #fff;
+        }
+        .funding-rank-thresh-btns {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+        .btn-funding-thresh {
+            flex: 1;
+            padding: 3px 4px;
+            font-size: 10px;
+            font-weight: 700;
+            background-color: #263346;
+            color: #94a3b8;
+            border-radius: 4px;
+            border: 1px solid #374151;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+            text-align: center;
+        }
+        .btn-funding-thresh.active {
+            background-color: #3b82f6;
+            color: #fff;
+            border-color: #60a5fa;
+        }
+        .funding-rank-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .funding-rank-card {
+            background: #222e42;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            padding: 9px 12px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .funding-rank-card:hover {
+            background: #2a3a52;
+            border-color: #60a5fa;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+        }
+        .funding-rank-card.selected {
+            border-color: #fbbf24;
+            background: #2a374c;
+            box-shadow: 0 0 0 1px #fbbf24;
+        }
+        .funding-rank-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .funding-rank-left {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .rank-num-badge {
+            font-size: 10px;
+            font-weight: 900;
+            padding: 2px 6px;
+            border-radius: 4px;
+            background: #374151;
+            color: #e2e8f0;
+            font-variant-numeric: tabular-nums;
+        }
+        .rank-num-badge.gold {
+            background: rgba(245, 158, 11, 0.2);
+            color: #fbbf24;
+            border: 1px solid #f59e0b;
+        }
+        .rank-num-badge.silver {
+            background: rgba(203, 213, 225, 0.2);
+            color: #f1f5f9;
+            border: 1px solid #94a3b8;
+        }
+        .rank-num-badge.bronze {
+            background: rgba(234, 88, 12, 0.2);
+            color: #fdba74;
+            border: 1px solid #ea580c;
+        }
+        .ex-tag {
+            font-size: 9px;
+            font-weight: 800;
+            padding: 2px 5px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+        .ex-tag.BINANCE { background: rgba(234, 179, 8, 0.2); color: #fde047; border: 1px solid #ca8a04; }
+        .ex-tag.BYBIT { background: rgba(249, 115, 22, 0.2); color: #fb923c; border: 1px solid #ea580c; }
+        .ex-tag.BITGET { background: rgba(6, 182, 212, 0.2); color: #22d3ee; border: 1px solid #0891b2; }
+        .ex-tag.BINGX { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid #2563eb; }
+        .ex-tag.MEXC { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #059669; }
+        .ex-tag.OKX { background: rgba(148, 163, 184, 0.2); color: #e2e8f0; border: 1px solid #64748b; }
+        .funding-rank-symbol {
+            font-size: 13px;
+            font-weight: 800;
+            color: #f8fafc;
+        }
+        .funding-rank-rate-box {
+            text-align: right;
+        }
+        .funding-rank-rate-val {
+            font-size: 13px;
+            font-weight: 900;
+            font-variant-numeric: tabular-nums;
+        }
+        .funding-rank-rate-val.neg {
+            color: #f87171;
+        }
+        .funding-rank-rate-val.extreme-neg {
+            color: #c084fc;
+        }
+        .funding-rank-rate-val.pos {
+            color: #4ade80;
+        }
+        .funding-meter-wrap {
+            height: 4px;
+            background: #1e293b;
+            border-radius: 2px;
+            overflow: hidden;
+            position: relative;
+        }
+        .funding-meter-fill {
+            height: 100%;
+            position: absolute;
+            border-radius: 2px;
+        }
+        .funding-meter-fill.neg {
+            right: 50%;
+            background: linear-gradient(270deg, #ef4444, #a855f7);
+        }
+        .funding-meter-fill.pos {
+            left: 50%;
+            background: linear-gradient(90deg, #10b981, #22c55e);
+        }
+        .funding-rank-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 10px;
+            color: #94a3b8;
+            padding-top: 3px;
+            border-top: 1px dashed #334155;
+        }
+
+        /* 전략 신호 패널 스타일 */
+        .strategy-section {
+            padding: 10px;
+            overflow-y: auto;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .strategy-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #e2e8f0;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .strategy-card {
+            background: #263346;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .strategy-card-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .strategy-name {
+            font-size: 12px;
+            font-weight: 700;
+            color: #f1f5f9;
+        }
+        .strategy-desc {
+            font-size: 10px;
+            color: #94a3b8;
+            line-height: 1.5;
+        }
+        .strategy-input-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #cbd5e1;
+        }
+        .switch-container {
+            position: relative;
+            display: inline-block;
+            width: 32px;
+            height: 18px;
+        }
+        .switch-container input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .switch-slider {
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background-color: #4b5563;
+            transition: .2s;
+            border-radius: 18px;
+        }
+        .switch-slider:before {
+            position: absolute;
+            content: "";
+            height: 14px;
+            width: 14px;
+            left: 2px;
+            bottom: 2px;
+            background-color: white;
+            transition: .2s;
+            border-radius: 50%;
+        }
+        .switch-container input:checked + .switch-slider {
+            background-color: #10b981;
+        }
+        .switch-container input:checked + .switch-slider:before {
+            transform: translateX(14px);
+        }
+        .strategy-signal-list-title {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            font-weight: 700;
+            color: #cbd5e1;
+            margin-top: 6px;
+        }
+        .strategy-signal-list-title .tag {
+            background: #2563eb;
+            color: #fff;
+            padding: 1px 6px;
+            border-radius: 8px;
+            font-size: 10px;
+        }
+        .strategy-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        /* 10초 급등락 하이라이트 배지 */
+        #surgeCountdownBadge {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 25;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 800;
+            color: #fff;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            pointer-events: none;
+            backdrop-filter: blur(4px);
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            transition: opacity 0.3s ease;
+        }
+        #surgeCountdownBadge.surge-gain {
+            background: linear-gradient(135deg, rgba(22, 163, 74, 0.95), rgba(16, 185, 129, 0.95));
+            border-color: #86efac;
+        }
+        #surgeCountdownBadge.surge-loss {
+            background: linear-gradient(135deg, rgba(220, 38, 38, 0.95), rgba(239, 68, 68, 0.95));
+            border-color: #fca5a5;
+        }
+        .surge-timer-pill {
+            background: rgba(0, 0, 0, 0.4);
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-variant-numeric: tabular-nums;
+            font-size: 12px;
+        }
+
+        /* 신호 목록 사이드바 기존 스타일 유지 */
         .sidebar-header {
             padding: 12px 14px;
             background-color: #111827;
@@ -407,29 +963,27 @@
           <div id="chart-key" style="padding:6px 12px;font-size:12px;min-height:28px">가격 · 거래량 · 정산 펀딩비 · RSI Div · 정산 주기 — 동일 시간축</div>
           <div id="chartWorkspace">
             <div id="chartTopbar">
-            <div id="chartIdentityControls" data-chart-identity="true" role="group" aria-label="코인 심볼과 타임프레임" hidden>
-              <span id="chartSymbolLabel" aria-label="현재 차트 코인 심볼"></span>
-              <span class="chart-identity-separator" aria-hidden="true">·</span>
-              <select id="intervalSelect" aria-label="차트 타임프레임" title="차트 타임프레임 변경">
-                <option value="1m">1분</option>
-                <option value="3m">3분</option>
-                <option value="5m">5분</option>
-                <option value="15m">15분</option>
-                <option value="30m">30분</option>
-                <option value="1h">1시간</option>
-                <option value="2h">2시간</option>
-                <option value="4h" selected>4시간</option>
-                <option value="1d">1일 (일봉)</option>
-              </select>
-            </div>
+              <div id="chartIdentityControls" data-chart-identity="true" role="group" aria-label="코인 심볼과 타임프레임" hidden>
+                <span id="chartSymbolLabel" aria-label="현재 차트 코인 심볼"></span>
+                <span class="chart-identity-separator" aria-hidden="true">·</span>
+                <select id="intervalSelect" aria-label="차트 타임프레임" title="차트 타임프레임 변경">
+                  <option value="1m">1분</option>
+                  <option value="3m">3분</option>
+                  <option value="5m">5분</option>
+                  <option value="15m">15분</option>
+                  <option value="30m">30분</option>
+                  <option value="1h">1시간</option>
+                  <option value="2h">2시간</option>
+                  <option value="4h" selected>4시간</option>
+                  <option value="1d">1일 (일봉)</option>
+                </select>
+              </div>
               <span id="drawingToolLabel" aria-live="polite">크로스</span>
               <div id="drawingHistoryControls" role="toolbar" aria-label="그리기 실행 이력"></div>
             </div>
             <div id="chartBody">
               <aside id="drawingToolbar" aria-label="그리기 도구"></aside>
-          <div id="unified-chart" style="flex:1;min-height:0;position:relative"><div id="historyLoading" hidden role="status"></div>
-
-          </div>
+              <div id="unified-chart" style="flex:1;min-height:0;position:relative"><div id="historyLoading" hidden role="status"></div></div>
             </div>
           </div>
           <div style="padding:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px">
@@ -442,15 +996,168 @@
           <a href="https://www.tradingview.com/" target="_blank" rel="noopener" style="padding:4px 12px;font-size:10px;color:#9ca3af">Charts by TradingView</a>
         </div>
 
-        <!-- ⚡ 발생 신호 목록 패널 -->
+        <!-- 사이드바 패널 (탭: 급등락 스캐너 / 펀딩비 신호 / 전략 신호) -->
         <div id="signal-sidebar">
-            <div class="sidebar-header">
-                ⚡ 펀딩비 발생 신호 목록
-                <span id="signalCountTag">0개</span>
+            <div class="sidebar-tab-bar">
+                <button type="button" class="sidebar-tab-btn active" data-tab="tab-scanner" id="tabBtnScanner">🚀 5일 급등락</button>
+                <button type="button" class="sidebar-tab-btn" data-tab="tab-funding-rank" id="tabBtnFundingRank">🔥 펀딩비 순위</button>
+                <button type="button" class="sidebar-tab-btn" data-tab="tab-funding" id="tabBtnFunding">⚡ 펀딩 신호 <span id="signalCountTag">0</span></button>
+                <button type="button" class="sidebar-tab-btn" data-tab="tab-strategy" id="tabBtnStrategy">🎯 전략 신호</button>
             </div>
-            <div class="signal-list" id="signalListContainer">
-                <div style="color: #9ca3af; font-size: 12px; text-align: center; padding: 20px;">
-                    검색을 실행하면 여기에 발생한 신호 목록이 생성됩니다.
+
+            <!-- 패널 1: 5일 급등락 스캐너 -->
+            <div class="sidebar-panel active" id="tab-scanner">
+                <div class="scanner-switch-bar" style="display:flex; gap:3px; padding:6px 10px 0; background:#182232;">
+                    <button type="button" class="btn-scanner-switch active" data-target="tab-scanner" style="flex:1; padding:5px 4px; font-size:10.5px; font-weight:800; border-radius:4px; border:none; cursor:pointer; background:#2563eb; color:#fff;">🚀 5일 급등락</button>
+                    <button type="button" class="btn-scanner-switch" data-target="tab-funding-rank" style="flex:1; padding:5px 4px; font-size:10.5px; font-weight:800; border-radius:4px; border:none; cursor:pointer; background:#374151; color:#94a3b8;">🔥 펀딩비 순위</button>
+                </div>
+                <div class="scanner-filter-box">
+                    <div class="scanner-row">
+                        <div class="scanner-input-group">
+                            <label for="scannerThreshold">변동 기준(%)</label>
+                            <input type="number" id="scannerThreshold" value="40" min="1" max="1000" step="1">
+                        </div>
+                        <div class="scanner-input-group">
+                            <label for="scannerDays">분석 기간(일)</label>
+                            <input type="number" id="scannerDays" value="5" min="1" max="30" step="1">
+                        </div>
+                    </div>
+                    <div class="scanner-row">
+                        <div class="scanner-filter-btns">
+                            <button type="button" class="btn-filter-dir active" data-dir="all" id="btnFilterAll">전체</button>
+                            <button type="button" class="btn-filter-dir" data-dir="gainers" id="btnFilterGainers">상승 🚀</button>
+                            <button type="button" class="btn-filter-dir" data-dir="losers" id="btnFilterLosers">하락 🔻</button>
+                        </div>
+                        <button type="button" id="scannerStartBtn" class="btn-scan">🔄 스캔 시작</button>
+                    </div>
+                    <div class="scanner-status-bar">
+                        <span id="scannerStatusText">조건 설정 후 [스캔 시작]을 누르세요.</span>
+                        <div id="scannerProgressBar" class="scanner-progress-bar"><div id="scannerProgressFill" class="scanner-progress-fill"></div></div>
+                    </div>
+                </div>
+                <div class="scanner-list" id="scannerListContainer">
+                    <div class="scanner-empty-msg">
+                        일봉 기준 5일 내 ±40% 급등락 코인을 검색합니다.<br><br>
+                        [스캔 시작]을 누르면 실시간 분석이 시작되며,<br>
+                        선택한 코인의 <strong>상승/하락 시작 지점이 10초간 메인 차트에 하이라이트</strong>됩니다.
+                    </div>
+                </div>
+            </div>
+
+            <!-- 패널: 거래소별 실시간 펀딩비 순위 목록 -->
+            <div class="sidebar-panel" id="tab-funding-rank">
+                <div class="scanner-switch-bar" style="display:flex; gap:3px; padding:6px 10px 0; background:#182232;">
+                    <button type="button" class="btn-scanner-switch" data-target="tab-scanner" style="flex:1; padding:5px 4px; font-size:10.5px; font-weight:800; border-radius:4px; border:none; cursor:pointer; background:#374151; color:#94a3b8;">🚀 5일 급등락</button>
+                    <button type="button" class="btn-scanner-switch active" data-target="tab-funding-rank" style="flex:1; padding:5px 4px; font-size:10.5px; font-weight:800; border-radius:4px; border:none; cursor:pointer; background:#2563eb; color:#fff;">🔥 펀딩비 순위</button>
+                </div>
+                <div class="funding-rank-filter-box">
+                    <div class="funding-rank-row">
+                        <select id="fundingRankExchangeSelect" style="flex:1; background:#1f2937; color:#f3f4f6; border:1px solid #374151; padding:5px 8px; border-radius:4px; font-size:11px; font-weight:700;">
+                            <option value="ALL">🌐 전체 거래소 통합 순위</option>
+                            <option value="BINANCE">Binance (바이낸스)</option>
+                            <option value="BYBIT">Bybit (바이비트)</option>
+                            <option value="BITGET">Bitget (비트겟)</option>
+                            <option value="BINGX">BingX (빙엑스)</option>
+                            <option value="MEXC">MEXC (멕스씨)</option>
+                        </select>
+                        <button type="button" id="fundingRankRefreshBtn" class="btn-scan" style="padding:5px 10px; font-size:11px;">🔄 갱신</button>
+                    </div>
+                    <div class="funding-rank-row">
+                        <button type="button" class="btn-funding-sort active" data-sort="negative" title="음수 펀딩비 순: 숏 스퀴즈 / 롱 반등 후보">🔻 음수 펀비 순</button>
+                        <button type="button" class="btn-funding-sort" data-sort="positive" title="양수 펀딩비 순: 롱 스퀴즈 / 숏 반락 후보">🚀 양수 펀비 순</button>
+                        <button type="button" class="btn-funding-sort" data-sort="magnitude" title="절대값 극단 펀딩비 순">⚡ 극단값 순</button>
+                    </div>
+                    <div class="funding-rank-thresh-btns">
+                        <button type="button" class="btn-funding-thresh active" data-thresh="all">전체</button>
+                        <button type="button" class="btn-funding-thresh" data-thresh="neg_01">≤ -0.1%</button>
+                        <button type="button" class="btn-funding-thresh" data-thresh="neg_05">≤ -0.5% (극단)</button>
+                        <button type="button" class="btn-funding-thresh" data-thresh="pos_005">≥ +0.05%</button>
+                    </div>
+                    <div class="funding-rank-row">
+                        <input type="text" id="fundingRankSearchInput" placeholder="심볼 검색 (예: BLUR, PUFFER, BTC)..." style="width:100%; padding:5px 8px; font-size:11px; background:#111827; border:1px solid #374151; border-radius:4px; color:#f3f4f6;">
+                    </div>
+                    <div class="scanner-status-bar">
+                        <span id="fundingRankStatusText">실시간 펀딩비 순위 분석 준비 중...</span>
+                        <div id="fundingRankProgressBar" class="scanner-progress-bar"><div id="fundingRankProgressFill" class="scanner-progress-fill"></div></div>
+                    </div>
+                </div>
+                <div class="funding-rank-list" id="fundingRankListContainer">
+                    <div class="scanner-empty-msg">
+                        거래소별 실시간 펀딩비 데이터를 수집하고 있습니다...<br>
+                        잠시만 기다려주세요.
+                    </div>
+                </div>
+            </div>
+
+            <!-- 패널 2: 펀딩비 발생 신호 목록 (기존 유지) -->
+            <div class="sidebar-panel" id="tab-funding">
+                <div class="sidebar-header" style="padding:10px 12px; font-size:12px;">
+                    ⚡ 펀딩비 이상치 신호 목록
+                    <span id="fundingCountBadge">0개</span>
+                </div>
+                <div class="signal-list" id="signalListContainer">
+                    <div style="color: #9ca3af; font-size: 12px; text-align: center; padding: 20px;">
+                        검색을 실행하면 여기에 발생한 신호 목록이 생성됩니다.
+                    </div>
+                </div>
+            </div>
+
+            <!-- 패널 3: 전략 신호 및 온/오프 설정 (보류 기획 반영) -->
+            <div class="sidebar-panel" id="tab-strategy">
+                <div class="strategy-section">
+                    <div class="strategy-title">🎯 매매 신호 설정 (ON/OFF)</div>
+                    <div class="strategy-card">
+                        <div class="strategy-card-header">
+                            <label class="switch-container">
+                                <input type="checkbox" id="stratRsiToggle" checked>
+                                <span class="switch-slider"></span>
+                            </label>
+                            <span class="strategy-name">1시간봉 RSI 모멘텀 반전</span>
+                        </div>
+                        <p class="strategy-desc">RSI 과매도(≤30) 후 30 상향 돌파 시 [BUY], 과매수(≥70) 후 70 하향 돌파 시 [SELL] 신호 표시</p>
+                    </div>
+
+                    <div class="strategy-card">
+                        <div class="strategy-card-header">
+                            <label class="switch-container">
+                                <input type="checkbox" id="stratFundingRsiToggle" checked>
+                                <span class="switch-slider"></span>
+                            </label>
+                            <span class="strategy-name">펀딩비 + 5분봉 RSI BUY 신호</span>
+                        </div>
+                        <div class="strategy-input-row">
+                            <label for="stratFundingThresh">펀딩비 기준</label>
+                            <input type="number" id="stratFundingThresh" value="-0.5" step="0.1" style="width:70px"> % 이하
+                        </div>
+                        <p class="strategy-desc">펀딩비 과열(-0.5% 이하) 발생 후 5분봉 RSI가 과매도(≤30) 진입 후 다시 30선 상향 돌파 시 [⚡BUY] 신호 발생!</p>
+                    </div>
+
+                    <div class="strategy-card">
+                        <div class="strategy-card-header">
+                            <label class="switch-container">
+                                <input type="checkbox" id="stratComboToggle">
+                                <span class="switch-slider"></span>
+                            </label>
+                            <span class="strategy-name">5일 급등락 + 지표 결합 필터</span>
+                        </div>
+                        <p class="strategy-desc">5일간 40% 이상 급등/급락한 종목에 한해서만 상기 반전 신호가 발동하도록 조건 결합</p>
+                    </div>
+
+                    <div class="strategy-signal-list-title">
+                        <span id="strategyCurrentCoinLabel">현재 코인 전략 신호</span>
+                        <span id="strategyCountTag" class="tag">0개</span>
+                    </div>
+                    <div class="strategy-filter-btns" style="display:flex; gap:3px; margin:4px 0;">
+                        <button type="button" class="btn-strat-filter active" data-filter="all" style="flex:1; padding:3px 2px; font-size:10px; font-weight:700; background:#2563eb; color:#fff; border-radius:4px; border:none; cursor:pointer;">전체</button>
+                        <button type="button" class="btn-strat-filter" data-filter="funding_rsi" style="flex:1; padding:3px 2px; font-size:10px; font-weight:700; background:#374151; color:#cbd5e1; border-radius:4px; border:none; cursor:pointer;">⚡펀딩+RSI</button>
+                        <button type="button" class="btn-strat-filter" data-filter="rsi" style="flex:1; padding:3px 2px; font-size:10px; font-weight:700; background:#374151; color:#cbd5e1; border-radius:4px; border:none; cursor:pointer;">⏱️1h RSI</button>
+                        <button type="button" class="btn-strat-filter" data-filter="combo" style="flex:1; padding:3px 2px; font-size:10px; font-weight:700; background:#374151; color:#cbd5e1; border-radius:4px; border:none; cursor:pointer;">🚀5일 결합</button>
+                    </div>
+                    <div id="strategyListContainer" class="strategy-list">
+                        <div style="color:#9ca3af;font-size:11px;text-align:center;padding:15px;">
+                            차트가 로드되면 설정된 전략 신호가 여기에 표시됩니다.
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -504,7 +1211,7 @@
           <div class="settings-row"><label for="rsiMiddleWidth">중간 기준선 두께·모양</label><div class="settings-line-options"><select id="rsiMiddleWidth" name="middleWidth" aria-label="중간 기준선 두께"><option value="1">1px</option><option value="2">2px</option><option value="3">3px</option><option value="4">4px</option></select><select name="middleStyle" aria-label="중간 기준선 모양"><option value="0">실선</option><option value="1">점선</option><option value="2">파선</option><option value="3">긴 파선</option></select></div></div>
           <div class="settings-row"><label for="rsiLowerShow">하단 기준선 (30)</label><div class="settings-line-options"><input id="rsiLowerShow" name="showLowerLine" type="checkbox" aria-label="하단 기준선 표시"><input name="lowerLevel" type="number" min="0" max="100" step="1" aria-label="하단 기준선 값" required><input name="lowerColor" type="color" aria-label="하단 기준선 색상"></div></div>
           <div class="settings-row"><label for="rsiLowerWidth">하단 기준선 두께·모양</label><div class="settings-line-options"><select id="rsiLowerWidth" name="lowerWidth" aria-label="하단 기준선 두께"><option value="1">1px</option><option value="2">2px</option><option value="3">3px</option><option value="4">4px</option></select><select name="lowerStyle" aria-label="하단 기준선 모양"><option value="0">실선</option><option value="1">점선</option><option value="2">파선</option><option value="3">긴 파선</option></select></div></div>
-          <div class="settings-row"><label for="rsiShowFill">배경 및 과매수·과매도 채우기</label><input id="rsiShowFill" name="showFill" type="checkbox"></div>
+          <div class="settings-row"><label for="rsiShowFill">RSI 밴드 배경 채우기</label><div class="settings-line-options"><input id="rsiShowFill" name="showFill" type="checkbox"><input name="fillColor" type="color" value="#7e57c2" aria-label="RSI 밴드 배경 색상"></div></div>
           <div class="settings-row"><label for="rsiShowBull">Bull 선·라벨</label><input id="rsiShowBull" name="showBull" type="checkbox"><input name="bullColor" type="color" aria-label="Bull 색상"></div>
           <div class="settings-row"><label for="rsiShowBear">Bear 선·라벨</label><input id="rsiShowBear" name="showBear" type="checkbox"><input name="bearColor" type="color" aria-label="Bear 색상"></div>
         </div>
@@ -534,12 +1241,13 @@
     <script src="timeframes.js?v=20261014-navigation-1"></script>
     <script src="chart-data.js?v=20261015-live-1"></script>
     <script src="date-navigation.js?v=20261014-navigation-1"></script>
-    <script src="indicators.js?v=20261015-hover-1"></script>
+    <script src="indicators.js?v=20261021-upgrade-1"></script>
     <script src="ruler-settings.js?v=20261016-ruler-1"></script>
     <script src="drawing-engine.js?v=20261016-drawings-1"></script>
     <script src="drawing-renderer.js?v=20261020-ruler-arrows-1"></script>
     <script src="chart-drawings.js?v=20261016-ruler-1"></script>
-    <script src="app.js?v=20261016-ruler-1"></script>
+    <script src="scanner.js?v=20261021-upgrade-1"></script>
+    <script src="app.js?v=20261021-upgrade-1"></script>
 </body>
 </html>
 
