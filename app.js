@@ -56,11 +56,223 @@ funding.createPriceLine({price:0,color:'#6b7280',lineWidth:1,lineStyle:LC.LineSt
 const markers=LC.createSeriesMarkers(candles,[]);
 let all=[],rates=[],signals=[],mapped=new Map(),unmappedFunding=[],controller,run=0,windowStart=0,windowEnd=0,showLines=true,busy=false,selectedSignal=null,changingWindow=false;
 let selectedGuideVisible=false, selectedGuideTimer, selectedCountdownTimer, selectedGuideDeadline=0;
+
+// [🚀 5일 급등락 하이라이트 상태 관리]
+let surgeHighlight = {
+  active: false,
+  symbol: '',
+  isSurge: true,
+  changePct: 0,
+  maxGain: 0,
+  startTime: 0,
+  startPrice: 0,
+  currentPrice: 0,
+  minLow: 0,
+  minLowTime: 0,
+  maxHigh: 0,
+  maxHighTime: 0,
+  deadline: 0,
+  timer: null,
+  countdownInterval: null
+};
+
+// 10초 카운트다운 알림 배지 (메인 차트 상단)
+const surgeCountdownBadge = document.createElement('div');
+surgeCountdownBadge.id = 'surgeCountdownBadge';
+surgeCountdownBadge.hidden = true;
+$('unified-chart').append(surgeCountdownBadge);
+
+function triggerSurgeHighlight(coin) {
+  clearTimeout(surgeHighlight.timer);
+  clearInterval(surgeHighlight.countdownInterval);
+
+  surgeHighlight = {
+    active: true,
+    symbol: coin.symbol,
+    isSurge: coin.changePct >= 0,
+    changePct: coin.changePct,
+    maxGain: coin.maxGain,
+    startTime: coin.startTime,
+    startPrice: coin.startPrice,
+    currentPrice: coin.currentPrice,
+    minLow: coin.minLow,
+    minLowTime: coin.minLowTime,
+    maxHigh: coin.maxHigh,
+    maxHighTime: coin.maxHighTime,
+    deadline: performance.now() + 10000,
+    timer: null,
+    countdownInterval: null
+  };
+
+  surgeCountdownBadge.hidden = false;
+  surgeHighlight.countdownInterval = setInterval(() => {
+    if (!surgeHighlight.active) {
+      clearInterval(surgeHighlight.countdownInterval);
+      return;
+    }
+    schedule();
+  }, 100);
+
+  surgeHighlight.timer = setTimeout(() => {
+    surgeHighlight.active = false;
+    clearInterval(surgeHighlight.countdownInterval);
+    if (surgeCountdownBadge) surgeCountdownBadge.hidden = true;
+    schedule();
+  }, 10000);
+
+  schedule();
+}
+
+function drawSurgeHighlight(w, h, plotWidth) {
+  if (!surgeHighlight.active || !all.length) {
+    if (surgeCountdownBadge) surgeCountdownBadge.hidden = true;
+    return;
+  }
+  const now = performance.now();
+  if (now >= surgeHighlight.deadline) {
+    surgeHighlight.active = false;
+    if (surgeCountdownBadge) surgeCountdownBadge.hidden = true;
+    schedule();
+    return;
+  }
+
+  // 10초 카운트다운 배지 업데이트
+  const remainingSec = Math.max(0, Math.ceil((surgeHighlight.deadline - now) / 1000));
+  if (surgeCountdownBadge) {
+    surgeCountdownBadge.hidden = false;
+    const isGain = surgeHighlight.isSurge;
+    surgeCountdownBadge.className = isGain ? 'surge-gain' : 'surge-loss';
+    const sign = isGain ? '+' : '';
+    const pctStr = sign + surgeHighlight.changePct.toFixed(2) + '%';
+    const typeStr = isGain ? '🚀 급등' : '🔻 급락';
+    surgeCountdownBadge.innerHTML = `
+      <span>${typeStr} <strong>[${surgeHighlight.symbol}]</strong> 5일간 ${pctStr} 변동 구간 가이드</span>
+      <span class="surge-timer-pill">⏱️ ${remainingSec}초</span>
+    `;
+  }
+
+  const ts = chart.timeScale();
+  // 5일 전 시작 시각 봉 찾기
+  const idx = lowerBound(all, surgeHighlight.startTime);
+  const startBar = idx < all.length ? all[idx] : all[0];
+  if (!startBar) return;
+
+  let xStart = ts.timeToCoordinate(startBar.time);
+  if (xStart === null) {
+    const range = ts.getVisibleLogicalRange();
+    if (range && idx < windowStart + range.from) {
+      xStart = 0;
+    } else {
+      return;
+    }
+  }
+
+  const latestBar = all[all.length - 1];
+  let xEnd = ts.timeToCoordinate(latestBar.time);
+  if (xEnd === null) xEnd = plotWidth;
+
+  const x1 = Math.max(0, Math.min(plotWidth, xStart));
+  const x2 = Math.max(0, Math.min(plotWidth, xEnd));
+
+  // 1) 반투명 그라데이션 하이라이트 밴드 (10초간 시각 효과)
+  if (x2 > x1) {
+    const grad = ctx.createLinearGradient(x1, 0, x2, 0);
+    if (surgeHighlight.isSurge) {
+      grad.addColorStop(0, 'rgba(34, 197, 94, 0.24)');
+      grad.addColorStop(0.6, 'rgba(34, 197, 94, 0.08)');
+      grad.addColorStop(1, 'rgba(34, 197, 94, 0.02)');
+    } else {
+      grad.addColorStop(0, 'rgba(239, 68, 68, 0.24)');
+      grad.addColorStop(0.6, 'rgba(239, 68, 68, 0.08)');
+      grad.addColorStop(1, 'rgba(239, 68, 68, 0.02)');
+    }
+    ctx.fillStyle = grad;
+    ctx.fillRect(x1, 0, x2 - x1, h - 28);
+  }
+
+  // 2) 변동 시작점 수직 기준선 & 핀 배지
+  if (xStart >= 0 && xStart <= plotWidth) {
+    const isGain = surgeHighlight.isSurge;
+    ctx.strokeStyle = isGain ? '#22c55e' : '#ef4444';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([6, 3]);
+    ctx.beginPath();
+    ctx.moveTo(xStart, 0);
+    ctx.lineTo(xStart, h - 28);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // 시작점 상단 핀 배지
+    const pInfo = pricePane();
+    const pinY = pInfo ? pInfo.top + 28 : 36;
+    const startPriceStr = (typeof ScannerEngine !== 'undefined') ? ScannerEngine.formatPrice(surgeHighlight.startPrice) : surgeHighlight.startPrice.toFixed(4);
+    const startText = (isGain ? '📍 상승 시작: $' : '📍 하락 시작: $') + startPriceStr;
+
+    ctx.font = 'bold 11px sans-serif';
+    const textWidth = ctx.measureText(startText).width;
+    const boxW = textWidth + 18;
+    const boxH = 22;
+    const boxX = Math.max(4, Math.min(plotWidth - boxW - 4, xStart - boxW / 2));
+
+    ctx.fillStyle = isGain ? '#15803d' : '#b91c1c';
+    ctx.beginPath();
+    ctx.roundRect(boxX, pinY, boxW, boxH, 5);
+    ctx.fill();
+
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.fillText(startText, boxX + boxW / 2, pinY + 15);
+  }
+
+  // 3) 극값(최고점 / 최저점) 위치 표시
+  const peakTime = surgeHighlight.isSurge ? surgeHighlight.maxHighTime : surgeHighlight.minLowTime;
+  const peakPrice = surgeHighlight.isSurge ? surgeHighlight.maxHigh : surgeHighlight.minLow;
+  if (peakTime && peakTime !== surgeHighlight.startTime) {
+    const pIdx = lowerBound(all, peakTime);
+    const pBar = all[pIdx] || all[all.length - 1];
+    const xPeak = ts.timeToCoordinate(pBar.time);
+    if (xPeak !== null && xPeak >= 0 && xPeak <= plotWidth) {
+      const isGain = surgeHighlight.isSurge;
+      ctx.strokeStyle = isGain ? '#86efac' : '#fca5a5';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(xPeak, 0);
+      ctx.lineTo(xPeak, h - 28);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const pInfo = pricePane();
+      const peakPinY = pInfo ? pInfo.top + 54 : 62;
+      const peakPriceStr = (typeof ScannerEngine !== 'undefined') ? ScannerEngine.formatPrice(peakPrice) : peakPrice.toFixed(4);
+      const peakText = (isGain ? '🔺 5일 최고: $' : '🔻 5일 최저: $') + peakPriceStr;
+
+      ctx.font = 'bold 11px sans-serif';
+      const tw = ctx.measureText(peakText).width;
+      const bW = tw + 14;
+      const bX = Math.max(4, Math.min(plotWidth - bW - 4, xPeak - bW / 2));
+
+      ctx.fillStyle = isGain ? '#166534' : '#991b1b';
+      ctx.beginPath();
+      ctx.roundRect(bX, peakPinY, bW, 20, 4);
+      ctx.fill();
+
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.fillText(peakText, bX + bW / 2, peakPinY + 14);
+    }
+  }
+}
+
 const WINDOW=10000, duration=TimeframeEngine.seconds;
 let dateNavigation=null, navigationController=null, loadedMarket=null, chartDateFocus=null;
 let historyState={id:0,buffer:[],pending:new Set(),exhausted:new Set()};
 let paneScaleSeries=[candles,volume,funding,settlementCycle];
-let studyPanels=null,chartDrawings=null;
+let studyPanels=null;
 const overlay=document.createElement('canvas');overlay.style.cssText='position:absolute;inset:0;pointer-events:none;z-index:4';$('unified-chart').append(overlay);
 const guideCountdown=document.createElement('div');guideCountdown.hidden=true;guideCountdown.style.cssText='position:absolute;top:12px;pointer-events:none;z-index:6;padding:7px 12px;background:#fbbf24;color:#111827;border:2px solid #fffbeb;border-radius:8px;font-size:14px;font-weight:800;white-space:nowrap;box-shadow:0 2px 10px #000b;transform:translateX(-50%)';guideCountdown.setAttribute('role','timer');guideCountdown.setAttribute('aria-label','선택 신호 기준선 남은 시간');$('unified-chart').append(guideCountdown);
 function updateGuideCountdown(){const seconds=Math.max(0,Math.ceil((selectedGuideDeadline-performance.now())/1000));const label='기준선 '+seconds+'초';if(guideCountdown.textContent!==label)guideCountdown.textContent=label;}
@@ -74,7 +286,7 @@ function draw(){paneLayoutCache=computePaneLayout();updatePaneHover();try{drawIn
 function setStyle(el,k,v){const c=el._st||(el._st={});if(c[k]!==v){c[k]=v;el.style[k]=v;}}
 function drawInner(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clientHeight,dpr=devicePixelRatio||1,plotWidth=chart.timeScale().width();
  if(overlay.width!==Math.round(w*dpr)||overlay.height!==Math.round(h*dpr)){overlay.width=Math.round(w*dpr);overlay.height=Math.round(h*dpr);overlay.style.width=w+'px';overlay.style.height=h+'px';}
- ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawCycleBands(w,h);drawRuler(w,h);placeChartSymbol();placeChartNavigation();placeChartClock();placeLegendToggle();studyPanels?.position();chartDrawings?.render();
+ ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawCycleBands(w,h);drawRuler(w,h);drawSurgeHighlight(w,h,plotWidth);placeChartSymbol();placeChartNavigation();placeChartClock();placeLegendToggle();studyPanels?.position();chartDrawings?.render();
  if(selectedSignal&&selectedGuideVisible){const x=chart.timeScale().timeToCoordinate(selectedSignal.time);if(x!==null&&x>=0&&x<=plotWidth){guideCountdown.hidden=false;guideCountdown.style.left=Math.max(65,Math.min(plotWidth-65,x))+'px';ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
  if(!showLines)return;
  const range=chart.timeScale().getVisibleRange();if(!range)return;
@@ -86,6 +298,7 @@ function drawInner(){const w=$('unified-chart').clientWidth,h=$('unified-chart')
 }
 
 const rulerColors=RulerSettings.create();
+let chartDrawings;
 let rulerEnabled=false,rulerStart=null,rulerEnd=null,rulerLocked=false,shiftHeld=false,rulerTemporary=false,rulerDragging=false,rulerPointer=null;
 const rulerBtn=$('btnRuler');rulerBtn.className='btn-toggle';rulerBtn.textContent='📏 줄자';rulerBtn.title='드래그로 측정 · Shift+드래그: 임시 줄자 · Esc 종료';rulerBtn.setAttribute('aria-pressed','false');
 const rulerLabel=document.createElement('div');rulerLabel.id='rulerMeasurementLabel';rulerLabel.hidden=true;rulerLabel.style.cssText='position:absolute;pointer-events:none;z-index:7;background:#2563eb;color:#fff;border:1px solid #93c5fd;padding:8px 12px;border-radius:4px;font-size:13px;font-weight:700;line-height:1.6;text-align:center;white-space:pre-line;box-shadow:0 2px 8px #0009;max-width:280px';$('unified-chart').append(rulerLabel);
@@ -315,7 +528,7 @@ rulerHost.addEventListener('pointercancel',()=>{if(rulerDragging){endRulerDrag()
 let rulerVolumeData=null,rulerVolumePrefix=[];
 function measureDetails(a,b){if(rulerVolumeData!==all){rulerVolumeData=all;rulerVolumePrefix=[0];for(const c of all)rulerVolumePrefix.push(rulerVolumePrefix.at(-1)+(Number.isFinite(c.volume)?c.volume:0));}
  const ai=Math.max(0,Math.min(all.length-1,Math.round(a.index))),bi=Math.max(0,Math.min(all.length-1,Math.round(b.index))),lo=Math.min(ai,bi),hi=Math.max(ai,bi);const seconds=all[ai]&&all[bi]?Math.abs(all[bi].time-all[ai].time):0;const days=Math.floor(seconds/86400),hours=Math.floor(seconds%86400/3600),minutes=Math.floor(seconds%3600/60);return {bars:Math.round(b.index-a.index),period:[days?days+'일':'',hours?hours+'시간':'',minutes?minutes+'분':''].filter(Boolean).join(' ')||'0분',volume:(rulerVolumePrefix[hi+1]||0)-(rulerVolumePrefix[lo]||0),start:all[ai]?.time,end:all[bi]?.time};}
-function drawRuler(w,h){rulerLabel.hidden=true;if(!(rulerEnabled||rulerTemporary)||!rulerStart||!rulerEnd)return;
+function drawRuler(w,h){if(!rulerStart||!rulerEnd)return;
  const pl=pricePane();if(!pl)return;
  const x1=chart.timeScale().logicalToCoordinate(rulerStart.index-windowStart),x2=chart.timeScale().logicalToCoordinate(rulerEnd.index-windowStart),y1=candles.priceToCoordinate(rulerStart.price),y2=candles.priceToCoordinate(rulerEnd.price);
  if([x1,x2,y1,y2].some(v=>v===null))return;const change=priceChange(rulerStart.price,rulerEnd.price);if(!change)return;
@@ -387,7 +600,7 @@ function placeLegendToggle() {
   legendToggle.hidden = Boolean(studyPanels?.priceCollapsed());
   if (legendToggle.hidden) return;
   const top = Math.min(...layout.map(p => p.top));
-  const symbolOffset = 0;
+  const symbolOffset = !chartIdentityControls.hidden && pricePane()?.top === top ? 28 : 0;
   setStyle(legendToggle, 'top', top + symbolOffset + (legendCollapsed ? 5 : 32) + 'px');
 }
 legendToggle.onclick = e => {
@@ -417,7 +630,7 @@ function isChartFullscreen() {
 function syncChartFullscreen() {
   const active = isChartFullscreen();
   chartWorkspace.classList.toggle('chart-is-fullscreen', active);
-  const label = active ? '차트 전체화면 종료' : '가격 차트와 모든 지표 전체화면';
+  const label = active ? '차트 전체화면 해제' : '가격 차트와 모든 지표 전체화면';
   chartFullscreenBtn.title = label;
   chartFullscreenBtn.setAttribute('aria-label', label);
   chartFullscreenBtn.setAttribute('aria-pressed', String(active));
@@ -493,16 +706,91 @@ function resetScales(){
  }
 }
 function centeredRange(index,span=240){return {from:index-span/2,to:index+span/2};}
-function focusSignal(s,element){chartDateFocus=null;selectedSignal=s;selectedGuideVisible=true;clearTimeout(selectedGuideTimer);clearInterval(selectedCountdownTimer);selectedGuideDeadline=performance.now()+5000;updateGuideCountdown();selectedCountdownTimer=setInterval(updateGuideCountdown,100);selectedGuideTimer=setTimeout(()=>{selectedGuideVisible=false;clearInterval(selectedCountdownTimer);guideCountdown.hidden=true;schedule();},5000);for(const el of $('signalListContainer').querySelectorAll('.signal-item')){el.style.outline='';el.setAttribute('aria-current','false');}element.style.outline='2px solid #fbbf24';element.setAttribute('aria-current','true');
- const old=chart.timeScale().getVisibleLogicalRange();const span=old?Math.max(80,Math.min(600,old.to-old.from)):240;
- renderWindow(lowerBound(all,s.time),true,span);
- chart.clearCrosshairPosition();
- $('chart-key').textContent=`선택 신호: ${date(s.eventTime)} · ${s.rate.toFixed(6)}% · 노란선: 해당 ${$('intervalSelect').selectedOptions[0].text} 캔들 (${date(s.time)})`;
- status(`신호 이동 완료 · ${date(s.eventTime)} · ${s.rate.toFixed(6)}%`);schedule();}
+
+function findNearestBarIndex(t) {
+  if (!all.length) return 0;
+  const sec = Number(t);
+  const intSec = duration[loadedMarket?.int ?? $('intervalSelect').value] || 300;
+  const next = lowerBound(all, sec);
+  if (next < all.length && all[next].time === sec) return next;
+  const previous = Math.max(0, next - 1);
+  if (next >= all.length || (sec >= all[previous].time && sec < all[previous].time + intSec)) return previous;
+  return sec - all[previous].time <= all[next].time - sec ? previous : next;
+}
+
+function focusSignal(s, element) {
+  chartDateFocus = null;
+  // 신호 이동 시 급등락 하이라이트가 화면을 덮어쓰지 않도록 즉시 해제
+  surgeHighlight.active = false;
+  if (surgeCountdownBadge) surgeCountdownBadge.hidden = true;
+
+  // 캔들 배열(all)에서 해당 신호 시각에 가장 부합하는 봉 인덱스 탐색
+  const targetTime = Number(s.eventTime || s.time);
+  const barIdx = findNearestBarIndex(targetTime);
+  const matchedBar = all[barIdx];
+  if (matchedBar) {
+    // 차트 타임스케일에 존재하는 봉의 시간으로 매핑해야 노란선이 정확히 그려짐
+    s.time = matchedBar.time;
+  }
+
+  selectedSignal = s;
+  selectedGuideVisible = true;
+  clearTimeout(selectedGuideTimer);
+  clearInterval(selectedCountdownTimer);
+  selectedGuideDeadline = performance.now() + 5000;
+  updateGuideCountdown();
+  selectedCountdownTimer = setInterval(updateGuideCountdown, 100);
+  selectedGuideTimer = setTimeout(() => {
+    selectedGuideVisible = false;
+    clearInterval(selectedCountdownTimer);
+    guideCountdown.hidden = true;
+    schedule();
+  }, 5000);
+
+  // 모든 신호 아이템 아웃라인 초기화 후 클릭된 요소 강조
+  document.querySelectorAll('.signal-item').forEach(el => {
+    el.style.outline = '';
+    el.setAttribute('aria-current', 'false');
+  });
+  if (element) {
+    element.style.outline = '2px solid #fbbf24';
+    element.setAttribute('aria-current', 'true');
+  }
+
+  const old = chart.timeScale().getVisibleLogicalRange();
+  const span = old ? Math.max(80, Math.min(300, old.to - old.from)) : 140;
+  renderWindow(barIdx, true, span);
+  chart.clearCrosshairPosition();
+
+  const timeLabel = date(targetTime);
+  const tfLabel = s.timeframe || $('intervalSelect').selectedOptions[0]?.text || '';
+  const titleLabel = s.title || (s.rate !== undefined ? `펀딩비 ${s.rate.toFixed(6)}%` : '신호');
+
+  $('chart-key').textContent = `선택 신호: [${tfLabel}] ${titleLabel} · 발생 시각: ${timeLabel} · 5초간 노란선 가이드`;
+  status(`신호 날짜 이동 완료 ➔ ${timeLabel} ([${tfLabel}] ${titleLabel})`);
+  schedule();
+}
+
 function renderSignalMarkers(part){if(!part.length)return;
  const visible=signals.slice(lowerBound(signals,part[0].time),lowerBound(signals,part.at(-1).time+1));
  const unique=new Map();for(const s of visible){const old=unique.get(s.time);if(!old||s.rate<old.rate)unique.set(s.time,s);}
- markers.setMarkers(unique.size<=300?[...unique.values()].map(s=>({time:s.time,position:'aboveBar',color:s.type==='EXTREME'?'#a855f7':'#ef4444',shape:'arrowDown',text:s.rate.toFixed(3)+'%'})):[]);
+ const markerList = [...unique.values()].map(s=>({time:s.time,position:'aboveBar',color:s.type==='EXTREME'?'#a855f7':'#ef4444',shape:'arrowDown',text:s.rate.toFixed(3)+'%'}));
+
+ // 전략 신호 (RSI 반전 / 펀딩비+5분봉 BUY 등) 마커 통합
+ if (typeof strategySignals !== 'undefined' && strategySignals.length) {
+   const stratVisible = strategySignals.filter(s => s.time >= part[0].time && s.time <= part.at(-1).time);
+   for (const st of stratVisible) {
+     markerList.push({
+       time: st.time,
+       position: st.position || 'belowBar',
+       color: st.color || '#10b981',
+       shape: st.shape || 'arrowUp',
+       text: st.text || '⚡BUY'
+     });
+   }
+ }
+
+ markers.setMarkers(markerList.length<=400?markerList.sort((a,b)=>a.time-b.time):[]);
 }
 function renderWindow(center,focus=true,span=240,preservedRange=null){if(!all.length)return;changingWindow=true;clearTimeout(navTimer);windowStart=windowStartFor(center);windowEnd=Math.min(all.length,windowStart+WINDOW);const part=all.slice(windowStart,windowEnd),{warn,ext}=thresholds();
  candles.setData(part.map(({time,open,high,low,close})=>({time,open,high,low,close})));
@@ -514,9 +802,46 @@ function renderWindow(center,focus=true,span=240,preservedRange=null){if(!all.le
  studyPanels?.render(part);
  renderSignalMarkers(part);
  $('historyPosition').max=Math.max(0,all.length-1);$('historyPosition').value=Math.max(0,Math.min(all.length-1,center));$('historyInfo').textContent=`${all.length.toLocaleString()}봉 · 화면 구간 ${date(part[0].time)} ~ ${date(part.at(-1).time)}`;
- if(focus){const ix=Math.max(0,Math.min(part.length-1,center-windowStart));resetScales();const rng=centeredRange(ix,Math.min(span,Math.max(20,all.length*1.2)));if(center>=all.length-1)latestOffset=rng.to-ix;chart.timeScale().setVisibleLogicalRange(rng);}else if(preservedRange){chart.timeScale().setVisibleLogicalRange({from:preservedRange.from-windowStart,to:preservedRange.to-windowStart});}requestAnimationFrame(()=>{changingWindow=false;schedule();scheduleVisibleHistory();});}
+ if(focus){
+  if(surgeHighlight.active && !selectedSignal && all.length){
+   const sIdx = Math.max(0, lowerBound(all, surgeHighlight.startTime) - 6);
+   const eIdx = Math.min(part.length - 1, all.length - 1 - windowStart + 6);
+   resetScales();
+   chart.timeScale().setVisibleLogicalRange({from: sIdx - windowStart, to: eIdx});
+  } else {
+   const ix=Math.max(0,Math.min(part.length-1,center-windowStart));resetScales();const rng=centeredRange(ix,Math.min(span,Math.max(20,all.length*1.2)));if(center>=all.length-1)latestOffset=rng.to-ix;chart.timeScale().setVisibleLogicalRange(rng);
+  }
+ }else if(preservedRange){chart.timeScale().setVisibleLogicalRange({from:preservedRange.from-windowStart,to:preservedRange.to-windowStart});}requestAnimationFrame(()=>{changingWindow=false;schedule();scheduleVisibleHistory();});}
 let listOffset=0;function renderList(){listOffset=0;$('signalListContainer').replaceChildren();$('signalCountTag').textContent=signals.length+'개';appendList();}
-function appendList(){const container=$('signalListContainer');container.querySelector('.more')?.remove();const end=Math.min(signals.length,listOffset+100);const fragment=document.createDocumentFragment();for(;listOffset<end;listOffset++){const s=signals[signals.length-1-listOffset],el=document.createElement('div');el.className='signal-item '+s.type;const text=document.createElement('div');text.textContent=`${date(s.eventTime)} · ${s.rate.toFixed(6)}%`;el.append(text);el.onclick=()=>focusSignal(s,el);fragment.append(el);}container.append(fragment);if(listOffset<signals.length){const b=document.createElement('button');b.className='more';b.textContent='신호 100개 더 보기';b.onclick=appendList;container.append(b);}if(!signals.length)container.textContent='설정 조건에 해당하는 펀딩비 신호 없음';}
+function appendList(){const container=$('signalListContainer');container.querySelector('.more')?.remove();const end=Math.min(signals.length,listOffset+100);const fragment=document.createDocumentFragment();
+ const tfText = $('intervalSelect').selectedOptions[0]?.text || '';
+ for(;listOffset<end;listOffset++){
+   const s=signals[signals.length-1-listOffset], el=document.createElement('div');
+   el.className='signal-item '+s.type;
+   s.timeframe = '정산 펀딩비 (' + tfText + ')';
+   s.title = `펀딩비 ${s.rate.toFixed(6)}%`;
+   el.innerHTML = `
+     <div class="signal-info" style="width:100%;">
+       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
+         <span style="background:#2563eb; color:#fff; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">⏱️ ${s.type==='EXTREME'?'극단 경고':'1차 경고'}</span>
+         <span class="signal-rate ${s.type}">${s.rate.toFixed(4)}%</span>
+       </div>
+       <div style="font-size:11px; font-weight:700; color:#f1f5f9; margin-bottom:2px;">
+         📅 ${date(s.eventTime || s.time)}
+       </div>
+       <div style="font-size:10px; color:#9ca3af;">
+         봉 시각: ${date(s.time)} (정산 기준)
+       </div>
+     </div>
+     <button type="button" class="btn-move" style="margin-left:8px; white-space:nowrap;">이동</button>
+   `;
+   el.onclick=()=>focusSignal(s,el);
+   fragment.append(el);
+ }
+ container.append(fragment);
+ if(listOffset<signals.length){const b=document.createElement('button');b.className='more';b.textContent='신호 100개 더 보기';b.onclick=appendList;container.append(b);}
+ if(!signals.length)container.textContent='설정 조건에 해당하는 펀딩비 신호 없음';
+}
 chart.subscribeCrosshairMove(p=>{studyPanels?.updateLegend(p.time??null);if(selectedSignal)return;if(!p.time)return;const setKey=t=>{const el=$('chart-key');if(el.textContent!==t)el.textContent=t;};const c=p.seriesData.get(candles),v=volume?p.seriesData.get(volume):undefined,f=funding?p.seriesData.get(funding):undefined,cycle=settlementCycle?p.seriesData.get(settlementCycle):undefined,live=fundingLive?p.seriesData.get(fundingLive):undefined;setKey(`${date(Number(p.time))} · 종가 ${c?.close??'—'} · 거래량 ${v?.value??'—'} · 정산 펀딩비 ${f?.value!==undefined?f.value.toFixed(6)+'%':'기록 없음'} (봉 내 최저 실현율) · 관측 현재율 ${live?.value!==undefined?live.value.toFixed(6)+'%':'기록 없음'} (미정산) · 정산 간격 ${cycle?.value!==undefined?cycle.value+'시간':'기록 없음'}`);});
 let navTimer;chart.timeScale().subscribeVisibleLogicalRangeChange(r=>{schedule();if(r&&!changingWindow)scheduleVisibleHistory();});
 new ResizeObserver(schedule).observe($('unified-chart'));
@@ -872,7 +1197,7 @@ async function jumpToChartDate(target,signal){
 }
 
 async function loadData(){try{thresholds();}catch(e){return status(e.message,true);}const symbol=$('symbolInput').value.trim().toUpperCase();if(!/^[A-Z0-9_-]+$/.test(symbol))return status('유효한 심볼을 입력하세요.',true);
- chartDateFocus=null;dateNavigation?.cancel();navigationController?.abort();navigationController=new AbortController();controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;loadedMarket={ex,symbol,int,id};historyState={id,buffer:[],pending:new Set(),exhausted:new Set()};$('historyLoading').hidden=true;chartSymbolLabel.textContent=FundingEngine.contract(ex,symbol);chartSymbolLabel.title=ex+' · '+chartSymbolLabel.textContent+' · '+$('intervalSelect').selectedOptions[0].text;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
+ chartDateFocus=null;dateNavigation?.cancel();navigationController?.abort();navigationController=new AbortController();controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;loadedMarket={ex,symbol,int,id};historyState={id,buffer:[],pending:new Set(),exhausted:new Set()};$('historyLoading').hidden=true;chartSymbolLabel.textContent=FundingEngine.contract(ex,symbol);chartSymbolLabel.title=ex+' · '+chartSymbolLabel.textContent+' · '+$('intervalSelect').selectedOptions[0].text;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();strategySignals=[];if($('strategyCurrentCoinLabel'))$('strategyCurrentCoinLabel').textContent=`[${symbol}] 전략 신호`;if($('strategyCountTag'))$('strategyCountTag').textContent='0개';if($('strategyListContainer'))$('strategyListContainer').innerHTML=`<div style="color:#9ca3af;font-size:11px;text-align:center;padding:25px;line-height:1.6;"><span style="color:#60a5fa;font-weight:700;">[${symbol}]</span> 신호 데이터 분석 중...<br><span style="font-size:10px;color:#6b7280;">차트 로드 완료 후 전략 신호가 즉시 업데이트됩니다.</span></div>`;candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
  $('coverage').textContent='선택 거래소 USDT 무기한 선물 · 제공 가능한 이력 끝까지 수집 · 과거 구간은 날짜로 이동(Alt+G) 또는 하단 슬라이더로 이동 · 전체 이력은 계속 수집';
  status(`${ex} ${symbol} · 과거 이력 수집 시작`);startFundingUpdates(ex,symbol,int,id);
  let candleEnd=Date.now(),chunks=[],count=0,candleNote='',fundNote='';historyState.buffer=chunks;
@@ -884,6 +1209,8 @@ async function loadData(){try{thresholds();}catch(e){return status(e.message,tru
  const edge=ex==='BINANCE'?rows.at(-1).time:rows[0].time;if(edge===previous){fundNote='API 페이지 반복: 제공 범위까지만 표시';break;}previous=edge;cursor=ex==='BINANCE'?edge*1000+1:edge*1000-1;if((ex==='BINANCE'&&cursor>=Date.now())||(ex!=='BINANCE'&&edge<=all[0].time)){fundNote='캔들 구간 수집 완료';break;}await pause(ex==='BINGX'?1150:350,signal);}
  }catch(e){fundNote=e.name==='AbortError'?'사용자 중지':e.message;}rates=FundingEngine.merge(uniqueSorted(parts.flat()),rates);}
  if(id!==run)return;rates=FundingEngine.merge(rates,(fundingSession?.latestRows??[]).filter(f=>f.time>=all[0].time));try{officialCycle=await fetchOfficialCycle(ex,symbol,signal);}catch{}try{otherCycles=await fetchAllCycles(symbol,signal);}catch{}if(id!==run)return;const fundingView=captureChartView();rebuild();restoreChartView(fundingView,false);busy=false;renderFundingBoard();
+ calculateStrategySignals();
+ if (typeof renderSignalMarkers === 'function') renderSignalMarkers(all.slice(windowStart, windowEnd));
  $('coverage').textContent=`캔들: ${date(all[0].time)} ~ ${date(all.at(-1).time)} (${candleNote}) · 펀딩비: ${rates.length?date(rates[0].time)+' ~ '+date(rates.at(-1).time):'확인된 기록 없음'} (${fundNote||'미수집'}) · 선택 거래소의 정산 기록(봉 내 최저율) · 노란선: 페이지에서 관측한 현재 미정산율 · 막대: 정산 기록 · 기록 없는 구간은 공백${unmappedFunding.length?' · 캔들 미연결 '+unmappedFunding.length+'건':''}. ${ex==='OKX'?'OKX 펀딩비 API는 최근 3개월 제공. ':''}${ex==='MEXC'?'거래량 단위: 계약 수. ':'거래량 단위: 기초자산. '}`;
  status(`${ex} ${symbol} · ${all.length.toLocaleString()}봉 / 펀딩비 ${rates.length.toLocaleString()}건`,!rates.length);
 }
@@ -909,4 +1236,774 @@ $('fundingMinimumBtn').onclick=focusMinimumFunding;
 for(const id of ['exchangeSelect','intervalSelect'])$(id).onchange=loadData;
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&fundingSession)void refreshFundingSession(fundingSession);});
 for(const p of studyPanels.active()){const s=studyPanels.primary(p);if(s&&p.stretch>0)s.getPane().setStretchFactor(p.stretch);}
+
+// [전략 신호 관리: RSI 반전 & 펀딩비 극단+5분봉 RSI BUY 신호 & 5일 급등락 결합]
+let strategySignals = [];
+let currentStrategyFilter = 'all';
+
+function buildHourlyCandles(bars) {
+  if (!bars || !bars.length) return [];
+  const hourly = [];
+  let currentHour = -1;
+  let cur = null;
+  for (let i = 0; i < bars.length; i++) {
+    const b = bars[i];
+    const hTime = Math.floor(b.time / 3600) * 3600;
+    if (hTime !== currentHour) {
+      if (cur) hourly.push(cur);
+      currentHour = hTime;
+      cur = {
+        time: hTime,
+        open: b.open,
+        high: b.high,
+        low: b.low,
+        close: b.close,
+        volume: b.volume || 0
+      };
+    } else {
+      cur.high = Math.max(cur.high, b.high);
+      cur.low = Math.min(cur.low, b.low);
+      cur.close = b.close;
+      cur.volume = (cur.volume || 0) + (b.volume || 0);
+    }
+  }
+  if (cur) hourly.push(cur);
+  return hourly;
+}
+
+function calculateRSI(bars, period = 14) {
+  if (!bars || bars.length <= period) return [];
+  const rsiList = [];
+  let gains = 0, losses = 0;
+  for (let i = 1; i <= period; i++) {
+    const diff = bars[i].close - bars[i - 1].close;
+    if (diff > 0) gains += diff;
+    else losses -= diff;
+  }
+  let avgG = gains / period;
+  let avgL = losses / period;
+  let rs = avgL === 0 ? 100 : avgG / avgL;
+  rsiList.push({ time: bars[period].time, rsi: 100 - (100 / (1 + rs)), index: period, bar: bars[period] });
+
+  for (let i = period + 1; i < bars.length; i++) {
+    const diff = bars[i].close - bars[i - 1].close;
+    const gain = diff > 0 ? diff : 0;
+    const loss = diff < 0 ? -diff : 0;
+    avgG = (avgG * (period - 1) + gain) / period;
+    avgL = (avgL * (period - 1) + loss) / period;
+    rs = avgL === 0 ? 100 : avgG / avgL;
+    rsiList.push({ time: bars[i].time, rsi: 100 - (100 / (1 + rs)), index: i, bar: bars[i] });
+  }
+  return rsiList;
+}
+
+function calculateStrategySignals() {
+  strategySignals = [];
+  if (!all.length) {
+    renderStrategyList();
+    return;
+  }
+
+  const symbol = loadedMarket?.symbol || $('symbolInput').value.trim().toUpperCase();
+  const rsiOn = $('stratRsiToggle')?.checked ?? true;
+  const fundingRsiOn = $('stratFundingRsiToggle')?.checked ?? true;
+  const comboOn = $('stratComboToggle')?.checked ?? false;
+  const fundingThresh = Number($('stratFundingThresh')?.value ?? -0.5);
+  const currentTfText = $('intervalSelect').selectedOptions[0]?.text || $('intervalSelect').value;
+
+  // 1) 1시간봉 RSI 모멘텀 반전 신호 (과매도 ≤30 탈출 30돌파 BUY / 과매수 ≥70 이탈 70돌파 SELL)
+  const hourlyBars = buildHourlyCandles(all);
+  const rsiBars = hourlyBars.length >= 20 ? hourlyBars : all;
+  const rsiTfLabel = hourlyBars.length >= 20 ? '1시간봉' : currentTfText;
+  const rsi1h = calculateRSI(rsiBars, 14);
+
+  if (rsiOn && rsi1h.length > 2) {
+    let wasOversold = false, wasOverbought = false;
+    for (let i = 1; i < rsi1h.length; i++) {
+      const prev = rsi1h[i - 1].rsi;
+      const cur = rsi1h[i].rsi;
+      const rBar = rsi1h[i].bar;
+      const nearestIdx = findNearestBarIndex(rBar.time);
+      const chartBar = all[nearestIdx] || rBar;
+
+      if (cur <= 30) wasOversold = true;
+      if (cur >= 70) wasOverbought = true;
+
+      if (wasOversold && prev < 30 && cur >= 30) {
+        strategySignals.push({
+          symbol,
+          category: 'rsi',
+          time: chartBar.time,
+          eventTime: rBar.time,
+          timeframe: rsiTfLabel,
+          badgeText: '⚡ 1h RSI BUY',
+          type: 'RSI_BUY',
+          title: '1시간봉 RSI 과매도 탈출 (30 상향 돌파 반등)',
+          conditionDesc: `1시간봉 RSI ${prev.toFixed(1)} ➔ ${cur.toFixed(1)} (30선 골든크로스 반등 타점)`,
+          color: '#10b981',
+          position: 'belowBar',
+          shape: 'arrowUp',
+          text: '1h 30▲',
+          price: chartBar.close
+        });
+        wasOversold = false;
+      }
+      if (wasOverbought && prev > 70 && cur <= 70) {
+        strategySignals.push({
+          symbol,
+          category: 'rsi',
+          time: chartBar.time,
+          eventTime: rBar.time,
+          timeframe: rsiTfLabel,
+          badgeText: '🔻 1h RSI SELL',
+          type: 'RSI_SELL',
+          title: '1시간봉 RSI 과매수 이탈 (70 하향 돌파 반락)',
+          conditionDesc: `1시간봉 RSI ${prev.toFixed(1)} ➔ ${cur.toFixed(1)} (70선 데드크로스 숏 타점)`,
+          color: '#f97316',
+          position: 'aboveBar',
+          shape: 'arrowDown',
+          text: '1h 70▼',
+          price: chartBar.close
+        });
+        wasOverbought = false;
+      }
+    }
+  }
+
+  // 2) 펀딩비 극단 + RSI 과매도 후 30 돌파 BUY 신호 (숏 스퀴즈 롱 타점)
+  const rsiNative = calculateRSI(all, 14);
+  if (fundingRsiOn && mapped.size && rsiNative.length > 2) {
+    for (const [fTime, fData] of mapped) {
+      if (fData.rate <= fundingThresh) {
+        const fIdx = lowerBound(all, fTime);
+        let foundOversold = false;
+        for (let k = fIdx; k < Math.min(all.length, fIdx + 40); k++) {
+          const rObj = rsiNative.find(r => r.time === all[k].time);
+          if (!rObj) continue;
+          if (rObj.rsi <= 32) foundOversold = true;
+          if (foundOversold && rObj.rsi >= 30) {
+            if (!strategySignals.some(s => s.time === all[k].time && s.type === 'FUNDING_RSI_BUY')) {
+              strategySignals.push({
+                symbol,
+                category: 'funding_rsi',
+                time: all[k].time,
+                eventTime: all[k].time,
+                timeframe: currentTfText,
+                badgeText: '⚡ 펀딩+RSI BUY',
+                type: 'FUNDING_RSI_BUY',
+                title: `펀딩비(${fData.rate.toFixed(3)}%) + RSI 30돌파 롱`,
+                conditionDesc: `펀딩비 ${fData.rate.toFixed(3)}% (기준 ${fundingThresh}% 이하) + RSI 과매도 탈출 반등`,
+                color: '#22c55e',
+                position: 'belowBar',
+                shape: 'arrowUp',
+                text: '⚡BUY',
+                price: all[k].close
+              });
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // 3) 5일 급등락 + 지표 결합 필터 신호
+  if (all.length >= 2) {
+    const fiveDaysSec = 5 * 86400;
+    const lastTime = all.at(-1).time;
+    const fiveDaysStartIdx = lowerBound(all, lastTime - fiveDaysSec);
+    const wBars = all.slice(fiveDaysStartIdx);
+    if (wBars.length >= 2) {
+      const startPrice = wBars[0].open;
+      let minLow = Infinity, maxHigh = -Infinity;
+      for (const b of wBars) {
+        if (b.low < minLow) minLow = b.low;
+        if (b.high > maxHigh) maxHigh = b.high;
+      }
+      const surgeGain = startPrice > 0 ? ((maxHigh - startPrice) / startPrice) * 100 : 0;
+      const dropLoss = startPrice > 0 ? ((minLow - startPrice) / startPrice) * 100 : 0;
+      const maxSwing = minLow > 0 ? ((maxHigh - minLow) / minLow) * 100 : 0;
+
+      // 5일간 40% 이상 급등한 경우: 1시간봉 RSI 70 하향 돌파(고점 숏 타점) 결합
+      if (surgeGain >= 40 || maxSwing >= 40) {
+        const rsiSellSignals = strategySignals.filter(s => s.type === 'RSI_SELL' && s.time >= lastTime - fiveDaysSec);
+        for (const sig of rsiSellSignals) {
+          strategySignals.push({
+            symbol,
+            category: 'combo',
+            time: sig.time,
+            eventTime: sig.eventTime,
+            timeframe: sig.timeframe,
+            badgeText: '🚀 5일 급등 결합 SELL',
+            type: 'COMBO_SELL',
+            title: `5일 급등(+${surgeGain.toFixed(1)}%) + 1h RSI 70 하향 이탈`,
+            conditionDesc: `5일간 +${surgeGain.toFixed(1)}% 급등한 종목에서 1시간봉 RSI 70선 하향 돌파(고점 숏 타점) 발생`,
+            color: '#ef4444',
+            position: 'aboveBar',
+            shape: 'arrowDown',
+            text: '🚀SELL',
+            price: sig.price
+          });
+        }
+      }
+
+      // 5일간 40% 이상 급락한 경우: RSI 30 상향 돌파(저점 롱 반등) 결합
+      if (dropLoss <= -40 || (startPrice > 0 && ((wBars.at(-1).close - startPrice) / startPrice) * 100 <= -40)) {
+        const rsiBuySignals = strategySignals.filter(s => (s.type === 'RSI_BUY' || s.type === 'FUNDING_RSI_BUY') && s.time >= lastTime - fiveDaysSec);
+        for (const sig of rsiBuySignals) {
+          strategySignals.push({
+            symbol,
+            category: 'combo',
+            time: sig.time,
+            eventTime: sig.eventTime,
+            timeframe: sig.timeframe,
+            badgeText: '🚀 5일 급락 결합 BUY',
+            type: 'COMBO_BUY',
+            title: `5일 급락(${dropLoss.toFixed(1)}%) + RSI 30선 상향 반등`,
+            conditionDesc: `5일간 ${dropLoss.toFixed(1)}% 급락한 종목에서 RSI 30선 상향 골든크로스(저점 반등 롱 타점) 발생`,
+            color: '#06b6d4',
+            position: 'belowBar',
+            shape: 'arrowUp',
+            text: '🚀BUY',
+            price: sig.price
+          });
+        }
+      }
+    }
+  }
+
+  // [5일 급등락 + 지표 결합 필터] 토글 활성화 시 결합 신호만 유지
+  if (comboOn) {
+    strategySignals = strategySignals.filter(s => s.category === 'combo');
+  }
+
+  strategySignals.sort((a, b) => a.time - b.time);
+  renderStrategyList();
+}
+
+function renderStrategyList() {
+  const container = $('strategyListContainer');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const symbol = loadedMarket?.symbol || $('symbolInput').value.trim().toUpperCase();
+  if ($('strategyCurrentCoinLabel')) {
+    $('strategyCurrentCoinLabel').textContent = `[${symbol}] 전략 신호`;
+  }
+
+  // 타 코인 신호가 섞이지 않도록 현재 심볼 신호만 선별
+  const coinSignals = strategySignals.filter(s => !s.symbol || s.symbol === symbol);
+
+  // 탭 필터(전체 / ⚡펀딩+RSI / ⏱️1h RSI / 🚀5일 결합) 적용
+  const filtered = coinSignals.filter(s => {
+    if (currentStrategyFilter === 'all') return true;
+    return s.category === currentStrategyFilter;
+  });
+
+  if ($('strategyCountTag')) {
+    $('strategyCountTag').textContent = currentStrategyFilter === 'all'
+      ? `${coinSignals.length}개`
+      : `${filtered.length}개 / 전체 ${coinSignals.length}개`;
+  }
+
+  if (!filtered.length) {
+    const filterLabels = {
+      all: '전략',
+      funding_rsi: '펀딩비 + RSI',
+      rsi: '1시간봉 RSI',
+      combo: '5일 급등락 결합'
+    };
+    const fName = filterLabels[currentStrategyFilter] || '조건 부합';
+    container.innerHTML = `<div style="color:#9ca3af;font-size:11px;text-align:center;padding:25px;line-height:1.6;"><strong>[${symbol}]</strong>에서 조건에 부합하는 <span style="color:#93c5fd;">${fName}</span> 신호가 없습니다.</div>`;
+    return;
+  }
+
+  const reversed = [...filtered].reverse().slice(0, 80);
+  for (const s of reversed) {
+    const el = document.createElement('div');
+    el.className = 'signal-item ' + s.type;
+    el.style.borderLeftColor = s.color;
+    el.style.background = s.type.includes('BUY')
+      ? 'rgba(34, 197, 94, 0.12)'
+      : (s.type.includes('SELL') ? 'rgba(239, 68, 68, 0.12)' : 'rgba(249, 115, 22, 0.12)');
+    const priceStr = (typeof ScannerEngine !== 'undefined') ? ScannerEngine.formatPrice(s.price) : s.price.toFixed(4);
+
+    el.innerHTML = `
+      <div class="signal-info" style="width:100%;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+          <span style="background:#1e3a8a; color:#93c5fd; font-size:10px; font-weight:800; padding:2px 7px; border-radius:4px; border:1px solid #3b82f6;">⏱️ ${s.timeframe}</span>
+          <span style="font-size:11px; font-weight:800; color:${s.color};">${s.badgeText}</span>
+        </div>
+        <div style="font-size:12px; font-weight:800; color:#f8fafc; margin-bottom:3px;">
+          📅 ${date(s.eventTime || s.time)}
+        </div>
+        <div style="font-size:11px; color:#cbd5e1; font-weight:600; line-height:1.4;">
+          ${s.title}
+        </div>
+        <div style="font-size:10px; color:#94a3af; margin-top:3px; line-height:1.4;">
+          ${s.conditionDesc || ''} · <span style="color:#e2e8f0;">가격: <strong>$${priceStr}</strong></span>
+        </div>
+      </div>
+      <button type="button" class="btn-move" style="margin-left:8px; white-space:nowrap;">이동</button>
+    `;
+
+    el.onclick = () => {
+      focusSignal(s, el);
+    };
+
+    container.appendChild(el);
+  }
+}
+
+
+// [사이드바 탭 전환 관리]
+function setupSidebarTabs() {
+  const tabs = document.querySelectorAll('.sidebar-tab-btn');
+  const panels = document.querySelectorAll('.sidebar-panel');
+
+  function switchTab(targetId) {
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === targetId));
+    panels.forEach(p => p.classList.toggle('active', p.id === targetId));
+
+    // 5일 급등락 / 펀딩비 순위 서브 스위처 버튼 상태 동기화
+    document.querySelectorAll('.btn-scanner-switch').forEach(b => {
+      const isTarget = b.dataset.target === targetId;
+      b.classList.toggle('active', isTarget);
+      b.style.background = isTarget ? '#2563eb' : '#374151';
+      b.style.color = isTarget ? '#fff' : '#94a3b8';
+    });
+
+    if (targetId === 'tab-funding-rank' && !fundingRankList.length && !fundingRankController) {
+      startFundingRankScan();
+    }
+
+    if ($('fundingCountBadge')) {
+      $('fundingCountBadge').textContent = signals.length + '개';
+    }
+    if ($('signalCountTag')) {
+      $('signalCountTag').textContent = signals.length + '개';
+    }
+  }
+
+  tabs.forEach(btn => {
+    btn.onclick = () => switchTab(btn.dataset.tab);
+  });
+
+  document.querySelectorAll('.btn-scanner-switch').forEach(btn => {
+    btn.onclick = () => switchTab(btn.dataset.target);
+  });
+}
+
+// [5일 급등락 스캐너 제어]
+let scannerController = null;
+let scannedCoins = [];
+let currentFilterDir = 'all';
+
+function setupScanner() {
+  const startBtn = $('scannerStartBtn');
+  const threshInput = $('scannerThreshold');
+  const daysInput = $('scannerDays');
+  const statusText = $('scannerStatusText');
+  const progressBar = $('scannerProgressBar');
+  const progressFill = $('scannerProgressFill');
+  const container = $('scannerListContainer');
+  if (!startBtn) return;
+
+  const dirBtns = document.querySelectorAll('.btn-filter-dir');
+  dirBtns.forEach(btn => {
+    btn.onclick = () => {
+      dirBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentFilterDir = btn.dataset.dir;
+      renderScannerResults();
+    };
+  });
+
+  async function startScan() {
+    scannerController?.abort();
+    scannerController = new AbortController();
+    const signal = scannerController.signal;
+
+    const threshold = Number(threshInput?.value) || 40;
+    const days = Number(daysInput?.value) || 5;
+
+    startBtn.classList.add('scanning');
+    startBtn.textContent = '⏹️ 스캔 중...';
+    if (progressBar) progressBar.style.display = 'block';
+    if (progressFill) progressFill.style.width = '0%';
+    if (statusText) statusText.textContent = `바이낸스 선물 분석 중 (기준: 5일 ±${threshold}%)...`;
+    scannedCoins = [];
+    if (container) container.innerHTML = '<div class="scanner-empty-msg">코인 시세를 조회하고 있습니다... 잠시만 기다려주세요.</div>';
+
+    try {
+      await ScannerEngine.scanBinance({
+        days,
+        thresholdPct: threshold,
+        maxCoins: 250,
+        concurrency: 20,
+        signal,
+        onProgress: ({ processed, total, matchedCount }) => {
+          const pct = Math.round((processed / total) * 100);
+          if (progressFill) progressFill.style.width = pct + '%';
+          if (statusText) statusText.textContent = `스캔 진행: ${processed}/${total}개 분석 (${matchedCount}개 조건 부합)`;
+        },
+        onMatch: coin => {
+          scannedCoins.push(coin);
+          renderScannerResults();
+        }
+      });
+
+      if (statusText) statusText.textContent = `스캔 완료: 총 ${scannedCoins.length}개 코인 발견 (±${threshold}%)`;
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        if (statusText) statusText.textContent = '스캔이 취소되었습니다.';
+      } else {
+        if (statusText) statusText.textContent = '스캔 오류: ' + err.message;
+      }
+    } finally {
+      startBtn.classList.remove('scanning');
+      startBtn.textContent = '🔄 스캔 시작';
+      setTimeout(() => { if (progressBar) progressBar.style.display = 'none'; }, 2000);
+    }
+  }
+
+  startBtn.onclick = startScan;
+
+  ['stratRsiToggle', 'stratFundingRsiToggle', 'stratComboToggle', 'stratFundingThresh'].forEach(id => {
+    const el = $(id);
+    if (el) {
+      el.onchange = () => {
+        calculateStrategySignals();
+        renderSignalMarkers(all.slice(windowStart, windowEnd));
+        schedule();
+      };
+    }
+  });
+
+  const stratFilterBtns = document.querySelectorAll('.btn-strat-filter');
+  stratFilterBtns.forEach(btn => {
+    btn.onclick = () => {
+      stratFilterBtns.forEach(b => {
+        b.classList.remove('active');
+        b.style.background = '#374151';
+        b.style.color = '#cbd5e1';
+      });
+      btn.classList.add('active');
+      btn.style.background = '#2563eb';
+      btn.style.color = '#ffffff';
+      currentStrategyFilter = btn.dataset.filter || 'all';
+      renderStrategyList();
+    };
+  });
+
+  // 페이지 시작 시 1회 백그라운드 스캔 자동 시작
+  setTimeout(() => {
+    if (!scannedCoins.length && !scannerController) {
+      startScan();
+    }
+  }, 1000);
+}
+
+function renderScannerResults() {
+  const container = $('scannerListContainer');
+  if (!container) return;
+
+  const threshold = Number($('scannerThreshold')?.value) || 40;
+  let filtered = scannedCoins.filter(c => {
+    if (currentFilterDir === 'gainers') return c.changePct >= threshold;
+    if (currentFilterDir === 'losers') return c.changePct <= -threshold;
+    return Math.abs(c.changePct) >= threshold;
+  });
+
+  filtered.sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct));
+
+  if (!filtered.length) {
+    container.innerHTML = `<div class="scanner-empty-msg">설정된 조건(±${threshold}%)에 해당하는 코인이 없습니다.</div>`;
+    return;
+  }
+
+  container.innerHTML = '';
+  for (const coin of filtered) {
+    const card = document.createElement('div');
+    card.className = 'scanner-card';
+    if (surgeHighlight.active && surgeHighlight.symbol === coin.symbol) {
+      card.classList.add('selected');
+    }
+
+    const isGain = coin.changePct >= 0;
+    const sign = isGain ? '+' : '';
+    const badgeClass = isGain ? 'gain' : 'loss';
+    const arrow = isGain ? '🚀' : '🔻';
+
+    card.innerHTML = `
+      <div class="scanner-card-header">
+        <div class="scanner-symbol">
+          ${arrow} <span class="base">${coin.baseSymbol}</span><span style="color:#9ca3af;font-size:11px;">/USDT</span>
+        </div>
+        <span class="scanner-badge ${badgeClass}">${sign}${coin.changePct.toFixed(2)}%</span>
+      </div>
+      <div class="scanner-prices-row">
+        <span>5일 전: <span class="price-val">$${ScannerEngine.formatPrice(coin.startPrice)}</span></span>
+        <span>현재가: <span class="price-val">$${ScannerEngine.formatPrice(coin.currentPrice)}</span></span>
+      </div>
+      <div class="scanner-details-row">
+        <span>5일 진폭: $${ScannerEngine.formatPrice(coin.minLow)} ~ $${ScannerEngine.formatPrice(coin.maxHigh)} (+${coin.maxGain.toFixed(1)}%)</span>
+        <span>거래대금: ${ScannerEngine.formatMoney(coin.quoteVolume)}</span>
+      </div>
+    `;
+
+    card.onclick = () => {
+      document.querySelectorAll('.scanner-card').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
+
+      $('symbolInput').value = coin.baseSymbol;
+      strategySignals = [];
+      if ($('strategyCurrentCoinLabel')) $('strategyCurrentCoinLabel').textContent = `[${coin.baseSymbol}] 전략 신호`;
+      if ($('strategyCountTag')) $('strategyCountTag').textContent = '0개';
+      if ($('strategyListContainer')) {
+        $('strategyListContainer').innerHTML = `<div style="color:#9ca3af;font-size:11px;text-align:center;padding:25px;line-height:1.6;"><span style="color:#60a5fa;font-weight:700;">[${coin.baseSymbol}]</span> 신호 데이터 분석 중...<br><span style="font-size:10px;color:#6b7280;">차트 로드 완료 후 전략 신호가 즉시 업데이트됩니다.</span></div>`;
+      }
+      triggerSurgeHighlight(coin);
+      loadData();
+      status(`[${coin.symbol}] 5일간 ${sign}${coin.changePct.toFixed(2)}% ${isGain ? '상승' : '하락'} 구간 로드 완료 · 10초간 메인 차트에 가이드 표시`);
+    };
+
+    container.appendChild(card);
+  }
+}
+
+// [거래소별 실시간 펀딩비 순위 랭킹 제어]
+let fundingRankController = null;
+let fundingRankList = [];
+let fundingRankSort = 'negative'; // 'negative' (음수순), 'positive' (양수순), 'magnitude' (극단순)
+let fundingRankExchange = 'ALL';
+let fundingRankThreshFilter = 'all';
+let fundingRankSearchQuery = '';
+
+function setupFundingRank() {
+  const refreshBtn = $('fundingRankRefreshBtn');
+  const exSelect = $('fundingRankExchangeSelect');
+  const searchInput = $('fundingRankSearchInput');
+
+  if (exSelect) {
+    exSelect.onchange = () => {
+      fundingRankExchange = exSelect.value;
+      renderFundingRankList();
+    };
+  }
+
+  const sortBtns = document.querySelectorAll('.btn-funding-sort');
+  sortBtns.forEach(btn => {
+    btn.onclick = () => {
+      sortBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      fundingRankSort = btn.dataset.sort;
+      renderFundingRankList();
+    };
+  });
+
+  const threshBtns = document.querySelectorAll('.btn-funding-thresh');
+  threshBtns.forEach(btn => {
+    btn.onclick = () => {
+      threshBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      fundingRankThreshFilter = btn.dataset.thresh;
+      renderFundingRankList();
+    };
+  });
+
+  if (searchInput) {
+    searchInput.oninput = () => {
+      fundingRankSearchQuery = searchInput.value.trim().toUpperCase();
+      renderFundingRankList();
+    };
+  }
+
+  if (refreshBtn) {
+    refreshBtn.onclick = () => startFundingRankScan();
+  }
+
+  // 페이지 시작 시 2초 뒤 1회 백그라운드 펀딩비 수집
+  setTimeout(() => {
+    if (!fundingRankList.length && !fundingRankController) {
+      startFundingRankScan();
+    }
+  }, 2000);
+}
+
+async function startFundingRankScan() {
+  fundingRankController?.abort();
+  fundingRankController = new AbortController();
+  const signal = fundingRankController.signal;
+
+  const refreshBtn = $('fundingRankRefreshBtn');
+  const statusText = $('fundingRankStatusText');
+  const progressBar = $('fundingRankProgressBar');
+  const progressFill = $('fundingRankProgressFill');
+  const container = $('fundingRankListContainer');
+
+  if (refreshBtn) {
+    refreshBtn.classList.add('scanning');
+    refreshBtn.textContent = '⏹️ 수집 중...';
+  }
+  if (progressBar) progressBar.style.display = 'block';
+  if (progressFill) progressFill.style.width = '0%';
+  if (statusText) statusText.textContent = '거래소별 실시간 펀딩비 데이터를 조회하는 중...';
+  if (!fundingRankList.length && container) {
+    container.innerHTML = '<div class="scanner-empty-msg">바이낸스, 바이비트, 비트겟, 빙엑스, MEXC 등 실시간 펀딩비를 수집 중입니다...</div>';
+  }
+
+  try {
+    const results = await ScannerEngine.scanAllFundingRates({
+      signal,
+      onProgress: ({ completedExchanges, totalExchanges, count, exchange }) => {
+        const pct = Math.round((completedExchanges / totalExchanges) * 100);
+        if (progressFill) progressFill.style.width = pct + '%';
+        if (statusText) statusText.textContent = `${exchange} 완료 · 총 ${count.toLocaleString()}개 계약 수집 (${completedExchanges}/${totalExchanges})`;
+      }
+    });
+
+    fundingRankList = results;
+    renderFundingRankList();
+    if (statusText) {
+      statusText.textContent = `실시간 분석 완료: 총 ${fundingRankList.length.toLocaleString()}개 계약 펀딩비 순위 산출`;
+    }
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      if (statusText) statusText.textContent = '펀딩비 수집이 중지되었습니다.';
+    } else {
+      if (statusText) statusText.textContent = '수집 오류: ' + err.message;
+    }
+  } finally {
+    if (refreshBtn) {
+      refreshBtn.classList.remove('scanning');
+      refreshBtn.textContent = '🔄 갱신';
+    }
+    setTimeout(() => { if (progressBar) progressBar.style.display = 'none'; }, 2000);
+  }
+}
+
+function renderFundingRankList() {
+  const container = $('fundingRankListContainer');
+  if (!container) return;
+
+  // 1. 거래소 필터
+  let filtered = [...fundingRankList];
+  if (fundingRankExchange !== 'ALL') {
+    filtered = filtered.filter(item => item.exchange === fundingRankExchange);
+  }
+
+  // 2. 임계값 조건 필터
+  if (fundingRankThreshFilter === 'neg_01') filtered = filtered.filter(c => c.rate <= -0.1);
+  else if (fundingRankThreshFilter === 'neg_05') filtered = filtered.filter(c => c.rate <= -0.5);
+  else if (fundingRankThreshFilter === 'pos_005') filtered = filtered.filter(c => c.rate >= 0.05);
+
+  // 3. 심볼 검색 필터
+  if (fundingRankSearchQuery) {
+    filtered = filtered.filter(c => c.symbol.toUpperCase().includes(fundingRankSearchQuery) || c.baseSymbol.toUpperCase().includes(fundingRankSearchQuery));
+  }
+
+  // 4. 순위 정렬
+  if (fundingRankSort === 'negative') {
+    filtered.sort((a, b) => a.rate - b.rate);
+  } else if (fundingRankSort === 'positive') {
+    filtered.sort((a, b) => b.rate - a.rate);
+  } else if (fundingRankSort === 'magnitude') {
+    filtered.sort((a, b) => Math.abs(b.rate) - Math.abs(a.rate));
+  }
+
+  if (!filtered.length) {
+    container.innerHTML = '<div class="scanner-empty-msg">선택한 조건에 부합하는 펀딩비 코인이 없습니다.</div>';
+    return;
+  }
+
+  container.innerHTML = '';
+  const nowSec = Math.floor(Date.now() / 1000);
+  const displayLimit = Math.min(filtered.length, 150);
+
+  for (let i = 0; i < displayLimit; i++) {
+    const item = filtered[i];
+    const card = document.createElement('div');
+    card.className = 'funding-rank-card';
+    if ($('symbolInput')?.value === item.baseSymbol && $('exchangeSelect')?.value === item.exchange) {
+      card.classList.add('selected');
+    }
+
+    const rank = i + 1;
+    let rankBadgeClass = '';
+    if (rank === 1) rankBadgeClass = 'gold';
+    else if (rank === 2) rankBadgeClass = 'silver';
+    else if (rank === 3) rankBadgeClass = 'bronze';
+
+    const isNeg = item.rate < 0;
+    const isExtremeNeg = item.rate <= -0.5;
+    const isPos = item.rate > 0;
+    const rateSign = isPos ? '+' : '';
+    const rateClass = isExtremeNeg ? 'extreme-neg' : (isNeg ? 'neg' : (isPos ? 'pos' : ''));
+
+    const clampedRate = Math.max(-2, Math.min(2, item.rate));
+    const meterPct = Math.min(50, Math.round((Math.abs(clampedRate) / 2) * 50));
+
+    let timeLabel = '';
+    if (item.nextTime) {
+      const diff = item.nextTime - nowSec;
+      if (diff > 0) {
+        const h = Math.floor(diff / 3600);
+        const m = Math.floor((diff % 3600) / 60);
+        timeLabel = `⏱️ 정산까지 ${h > 0 ? h + '시간 ' : ''}${m}분`;
+      } else {
+        timeLabel = '⏱️ 정산 진행 중';
+      }
+    } else {
+      timeLabel = `⏱️ ${item.intervalHours || 8}시간 주기`;
+    }
+
+    const priceFormatted = (typeof ScannerEngine !== 'undefined') ? ScannerEngine.formatPrice(item.markPrice) : item.markPrice.toFixed(4);
+
+    card.innerHTML = `
+      <div class="funding-rank-card-header">
+        <div class="funding-rank-left">
+          <span class="rank-num-badge ${rankBadgeClass}">#${rank}</span>
+          <span class="ex-tag ${item.exchange}">${item.exchange}</span>
+          <span class="funding-rank-symbol">${item.baseSymbol}<span style="color:#9ca3af;font-size:10px;">/USDT</span></span>
+        </div>
+        <div class="funding-rank-rate-box">
+          <span class="funding-rank-rate-val ${rateClass}">${rateSign}${item.rate.toFixed(4)}%</span>
+        </div>
+      </div>
+      <div class="funding-meter-wrap" title="펀딩비 규모 시각화 (-2.0% ~ +2.0%)">
+        <div class="funding-meter-fill ${isNeg ? 'neg' : 'pos'}" style="width: ${meterPct}%;"></div>
+      </div>
+      <div class="funding-rank-footer">
+        <span>현재가: <strong>$${priceFormatted}</strong></span>
+        <span>${timeLabel}</span>
+        <button type="button" class="btn-move" style="padding:2px 8px; font-size:10px; margin-left:4px;">차트 로드</button>
+      </div>
+    `;
+
+    card.onclick = () => {
+      document.querySelectorAll('.funding-rank-card').forEach(c => c.classList.remove('selected'));
+      card.classList.add('selected');
+
+      if ($('exchangeSelect')) $('exchangeSelect').value = item.exchange;
+      if ($('symbolInput')) $('symbolInput').value = item.baseSymbol;
+
+      strategySignals = [];
+      if ($('strategyCurrentCoinLabel')) $('strategyCurrentCoinLabel').textContent = `[${item.baseSymbol}] 전략 신호`;
+      if ($('strategyCountTag')) $('strategyCountTag').textContent = '0개';
+      if ($('strategyListContainer')) {
+        $('strategyListContainer').innerHTML = `<div style="color:#9ca3af;font-size:11px;text-align:center;padding:25px;line-height:1.6;"><span style="color:#60a5fa;font-weight:700;">[${item.baseSymbol}]</span> 신호 데이터 분석 중...<br><span style="font-size:10px;color:#6b7280;">차트 로드 완료 후 전략 신호가 즉시 업데이트됩니다.</span></div>`;
+      }
+
+      loadData();
+      status(`[${item.exchange} ${item.symbol}] 실시간 펀딩비 ${rateSign}${item.rate.toFixed(4)}% 차트 로드 완료`);
+    };
+
+    container.appendChild(card);
+  }
+}
+
+setupSidebarTabs();
+setupScanner();
+setupFundingRank();
 loadData();

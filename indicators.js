@@ -16,6 +16,7 @@ const RsiEngine = (() => {
     bearColor: '#ef4444',
     upperLevel:70, middleLevel:50, lowerLevel:30,
     upperColor:'#787b86', middleColor:'#787b86', lowerColor:'#787b86',
+    fillColor: '#7e57c2',
     upperWidth:1, middleWidth:1, lowerWidth:1,
     upperStyle:2, middleStyle:2, lowerStyle:2,
     showUpperLine:true, showMiddleLine:true, showLowerLine:true,
@@ -59,7 +60,7 @@ const RsiEngine = (() => {
       throw Error('BB 표준편차 배수는 0.001~50 범위입니다.');
     }
 
-    for (const key of ['rsiColor', 'maColor', 'bullColor', 'bearColor','upperColor','middleColor','lowerColor']) {
+    for (const key of ['rsiColor', 'maColor', 'bullColor', 'bearColor','upperColor','middleColor','lowerColor','fillColor']) {
       if (!/^#[0-9a-f]{6}$/i.test(s[key])) {
         s[key] = defaults[key];
       }
@@ -534,7 +535,11 @@ class RsiPanePrimitive {
         const bottom = y(s.lowerLevel);
 
         if (top !== null && bottom !== null) {
-          ctx.fillStyle = '#7e57c21a';
+          const hex = (s.fillColor || '#7e57c2').replace('#', '');
+          const r = parseInt(hex.substring(0, 2), 16);
+          const g = parseInt(hex.substring(2, 4), 16);
+          const b = parseInt(hex.substring(4, 6), 16);
+          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.22)`;
           ctx.fillRect(0, Math.min(top, bottom), width, Math.abs(bottom - top));
         }
       }
@@ -586,28 +591,7 @@ class RsiPanePrimitive {
         paint();
       };
 
-      if (s.showFill && s.showRsi) {
-        const y100 = y(100);
-        const y70 = y(s.upperLevel);
-        const y30 = y(s.lowerLevel);
-        const y0 = y(0);
 
-        if (
-          [y100, y70, y30, y0].every(v => v !== null) &&
-          y100 !== y70 &&
-          y30 !== y0
-        ) {
-          const ob = ctx.createLinearGradient(0, y100, 0, y70);
-          ob.addColorStop(0, '#4caf50');
-          ob.addColorStop(1, '#4caf5000');
-          fill(cache.rsi, 50, ob);
-
-          const os = ctx.createLinearGradient(0, y30, 0, y0);
-          os.addColorStop(0, '#ef444400');
-          os.addColorStop(1, '#ef4444');
-          fill(cache.rsi, 50, os);
-        }
-      }
 
       if (s.showFill && s.showBands && s.maType === 'SMA + Bollinger Bands') {
         fill(cache.upper, cache.lower, '#4caf501a');
@@ -2056,9 +2040,10 @@ class StudyPanelManager {
         'rsiColor',
         'maColor',
         'bullColor',
-        'bearColor','upperColor','middleColor','lowerColor'
+        'bearColor','upperColor','middleColor','lowerColor','fillColor'
       ]) {
-        next[key] = f.elements.namedItem(key).value;
+        const el = f.elements.namedItem(key);
+        if (el) next[key] = el.value;
       }
 
       for (const key of [
