@@ -3,7 +3,7 @@ const PAGE_ORIGIN = 'https://didie111.github.io';
 const BINGX_PRIMARY = 'https://open-api.bingx.com';
 const BINGX_BACKUP = 'https://open-api.bingx.pro';
 const MEXC_PRIMARY = 'https://api.mexc.com';
-const bingxPaths = new Set(['/openApi/swap/v2/quote/premiumIndex', '/openApi/swap/v2/quote/fundingRate', '/openApi/swap/v3/quote/klines']);
+const bingxPaths = new Set(['/openApi/swap/v2/quote/premiumIndex', '/openApi/swap/v2/quote/fundingRate', '/openApi/swap/v3/quote/klines', '/openApi/swap/v2/quote/contracts', '/openApi/swap/v2/quote/ticker']);
 const intervals = new Set(['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']);
 const mexcIntervals = new Set(['Min1', 'Min5', 'Min15', 'Min30', 'Min60', 'Hour4', 'Day1']);
 
@@ -21,10 +21,11 @@ function targetFor(input) {
   const path = input.searchParams.get('path');
   if (!['BINGX', 'MEXC'].includes(exchange) || !path) throw Error('지원하지 않는 거래소 또는 조회 경로입니다.');
   const bingx = exchange === 'BINGX';
+  const catalog = bingx ? /\/(contracts|ticker)$/.test(path) : ['/api/v1/contract/detail','/api/v1/contract/ticker'].includes(path);
   const current = bingx ? path.endsWith('/premiumIndex') : /^\/api\/v1\/contract\/funding_rate\/[A-Z0-9]{1,32}_USDT$/.test(path);
   const history = bingx ? path.endsWith('/fundingRate') : path === '/api/v1/contract/funding_rate/history';
   const candles = bingx ? path.endsWith('/klines') : /^\/api\/v1\/contract\/kline\/[A-Z0-9]{1,32}_USDT$/.test(path);
-  if (bingx ? !bingxPaths.has(path) : !(current || history || candles)) throw Error('공개 시세 조회만 지원합니다.');
+  if (bingx ? !bingxPaths.has(path) : !(current || history || candles || catalog)) throw Error('공개 시세 조회만 지원합니다.');
   const allowed = new Set(['exchange', 'path', 'timestamp']);
   const params = new URLSearchParams();
   const add = (key, validate, required = false) => {
@@ -35,7 +36,7 @@ function targetFor(input) {
     params.set(key, value);
   };
   const number = (min, max) => value => /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) >= min && Number(value) <= max;
-  if (bingx || history) add('symbol', value => (bingx ? /^[A-Z0-9]{1,32}-USDT$/ : /^[A-Z0-9]{1,32}_USDT$/).test(value), true);
+  if (bingx || history || catalog) add('symbol', value => (bingx ? /^[A-Z0-9]{1,32}-USDT$/ : /^[A-Z0-9]{1,32}_USDT$/).test(value), !catalog);
   if (bingx && (history || candles)) {
     add('limit', number(1, 1000)); add('startTime', number(0, 1e15)); add('endTime', number(0, 1e15));
   }
@@ -49,7 +50,7 @@ function targetFor(input) {
     if (!allowed.has(key) || input.searchParams.getAll(key).length !== 1) throw Error('허용되지 않거나 중복된 조회 매개변수입니다.');
   }
   params.sort();
-  return {exchange, path, params, current, origin: bingx ? BINGX_PRIMARY : MEXC_PRIMARY, key: exchange + path + '?' + params};
+  return {exchange, path, params, current, catalog, origin: bingx ? BINGX_PRIMARY : MEXC_PRIMARY, key: exchange + path + '?' + params};
 }
 
 // Only completed, serialized replies and numeric reservation times cross request boundaries.
@@ -89,7 +90,7 @@ export function createMarketRelay({fetch: fetcher = (...args) => globalThis.fetc
       });
       if (response.status >= 300 && response.status < 400) throw Error(target.exchange + ' API가 다른 주소로 리디렉션했습니다: HTTP ' + response.status);
       const body = await response.text();
-      if (body.length > 2 * 1024 * 1024) throw Error('거래소 응답이 허용 크기를 초과했습니다.');
+      if (body.length > (target.catalog ? 8 : 2) * 1024 * 1024) throw Error('거래소 응답이 허용 크기를 초과했습니다.');
       let data;
       try {data = JSON.parse(body);} catch {
         if (!response.ok) {
@@ -115,7 +116,7 @@ export function createMarketRelay({fetch: fetcher = (...args) => globalThis.fetc
     const code = reply.data.code;
     if (reply.status === 200 && reply.data.success !== false && (code === undefined || ['0', '00000'].includes(String(code)))) {
       cache.delete(target.key);
-      cache.set(target.key, {reply, expires: now() + (target.current ? 3000 : 10000)});
+      cache.set(target.key, {reply, expires: now() + (target.catalog && /\/(contracts|detail)$/.test(target.path) ? 300000 : target.current ? 3000 : 10000)});
       while (cache.size > 32) cache.delete(cache.keys().next().value);
     }
     return reply;
