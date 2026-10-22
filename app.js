@@ -39,7 +39,7 @@ function updateCycleBadge(){const latest=cycleHistory.at(-1)?.hours??null,offici
  cycleBadge.title=`거래소별 현재 펀딩 정산 주기: ${entries.map(e=>e.name+' '+e.hours+'시간'+(e.sel?' (현재 보는 거래소)':'')).join(' / ')}${changed}`;}
 const CYCLE_EXCHANGES=[['BINANCE','Binance'],['BYBIT','Bybit'],['OKX','OKX'],['BITGET','Bitget'],['MEXC','MEXC']];
 // 현재 보는 거래소와 무관하게 주요 거래소의 공식 현재 정산 주기를 모두 조회 (개별 실패는 무시)
-async function fetchAllCycles(s,signal){const out=await Promise.all(CYCLE_EXCHANGES.map(async([ex,name])=>{try{const r=await fetchOfficialCycle(ex,s,signal);return r?{ex,name,hours:r.hours,note:r.note}:null;}catch(e){if(e.name==='AbortError')throw e;return null;}}));return out.filter(Boolean);}
+async function fetchAllCycles(s,signal){if(globalThis.ChartWorkspace?.embedded)return [];const out=await Promise.all(CYCLE_EXCHANGES.map(async([ex,name])=>{try{const r=await fetchOfficialCycle(ex,s,signal);return r?{ex,name,hours:r.hours,note:r.note}:null;}catch(e){if(e.name==='AbortError')throw e;return null;}}));return out.filter(Boolean);}
 // 8시간보다 짧은 정산 구간(1h/4h 등)을 전체 패널에 옅게 칠하고 라벨 표시
 function drawCycleBands(w,h){if(!all.length||!cycleValues.size||cycleFast.length!==all.length)return;const ts=chart.timeScale(),range=ts.getVisibleLogicalRange();if(!range)return;
  const plotWidth=ts.width(),part=windowEnd-windowStart,i0=Math.max(0,Math.floor(range.from)),i1=Math.min(part-1,Math.ceil(range.to));
@@ -278,7 +278,7 @@ const guideCountdown=document.createElement('div');guideCountdown.hidden=true;gu
 function updateGuideCountdown(){const seconds=Math.max(0,Math.ceil((selectedGuideDeadline-performance.now())/1000));const label='기준선 '+seconds+'초';if(guideCountdown.textContent!==label)guideCountdown.textContent=label;}
 const ctx=overlay.getContext('2d');let frame=0,paneLayoutCache=null;
 const date=t=>fullFmt.format(new Date(t*1000));
-const status=(s,error=false)=>{$('status-msg').textContent=s;$('status-msg').classList.toggle('error',error);};
+const status=(s,error=false)=>{$('status-msg').textContent=s;$('status-msg').classList.toggle('error',error);globalThis.ChartWorkspace?.reportStatus(s,error);};
 function schedule(){if(!frame)frame=requestAnimationFrame(()=>{frame=0;draw();});}
 // [최적화] draw 한 번 안에서 getPaneLayout()이 6번 넘게 불리며 매번 getBoundingClientRect(강제 리플로우)를 했음 -> 1회로 축소
 function draw(){paneLayoutCache=computePaneLayout();updatePaneHover();try{drawInner();}finally{paneLayoutCache=null;}}
@@ -641,6 +641,7 @@ function syncChartFullscreen() {
   schedule();
 }
 async function toggleChartFullscreen() {
+  if(globalThis.ChartWorkspace?.requestFullscreen())return;
   if (chartFullscreenPending) return;
   chartFullscreenPending = true;
   chartFullscreenBtn.disabled = true;
@@ -966,7 +967,7 @@ function renderFundingBoard() {
     ui.card.title = row?.error ?? (current ? `${current.symbol} · ${current.nextTime ? '정산 예정 ' + date(current.nextTime) : '정산 시각 확인 불가'}${current.hours ? ' · ' + current.hours + '시간 주기' : ''}` : '');
     if (current && !row.error) healthy++;
   }
-  if (!session.abort.signal.aborted) $('fundingUpdateStatus').textContent = `현재값 ${healthy}/6곳 확인 · 현재값 10초 / 캔들 3초 / 정산 이력 60초마다 요청${session.pending || session.quotePending.size ? ' · 갱신 중' : ''}`;
+  if (!session.abort.signal.aborted) $('fundingUpdateStatus').textContent = `현재값 ${healthy}/6곳 확인 · ${globalThis.ChartWorkspace?.isMulti()?'현재값 20초 / 캔들 약 9초':'현재값 10초 / 캔들 3초'} / 정산 이력 60초마다 요청${session.pending || session.quotePending.size ? ' · 갱신 중' : ''}`;
   studyPanels?.updateFundingLegend();
 }
 function startFundingUpdates(ex, symbol, interval, id) {
@@ -988,7 +989,9 @@ function fundingRequestSignal(session) {
 }
 async function refreshFundingQuotes(session) {
   if (!fundingSessionActive(session)) return;
-  await Promise.all(FundingEngine.exchanges.map(async ([ex]) => {
+  if(globalThis.ChartWorkspace?.isMulti()&&session.lastQuotePoll&&Date.now()-session.lastQuotePoll<15000)return;
+  session.lastQuotePoll=Date.now();
+  await Promise.all((globalThis.ChartWorkspace?.embedded?FundingEngine.exchanges.filter(([ex])=>ex===session.ex):FundingEngine.exchanges).map(async ([ex]) => {
     if (session.quotePending.has(ex)) return;
     session.quotePending.add(ex);
     try {
@@ -1073,6 +1076,8 @@ function refreshFundingChart(session, recentCandles = []) {
 }
 async function refreshFundingCandles(session) {
   if (!fundingSessionActive(session) || !all.length || session.candlesPending) return;
+  if(globalThis.ChartWorkspace?.isMulti()&&session.lastCandlePoll&&Date.now()-session.lastCandlePoll<8000)return;
+  session.lastCandlePoll=Date.now();
   session.candlesPending = true;
   try {
     const rows = await candlePage(session.ex, session.symbol, session.interval, Date.now(), fundingRequestSignal(session), true);
@@ -1197,15 +1202,15 @@ async function jumpToChartDate(target,signal){
 }
 
 async function loadData(){try{thresholds();}catch(e){return status(e.message,true);}const symbol=$('symbolInput').value.trim().toUpperCase();if(!/^[A-Z0-9_-]+$/.test(symbol))return status('유효한 심볼을 입력하세요.',true);
- chartDateFocus=null;dateNavigation?.cancel();navigationController?.abort();navigationController=new AbortController();controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;loadedMarket={ex,symbol,int,id};historyState={id,buffer:[],pending:new Set(),exhausted:new Set()};$('historyLoading').hidden=true;chartSymbolLabel.textContent=FundingEngine.contract(ex,symbol);chartSymbolLabel.title=ex+' · '+chartSymbolLabel.textContent+' · '+$('intervalSelect').selectedOptions[0].text;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();strategySignals=[];if($('strategyCurrentCoinLabel'))$('strategyCurrentCoinLabel').textContent=`[${symbol}] 전략 신호`;if($('strategyCountTag'))$('strategyCountTag').textContent='0개';if($('strategyListContainer'))$('strategyListContainer').innerHTML=`<div style="color:#9ca3af;font-size:11px;text-align:center;padding:25px;line-height:1.6;"><span style="color:#60a5fa;font-weight:700;">[${symbol}]</span> 신호 데이터 분석 중...<br><span style="font-size:10px;color:#6b7280;">차트 로드 완료 후 전략 신호가 즉시 업데이트됩니다.</span></div>`;candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
+ chartDateFocus=null;dateNavigation?.cancel();navigationController?.abort();navigationController=new AbortController();controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;loadedMarket={ex,symbol,int,id};globalThis.ChartWorkspace?.marketChanged(loadedMarket);historyState={id,buffer:[],pending:new Set(),exhausted:new Set()};$('historyLoading').hidden=true;chartSymbolLabel.textContent=FundingEngine.contract(ex,symbol);chartSymbolLabel.title=ex+' · '+chartSymbolLabel.textContent+' · '+$('intervalSelect').selectedOptions[0].text;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();strategySignals=[];if($('strategyCurrentCoinLabel'))$('strategyCurrentCoinLabel').textContent=`[${symbol}] 전략 신호`;if($('strategyCountTag'))$('strategyCountTag').textContent='0개';if($('strategyListContainer'))$('strategyListContainer').innerHTML=`<div style="color:#9ca3af;font-size:11px;text-align:center;padding:25px;line-height:1.6;"><span style="color:#60a5fa;font-weight:700;">[${symbol}]</span> 신호 데이터 분석 중...<br><span style="font-size:10px;color:#6b7280;">차트 로드 완료 후 전략 신호가 즉시 업데이트됩니다.</span></div>`;candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
  $('coverage').textContent='선택 거래소 USDT 무기한 선물 · 제공 가능한 이력 끝까지 수집 · 과거 구간은 날짜로 이동(Alt+G) 또는 하단 슬라이더로 이동 · 전체 이력은 계속 수집';
  status(`${ex} ${symbol} · 과거 이력 수집 시작`);startFundingUpdates(ex,symbol,int,id);
  let candleEnd=Date.now(),chunks=[],count=0,candleNote='',fundNote='';historyState.buffer=chunks;
- try{for(;;){const rows=uniqueSorted(await candlePage(ex,symbol,int,candleEnd,signal)).filter(c=>c.time*1000<=candleEnd);if(!rows.length){candleNote='API 이력 끝';break;}chunks.push(rows);count+=rows.length;status(`${ex} ${symbol} · 캔들 ${count.toLocaleString()}봉 수집 중`);if(chunks.length===1){const view=chartDateFocus?.id===run?captureChartView():null;all=ChartData.mergeHistory(all,rows);rates=FundingEngine.merge(rates,(fundingSession?.latestRows??[]).filter(f=>f.time>=all[0].time));rebuild();if(view)restoreChartView(view,false);else renderWindow(all.length-1);}else if(!changingWindow){const range=chart.timeScale().getVisibleLogicalRange();if(range&&windowStart+range.from<80&&rows.at(-1).time>=all[0].time-duration[int])await commitHistoryRows(rows,id);}const next=rows[0].time*1000-1;if(next>=candleEnd){candleNote='API 페이지 진행 불가';break;}candleEnd=next;if(candleEnd<=0){candleNote='이력 끝';break;}await pause(ex==='BINGX'?1150:350,signal);}
+ try{for(;;){const rows=uniqueSorted(await candlePage(ex,symbol,int,candleEnd,signal)).filter(c=>c.time*1000<=candleEnd);if(!rows.length){candleNote='API 이력 끝';break;}chunks.push(rows);count+=rows.length;status(`${ex} ${symbol} · 캔들 ${count.toLocaleString()}봉 수집 중`);if(chunks.length===1){const view=chartDateFocus?.id===run?captureChartView():null;all=ChartData.mergeHistory(all,rows);rates=FundingEngine.merge(rates,(fundingSession?.latestRows??[]).filter(f=>f.time>=all[0].time));rebuild();if(view)restoreChartView(view,false);else renderWindow(all.length-1);}else if(!changingWindow){const range=chart.timeScale().getVisibleLogicalRange();if(range&&windowStart+range.from<80&&rows.at(-1).time>=all[0].time-duration[int])await commitHistoryRows(rows,id);}const next=rows[0].time*1000-1;if(next>=candleEnd){candleNote='API 페이지 진행 불가';break;}candleEnd=next;if(candleEnd<=0){candleNote='이력 끝';break;}if(globalThis.ChartWorkspace?.isMulti()){candleNote='최근 구간 · 과거 이동 시 추가 조회';break;}await pause(ex==='BINGX'?1150:350,signal);}
  }catch(e){candleNote=e.name==='AbortError'?'사용자 중지':e.message;}
  if(id!==run)return;const collectedView=captureChartView();all=ChartData.mergeHistory(all,chunks.flat());if(!all.length){busy=false;renderFundingBoard();return status(`${ex}: ${candleNote||'해당 심볼 데이터 없음'}`,true);}rebuild();restoreChartView(collectedView,false);if(!await settleChartView(id))return;
  if(!signal.aborted){let cursor=ex==='BINANCE'?all[0].time*1000:Date.now(),parts=[],previous=-1;
- try{for(let page=1;;page++){const rows=await fundingPage(ex,symbol,cursor,page,signal);if(!rows.length){fundNote='API 이력 끝';break;}const useful=rows.filter(f=>f.time>=all[0].time);parts.push(useful);status(`${ex} · ${all.length.toLocaleString()}봉 / 펀딩비 ${parts.reduce((n,a)=>n+a.length,0).toLocaleString()}건 수집 중`);
+ try{for(let page=1;;page++){const rows=await fundingPage(ex,symbol,cursor,page,signal);if(!rows.length){fundNote='API 이력 끝';break;}const useful=rows.filter(f=>f.time>=all[0].time);parts.push(useful);if(globalThis.ChartWorkspace?.isMulti()){fundNote='최근 구간 · 과거 이동 시 추가 조회';break;}status(`${ex} · ${all.length.toLocaleString()}봉 / 펀딩비 ${parts.reduce((n,a)=>n+a.length,0).toLocaleString()}건 수집 중`);
  const edge=ex==='BINANCE'?rows.at(-1).time:rows[0].time;if(edge===previous){fundNote='API 페이지 반복: 제공 범위까지만 표시';break;}previous=edge;cursor=ex==='BINANCE'?edge*1000+1:edge*1000-1;if((ex==='BINANCE'&&cursor>=Date.now())||(ex!=='BINANCE'&&edge<=all[0].time)){fundNote='캔들 구간 수집 완료';break;}await pause(ex==='BINGX'?1150:350,signal);}
  }catch(e){fundNote=e.name==='AbortError'?'사용자 중지':e.message;}rates=FundingEngine.merge(uniqueSorted(parts.flat()),rates);}
  if(id!==run)return;rates=FundingEngine.merge(rates,(fundingSession?.latestRows??[]).filter(f=>f.time>=all[0].time));try{officialCycle=await fetchOfficialCycle(ex,symbol,signal);}catch{}try{otherCycles=await fetchAllCycles(symbol,signal);}catch{}if(id!==run)return;const fundingView=captureChartView();rebuild();restoreChartView(fundingView,false);busy=false;renderFundingBoard();
@@ -1698,7 +1703,7 @@ function setupScanner() {
 
   // 페이지 시작 시 1회 백그라운드 스캔 자동 시작
   setTimeout(() => {
-    if (!scannedCoins.length && !scannerController) {
+    if (!globalThis.ChartWorkspace?.isMulti() && !scannedCoins.length && !scannerController) {
       startScan();
     }
   }, 1000);
@@ -1825,7 +1830,7 @@ function setupFundingRank() {
 
   // 페이지 시작 시 2초 뒤 1회 백그라운드 펀딩비 수집
   setTimeout(() => {
-    if (!fundingRankList.length && !fundingRankController) {
+    if (!globalThis.ChartWorkspace?.isMulti() && !fundingRankList.length && !fundingRankController) {
       startFundingRankScan();
     }
   }, 2000);
@@ -2003,7 +2008,13 @@ function renderFundingRankList() {
   }
 }
 
-setupSidebarTabs();
-setupScanner();
-setupFundingRank();
+globalThis.ChartWorkspace?.bind({
+ workspace:chartWorkspace,host:rulerHost,symbolButton:chartSymbolLabel,
+ getMarket:()=>loadedMarket||{ex:$('exchangeSelect').value,symbol:$('symbolInput').value,int:$('intervalSelect').value},
+ selectMarket:m=>{$('exchangeSelect').value=m.ex;$('symbolInput').value=m.symbol;$('intervalSelect').value=m.int;void loadData();},
+ onSplit:()=>{if(all.length)controller?.abort();scannerController?.abort();fundingRankController?.abort();},
+ dispose:()=>{controller?.abort();navigationController?.abort();stopFundingUpdates();clearTimeout(selectedGuideTimer);clearInterval(selectedCountdownTimer);clearTimeout(surgeHighlight.timer);clearInterval(surgeHighlight.countdownInterval);},
+ schedule,fullscreen:toggleChartFullscreen,jumpDate:()=>$('gotoDateBtn').click()
+});
+if(!globalThis.ChartWorkspace?.embedded){setupSidebarTabs();setupScanner();setupFundingRank();}
 loadData();

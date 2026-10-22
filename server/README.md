@@ -5,6 +5,8 @@ GitHub Pages에서 BingX와 MEXC를 직접 요청하면 브라우저의 출처 �
 - 현재값: BingX premiumIndex, MEXC funding_rate
 - 정산 이력: BingX fundingRate, MEXC funding_rate/history
 - 캔들: BingX swap v3 klines, MEXC contract kline
+- 전체 종목 목록: BingX contracts, MEXC contract/detail
+- 전체 24시간 시세: BingX ticker, MEXC contract/ticker
 - 정산 주기: 현재값 응답의 fundingIntervalHours / collectCycle
 
 `market-relay.mjs`는 Sites 서버의 동일 파일을 보관한 사본이다. 서버 소스를 수정할 때는 두 저장소의 파일을 함께 갱신한다. 서버는 `GET /api/market`의 exchange/path와 허용된 매개변수만 받아 공식 URL을 구성한다. 브라우저의 Origin, 쿠키, 인증 정보는 거래소로 전달하지 않는다. 임의 URL, 개인 계정, 주문 API는 지원하지 않는다.
@@ -44,3 +46,7 @@ node --test tests/*.test.cjs tests/*.test.mjs
 - https://www.mexc.com/announcements/article/futures-api-access-domain-update-17827791532974
 - https://www.mexc.com/api-docs/futures/market-endpoints/get-funding-rate
 - https://github.com/BingX-API/api-ai-skills/blob/main/skills/references/base-urls.md
+
+4분할 차트는 `chart-workspace.js`가 기존 차트와 3개의 독립 차트 문서를 구성한다. 1화면으로 돌아가면 추가 문서를 제거하고 시세 요청을 취소한다. 분할에서는 최근 캔들을 우선 조회하고 과거 구간은 이동 시 추가 조회한다. `market-shared.js`가 차트 간 같은 요청, 짧은 캐시, BingX 요청 간격을 공유한다. 한 차트의 취소는 다른 차트의 조회를 중단하지 않는다. 분할 캔들은 약 9초, 현재 펀딩비는 약 20초 간격으로 갱신해 BingX의 공유 요청 간격을 지킨다. 단일 화면의 캔들 3초·현재값 10초 갱신은 유지한다.
+
+종목 이름을 누르면 `symbol-picker.js`가 6개 거래소의 거래 가능한 USDT 무기한 계약을 검색·즐겨찾기·현재가·24시간 등락·거래대금과 함께 표시한다. `market-catalog.js`는 Bybit의 모든 cursor 페이지를 조회한다. 목록에서는 화면에 보이는 행만 만들고, 열린 동안에만 시세를 갱신한다. 종목 정보는 최대 5분 캐시하며 갱신 실패 시 이전 목록임을 표시한다.

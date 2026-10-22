@@ -12,6 +12,16 @@ function request(exchange = 'BINGX', path = '/openApi/swap/v2/quote/premiumIndex
   return new Request('https://relay.test/api/market?' + new URLSearchParams({exchange, path, ...params}), options);
 }
 
+test('whole-market catalogs and tickers accept only the explicit public routes without a symbol',async()=>{
+ const calls=[];let clock=stamp;const relay=createMarketRelay({now:()=>clock,wait:async ms=>{clock+=ms;},fetch:async url=>{calls.push(new URL(url));return reply({code:0,data:[]});}});
+ for(const [exchange,path]of [['BINGX','/openApi/swap/v2/quote/contracts'],['BINGX','/openApi/swap/v2/quote/ticker'],['MEXC','/api/v1/contract/detail'],['MEXC','/api/v1/contract/ticker']]){
+  const response=await relay.handle(request(exchange,path,{}));assert.equal(response.status,200);assert.equal(calls.at(-1).pathname,path);assert.equal(calls.at(-1).searchParams.has('symbol'),false);
+ }
+ assert.equal((await relay.handle(request('BINGX','/openApi/swap/v2/quote/contracts',{url:'https://untrusted.test'}))).status,400);
+ assert.equal((await relay.handle(request('BINGX','/openApi/swap/v2/quote/fundingRate',{}))).status,400);
+ assert.equal((await relay.handle(request('MEXC','/api/v1/private/order/list',{}))).status,400);
+});
+
 test('new chart intervals pass the relay allowlist while invented interval names remain blocked', async () => {
   const calls=[];let clock=stamp;
   const relay=createMarketRelay({now:()=>clock,wait:async ms=>{clock+=ms;},fetch:async url=>{calls.push(new URL(url));return reply({code:0,data:[]});}});

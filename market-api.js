@@ -26,6 +26,7 @@ const MarketAPI = (() => {
       }
     }
     async function reserveBingx(signal, request) {
+      if(globalThis.MarketShared)return globalThis.MarketShared.broker.reserveBingx(signal,request);
       const turn = bingxQueue.then(async () => {
         signal.throwIfAborted();
         const delay = lastBingxStart === null ? 0 : lastBingxStart + 1150 - now();
@@ -39,7 +40,7 @@ const MarketAPI = (() => {
       bingxQueue = turn.catch(() => {});
       return await turn;
     }
-    async function json(base, params = {}, signal = new AbortController().signal) {
+    async function fetchJson(base, params = {}, signal = new AbortController().signal) {
       const bingx = new URL(base).hostname === 'open-api.bingx.com';
       const mexc = new URL(base).hostname === 'api.mexc.com';
       const viaRelay = Boolean(relayUrl) && (bingx || mexc);
@@ -109,6 +110,10 @@ const MarketAPI = (() => {
         return result;
       }
       throw Error(name + ': API 실패');
+    }
+    async function json(base,params={},signal=new AbortController().signal){
+      const shared=globalThis.MarketShared;
+      return shared?shared.broker.request(shared.key(base,params),abort=>fetchJson(base,params,abort),signal,shared.ttl(base)):fetchJson(base,params,signal);
     }
     return {json};
   }
