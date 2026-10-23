@@ -19,9 +19,16 @@
   function send(message){if(embedded&&win.parent!==win)win.parent.postMessage({channel,...message},win.location.origin);}
   function persist(){if(embedded)return;try{win.localStorage.setItem(storageKey,JSON.stringify({layout:mode,markets}));}catch{}}
   function selected(index){active=index;firstCell?.classList.toggle('selected',index===0);for(const frame of frames)frame.classList.toggle('selected',Number(frame.dataset.chartCell)===index);}
-  function expandControl(button,pressed,label){if(!button)return;button.title=label;button.setAttribute('aria-label',label);button.setAttribute('aria-pressed',String(pressed));const path=pressed?'M3 7h4V3m10 4h-4V3M3 13h4v4m10-4h-4v4':'M7 3H3v4m10-4h4v4M3 13v4h4m10-4v4h-4';button.innerHTML='<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="'+path+'"/></svg>';}
+  function expandControl(button,pressed,label,kind='chart'){
+   if(!button)return;button.title=label;button.setAttribute('aria-label',label);button.setAttribute('aria-pressed',String(pressed));
+   const shape=kind==='workspace'
+    ?'<rect x="2" y="3" width="16" height="11" rx="1.5"/><path d="M10 14v4m-4 0h8'+(pressed?'M7 8.5h6':'')+'"/>'
+    :pressed?'<rect x="3" y="3" width="14" height="14" rx="1"/><path d="M10 3v14M3 10h14"/>'
+    :'<rect x="3" y="3" width="14" height="14" rx="1"/><path d="m6 14 8-8M9 6h5v5"/>';
+   button.innerHTML='<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+shape+'</svg>';
+  }
   function fullscreenState(){return embedded||mode===4?{active:maximized===ownCell,label:maximized===ownCell?'4분할로 돌아가기 (Alt+Enter)':'이 차트 최대화 (Alt+Enter)'}:null;}
-  function updateControls(){const state=fullscreenState();if(maximizeButton)maximizeButton.hidden=!state;if(workspaceButton)workspaceButton.hidden=!state;expandControl(maximizeButton,Boolean(state?.active),state?.label||'이 차트 최대화 (Alt+Enter)');expandControl(workspaceButton,workspaceFullscreen,workspaceFullscreen?'작업 영역 전체화면 해제':'작업 영역 전체화면');}
+  function updateControls(){const state=fullscreenState();if(maximizeButton)maximizeButton.hidden=!state;if(workspaceButton)workspaceButton.hidden=!state;expandControl(maximizeButton,Boolean(state?.active),state?.label||'이 차트 최대화 (Alt+Enter)');expandControl(workspaceButton,workspaceFullscreen,workspaceFullscreen?'작업 영역 전체화면 해제':'작업 영역 전체화면','workspace');}
   function broadcastLayout(){if(!embedded)for(const frame of frames)frame.contentWindow.postMessage({channel,type:'layout-state',maximized,fullscreen:workspaceFullscreen},win.location.origin);}
   function syncWorkspaceFullscreen(value){if(embedded||workspaceFullscreen===value)return;workspaceFullscreen=value;updateControls();broadcastLayout();}
   function setMaximized(index){
