@@ -55,7 +55,7 @@ chart.panes()[0].setStretchFactor(6);chart.panes()[1].setStretchFactor(1.5);char
 funding.createPriceLine({price:0,color:'#6b7280',lineWidth:1,lineStyle:LC.LineStyle.Dotted,axisLabelVisible:false});
 const markers=LC.createSeriesMarkers(candles,[]);
 let all=[],rates=[],signals=[],mapped=new Map(),unmappedFunding=[],controller,run=0,windowStart=0,windowEnd=0,showLines=true,busy=false,selectedSignal=null,changingWindow=false;
-let selectedGuideVisible=false, selectedGuideTimer, selectedCountdownTimer, selectedGuideDeadline=0;
+let selectedGuideVisible=false, selectedGuideTimer, selectedCountdownTimer, selectedGuideDeadline=0, selectedGuideTime=null, selectedGuideKind='signal';
 
 // [🚀 5일 급등락 하이라이트 상태 관리]
 let surgeHighlight = {
@@ -274,8 +274,15 @@ let historyState={id:0,buffer:[],pending:new Set(),exhausted:new Set()};
 let paneScaleSeries=[candles,volume,funding,settlementCycle];
 let studyPanels=null;
 const overlay=document.createElement('canvas');overlay.style.cssText='position:absolute;inset:0;pointer-events:none;z-index:4';$('unified-chart').append(overlay);
-const guideCountdown=document.createElement('div');guideCountdown.hidden=true;guideCountdown.style.cssText='position:absolute;top:12px;pointer-events:none;z-index:6;padding:7px 12px;background:#fbbf24;color:#111827;border:2px solid #fffbeb;border-radius:8px;font-size:14px;font-weight:800;white-space:nowrap;box-shadow:0 2px 10px #000b;transform:translateX(-50%)';guideCountdown.setAttribute('role','timer');guideCountdown.setAttribute('aria-label','선택 신호 기준선 남은 시간');$('unified-chart').append(guideCountdown);
-function updateGuideCountdown(){const seconds=Math.max(0,Math.ceil((selectedGuideDeadline-performance.now())/1000));const label='기준선 '+seconds+'초';if(guideCountdown.textContent!==label)guideCountdown.textContent=label;}
+const guideCountdown=document.createElement('div');guideCountdown.id='chartLocationGuide';guideCountdown.hidden=true;guideCountdown.style.cssText='position:absolute;top:12px;pointer-events:none;z-index:6;padding:7px 12px;background:#fbbf24;color:#111827;border:2px solid #fffbeb;border-radius:8px;font-size:14px;font-weight:800;white-space:nowrap;box-shadow:0 2px 10px #000b;transform:translateX(-50%)';guideCountdown.setAttribute('role','timer');guideCountdown.setAttribute('aria-label','선택 신호 기준선 남은 시간');$('unified-chart').append(guideCountdown);
+function updateGuideCountdown(){const seconds=Math.max(0,Math.ceil((selectedGuideDeadline-performance.now())/1000));const label=(selectedGuideKind==='date'?'이동 위치 · ':'기준선 ')+seconds+'초';if(guideCountdown.textContent!==label)guideCountdown.textContent=label;}
+function clearLocationGuide(){clearTimeout(selectedGuideTimer);clearInterval(selectedCountdownTimer);selectedGuideVisible=false;selectedGuideTime=null;guideCountdown.hidden=true;}
+function showLocationGuide(time,kind='signal'){
+ clearLocationGuide();selectedGuideTime=time;selectedGuideKind=kind;selectedGuideVisible=true;selectedGuideDeadline=performance.now()+5000;
+ guideCountdown.style.background=kind==='date'?'#60a5fa':'#fbbf24';guideCountdown.setAttribute('aria-label',kind==='date'?'날짜 이동 위치 남은 시간':'선택 신호 기준선 남은 시간');
+ updateGuideCountdown();selectedCountdownTimer=setInterval(updateGuideCountdown,100);
+ selectedGuideTimer=setTimeout(()=>{clearLocationGuide();schedule();},5000);schedule();
+}
 const ctx=overlay.getContext('2d');let frame=0,paneLayoutCache=null;
 const date=t=>fullFmt.format(new Date(t*1000));
 const status=(s,error=false)=>{$('status-msg').textContent=s;$('status-msg').classList.toggle('error',error);globalThis.ChartWorkspace?.reportStatus(s,error);};
@@ -286,8 +293,8 @@ function draw(){paneLayoutCache=computePaneLayout();updatePaneHover();try{drawIn
 function setStyle(el,k,v){const c=el._st||(el._st={});if(c[k]!==v){c[k]=v;el.style[k]=v;}}
 function drawInner(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clientHeight,dpr=devicePixelRatio||1,plotWidth=chart.timeScale().width();
  if(overlay.width!==Math.round(w*dpr)||overlay.height!==Math.round(h*dpr)){overlay.width=Math.round(w*dpr);overlay.height=Math.round(h*dpr);overlay.style.width=w+'px';overlay.style.height=h+'px';}
- ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawCycleBands(w,h);drawRuler(w,h);drawSurgeHighlight(w,h,plotWidth);placeChartSymbol();placeChartNavigation();placeChartClock();placeLegendToggle();studyPanels?.position();chartDrawings?.render();
- if(selectedSignal&&selectedGuideVisible){const x=chart.timeScale().timeToCoordinate(selectedSignal.time);if(x!==null&&x>=0&&x<=plotWidth){guideCountdown.hidden=false;guideCountdown.style.left=Math.max(65,Math.min(plotWidth-65,x))+'px';ctx.strokeStyle='#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
+ ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawCycleBands(w,h);drawRuler(w,h);drawSurgeHighlight(w,h,plotWidth);placeChartSymbol();placeChartNavigation();placeChartClock();placeLegendToggle();studyPanels?.position();chartDrawings?.render();globalThis.ChartWorkspace?.controlsChanged({ruler:chartDrawings?.tool==='ruler',lines:showLines});
+ if(selectedGuideVisible&&selectedGuideTime!==null){const x=chart.timeScale().timeToCoordinate(selectedGuideTime);if(x!==null&&x>=0&&x<=plotWidth){guideCountdown.hidden=false;guideCountdown.style.left=Math.max(65,Math.min(plotWidth-65,x))+'px';ctx.strokeStyle=selectedGuideKind==='date'?'#60a5fa':'#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
  if(!showLines)return;
  const range=chart.timeScale().getVisibleRange();if(!range)return;
  const ts=chart.timeScale(),iEnd=lowerBound(signals,Number(range.to)+1),pathExt=new Path2D(),pathWarn=new Path2D();let last=-100,i=lowerBound(signals,Number(range.from)),any=false;
@@ -724,7 +731,8 @@ function findNearestBarIndex(t) {
   return sec - all[previous].time <= all[next].time - sec ? previous : next;
 }
 
-function focusSignal(s, element) {
+function focusSignal(s, element, local=false) {
+  if(!local&&loadedMarket&&globalThis.ChartWorkspace?.selectActive({ex:loadedMarket.ex,symbol:loadedMarket.symbol},{kind:'signal',signal:s}))return;
   chartDateFocus = null;
   // 신호 이동 시 급등락 하이라이트가 화면을 덮어쓰지 않도록 즉시 해제
   surgeHighlight.active = false;
@@ -740,18 +748,7 @@ function focusSignal(s, element) {
   }
 
   selectedSignal = s;
-  selectedGuideVisible = true;
-  clearTimeout(selectedGuideTimer);
-  clearInterval(selectedCountdownTimer);
-  selectedGuideDeadline = performance.now() + 5000;
-  updateGuideCountdown();
-  selectedCountdownTimer = setInterval(updateGuideCountdown, 100);
-  selectedGuideTimer = setTimeout(() => {
-    selectedGuideVisible = false;
-    clearInterval(selectedCountdownTimer);
-    guideCountdown.hidden = true;
-    schedule();
-  }, 5000);
+  showLocationGuide(s.time);
 
   // 모든 신호 아이템 아웃라인 초기화 후 클릭된 요소 강조
   document.querySelectorAll('.signal-item').forEach(el => {
@@ -765,6 +762,7 @@ function focusSignal(s, element) {
 
   const old = chart.timeScale().getVisibleLogicalRange();
   const span = old ? Math.max(80, Math.min(300, old.to - old.from)) : 140;
+  chartDateFocus={id:run,time:matchedBar?.time??targetTime,span};
   renderWindow(barIdx, true, span);
   chart.clearCrosshairPosition();
 
@@ -1190,7 +1188,7 @@ async function jumpToChartDate(target,signal,interval=loadedMarket?.int){
  requestSignal.throwIfAborted();
  const span=Math.max(60,Math.min(180,chart.timeScale().getVisibleLogicalRange()?.to-chart.timeScale().getVisibleLogicalRange()?.from||180));
  let index=TimeframeEngine.indexAt(all,target,int);
- if(index>=0){chartDateFocus={id,time:target,span};selectedSignal=null;clearRuler();renderWindow(index,true,span);status('날짜 이동 완료 · '+date(target));return;}
+ if(index>=0){chartDateFocus={id,time:target,span};selectedSignal=null;clearRuler();renderWindow(index,true,span);showLocationGuide(all[index].time,'date');status('날짜 이동 완료 · '+date(target));return;}
  const end=Math.min(Date.now(),Math.floor((target+(Math.ceil(span/2)+10)*duration[int])*1000));
  const cursor=ex==='BINANCE'?Math.max(0,(target-3*86400)*1000):end;
  const [candlesResult,historyResult]=await Promise.allSettled([
@@ -1203,13 +1201,13 @@ async function jumpToChartDate(target,signal,interval=loadedMarket?.int){
  if(!rows.length)throw Error('해당 날짜의 '+$('intervalSelect').selectedOptions[0].text+' 기록을 거래소가 제공하지 않습니다. 상장일·보관 범위를 확인하세요.');
  chartDateFocus={id,time:target,span};all=uniqueSorted([...all,...rows]);
  if(historyResult.status==='fulfilled')rates=FundingEngine.merge(rates,historyResult.value.filter(row=>row.time>=rows[0].time&&row.time<rows.at(-1).time+duration[int]));
- rebuild();index=TimeframeEngine.indexAt(all,target,int);selectedSignal=null;clearRuler();renderWindow(index,true,span);
+ rebuild();index=TimeframeEngine.indexAt(all,target,int);selectedSignal=null;clearRuler();renderWindow(index,true,span);showLocationGuide(all[index].time,'date');
  $('coverage').textContent='날짜 조회: '+date(target)+' · 주변 캔들 '+date(rows[0].time)+' ~ '+date(rows.at(-1).time)+' · 거래소가 제공하는 실제 기록. 정산 기록이 없는 구간은 공백입니다.'+(historyResult.status==='rejected'?' · 이 구간의 정산 기록 조회 실패: '+fundingError(historyResult.reason):'');
  status('날짜 이동 완료 · '+date(target));
 }
 
 async function loadData(options={}){const dateTarget=Number.isFinite(options.dateTarget)?options.dateTarget:null;if(options.timeframe&&duration[options.timeframe])$('intervalSelect').value=options.timeframe;try{thresholds();}catch(e){if(dateTarget!==null)throw e;return status(e.message,true);}const symbol=$('symbolInput').value.trim().toUpperCase();if(!/^[A-Z0-9_-]+$/.test(symbol)){if(dateTarget!==null)throw Error('유효한 심볼을 입력하세요.');return status('유효한 심볼을 입력하세요.',true);}
- chartDateFocus=null;if(dateTarget===null)dateNavigation?.cancel();navigationController?.abort();navigationController=new AbortController();controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;loadedMarket={ex,symbol,int,id};globalThis.ChartWorkspace?.marketChanged(loadedMarket);historyState={id,buffer:[],pending:new Set(),exhausted:new Set()};$('historyLoading').hidden=true;chartSymbolLabel.textContent=FundingEngine.contract(ex,symbol);chartSymbolLabel.title=ex+' · '+chartSymbolLabel.textContent+' · '+$('intervalSelect').selectedOptions[0].text;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();strategySignals=[];if($('strategyCurrentCoinLabel'))$('strategyCurrentCoinLabel').textContent=`[${symbol}] 전략 신호`;if($('strategyCountTag'))$('strategyCountTag').textContent='0개';if($('strategyListContainer'))$('strategyListContainer').innerHTML=`<div style="color:#9ca3af;font-size:11px;text-align:center;padding:25px;line-height:1.6;"><span style="color:#60a5fa;font-weight:700;">[${symbol}]</span> 신호 데이터 분석 중...<br><span style="font-size:10px;color:#6b7280;">차트 로드 완료 후 전략 신호가 즉시 업데이트됩니다.</span></div>`;candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
+ chartDateFocus=null;clearLocationGuide();if(dateTarget===null)dateNavigation?.cancel();navigationController?.abort();navigationController=new AbortController();controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;loadedMarket={ex,symbol,int,id};globalThis.ChartWorkspace?.marketChanged(loadedMarket);historyState={id,buffer:[],pending:new Set(),exhausted:new Set()};$('historyLoading').hidden=true;chartSymbolLabel.textContent=FundingEngine.contract(ex,symbol);chartSymbolLabel.title=ex+' · '+chartSymbolLabel.textContent+' · '+$('intervalSelect').selectedOptions[0].text;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();strategySignals=[];if($('strategyCurrentCoinLabel'))$('strategyCurrentCoinLabel').textContent=`[${symbol}] 전략 신호`;if($('strategyCountTag'))$('strategyCountTag').textContent='0개';if($('strategyListContainer'))$('strategyListContainer').innerHTML=`<div style="color:#9ca3af;font-size:11px;text-align:center;padding:25px;line-height:1.6;"><span style="color:#60a5fa;font-weight:700;">[${symbol}]</span> 신호 데이터 분석 중...<br><span style="font-size:10px;color:#6b7280;">차트 로드 완료 후 전략 신호가 즉시 업데이트됩니다.</span></div>`;candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
  $('coverage').textContent='선택 거래소 USDT 무기한 선물 · 제공 가능한 이력 끝까지 수집 · 과거 구간은 날짜로 이동(Alt+G) 또는 하단 슬라이더로 이동 · 전체 이력은 계속 수집';
  status(`${ex} ${symbol} · 과거 이력 수집 시작`);startFundingUpdates(ex,symbol,int,id);
  const context={ex,symbol,int,id,signal};
@@ -1779,15 +1777,7 @@ function renderScannerResults() {
       document.querySelectorAll('.scanner-card').forEach(c => c.classList.remove('selected'));
       card.classList.add('selected');
 
-      $('symbolInput').value = coin.baseSymbol;
-      strategySignals = [];
-      if ($('strategyCurrentCoinLabel')) $('strategyCurrentCoinLabel').textContent = `[${coin.baseSymbol}] 전략 신호`;
-      if ($('strategyCountTag')) $('strategyCountTag').textContent = '0개';
-      if ($('strategyListContainer')) {
-        $('strategyListContainer').innerHTML = `<div style="color:#9ca3af;font-size:11px;text-align:center;padding:25px;line-height:1.6;"><span style="color:#60a5fa;font-weight:700;">[${coin.baseSymbol}]</span> 신호 데이터 분석 중...<br><span style="font-size:10px;color:#6b7280;">차트 로드 완료 후 전략 신호가 즉시 업데이트됩니다.</span></div>`;
-      }
-      triggerSurgeHighlight(coin);
-      loadData();
+      loadDetectedMarket({symbol:coin.symbol},{kind:'surge',coin});
       status(`[${coin.symbol}] 5일간 ${sign}${coin.changePct.toFixed(2)}% ${isGain ? '상승' : '하락'} 구간 로드 완료 · 10초간 메인 차트에 가이드 표시`);
     };
 
@@ -2008,17 +1998,7 @@ function renderFundingRankList() {
       document.querySelectorAll('.funding-rank-card').forEach(c => c.classList.remove('selected'));
       card.classList.add('selected');
 
-      if ($('exchangeSelect')) $('exchangeSelect').value = item.exchange;
-      if ($('symbolInput')) $('symbolInput').value = item.baseSymbol;
-
-      strategySignals = [];
-      if ($('strategyCurrentCoinLabel')) $('strategyCurrentCoinLabel').textContent = `[${item.baseSymbol}] 전략 신호`;
-      if ($('strategyCountTag')) $('strategyCountTag').textContent = '0개';
-      if ($('strategyListContainer')) {
-        $('strategyListContainer').innerHTML = `<div style="color:#9ca3af;font-size:11px;text-align:center;padding:25px;line-height:1.6;"><span style="color:#60a5fa;font-weight:700;">[${item.baseSymbol}]</span> 신호 데이터 분석 중...<br><span style="font-size:10px;color:#6b7280;">차트 로드 완료 후 전략 신호가 즉시 업데이트됩니다.</span></div>`;
-      }
-
-      loadData();
+      loadDetectedMarket({ex:item.exchange,symbol:item.symbol});
       status(`[${item.exchange} ${item.symbol}] 실시간 펀딩비 ${rateSign}${item.rate.toFixed(4)}% 차트 로드 완료`);
     };
 
@@ -2026,13 +2006,40 @@ function renderFundingRankList() {
   }
 }
 
+function loadDetectedMarket(value,navigation){
+ if(globalThis.ChartWorkspace?.selectActive(value,navigation))return;
+ const fallback=loadedMarket||{ex:$('exchangeSelect').value,symbol:$('symbolInput').value,int:$('intervalSelect').value};
+ void selectWorkspaceMarket({...fallback,...value},navigation);
+}
+async function selectWorkspaceMarket(m,navigation){
+ $('exchangeSelect').value=m.ex;$('symbolInput').value=m.symbol;$('intervalSelect').value=m.int;
+ try{
+  if(navigation?.kind==='surge')triggerSurgeHighlight(navigation.coin);
+  const target=navigation?.kind==='signal'?Number(navigation.signal?.eventTime||navigation.signal?.time):null;
+  const task=loadData(Number.isFinite(target)?{dateTarget:target,timeframe:m.int}:{}),id=run;
+  await task;if(id!==run)return;
+  if(Number.isFinite(target))focusSignal({...navigation.signal},null,true);
+ }catch(error){if(error.name!=='AbortError')status(error.message,true);}
+}
+const chartViewActions={};
+for(const [action,id]of Object.entries({ruler:'btnRuler','ruler-settings':'rulerColorSettingsBtn',lines:'btnToggleLines',indicators:'btnIndicators'})){
+ const button=$(id),handler=button.onclick;chartViewActions[action]=()=>handler.call(button);
+ button.onclick=event=>{if(!globalThis.ChartWorkspace?.runOnActive(action))handler.call(button,event);};
+}
+function loadInputMarket(){
+ if(globalThis.ChartWorkspace?.selectActive({ex:$('exchangeSelect').value,symbol:$('symbolInput').value.trim().toUpperCase()})){
+  if(loadedMarket){$('exchangeSelect').value=loadedMarket.ex;$('symbolInput').value=loadedMarket.symbol;}return;
+ }
+ void loadData();
+}
 globalThis.ChartWorkspace?.bind({
  workspace:chartWorkspace,host:rulerHost,symbolButton:chartSymbolLabel,
  getMarket:()=>loadedMarket||{ex:$('exchangeSelect').value,symbol:$('symbolInput').value,int:$('intervalSelect').value},
- selectMarket:m=>{$('exchangeSelect').value=m.ex;$('symbolInput').value=m.symbol;$('intervalSelect').value=m.int;void loadData();},
+ selectMarket:selectWorkspaceMarket,action:action=>chartViewActions[action]?.(),
  onSplit:()=>{if(all.length)controller?.abort();scannerController?.abort();fundingRankController?.abort();},
- dispose:()=>{controller?.abort();navigationController?.abort();stopFundingUpdates();clearTimeout(selectedGuideTimer);clearInterval(selectedCountdownTimer);clearTimeout(surgeHighlight.timer);clearInterval(surgeHighlight.countdownInterval);},
+ dispose:()=>{controller?.abort();navigationController?.abort();stopFundingUpdates();clearLocationGuide();clearTimeout(surgeHighlight.timer);clearInterval(surgeHighlight.countdownInterval);},
  schedule,syncFullscreen:syncChartFullscreen,fullscreen:toggleChartFullscreen,jumpDate:()=>$('gotoDateBtn').click()
 });
+$('searchBtn').onclick=loadInputMarket;$('symbolInput').onkeydown=e=>{if(e.key==='Enter')loadInputMarket();};$('exchangeSelect').onchange=loadInputMarket;
 if(!globalThis.ChartWorkspace?.embedded){setupSidebarTabs();setupScanner();setupFundingRank();}
 loadData();

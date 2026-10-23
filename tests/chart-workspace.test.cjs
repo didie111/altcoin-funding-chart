@@ -60,15 +60,15 @@ function workspaceHarness({embedded=false,saved={}}={}){
   prepend(node){node.remove();node.parent=this;this.children.unshift(node);}
   before(node){this.parent?.append(node);}
   remove(){if(this.parent){this.parent.children=this.parent.children.filter(child=>child!==this);this.parent=null;}}
-  setAttribute(name,value){this.attrs[name]=String(value);}addEventListener(){}
+  setAttribute(name,value){this.attrs[name]=String(value);}addEventListener(name,fn){this.events??={};this.events[name]=fn;}
  }
  const doc={body:new Element('body'),documentElement:new Element('html'),createElement:tag=>new Element(tag),getElementById:id=>ids.get(id),addEventListener:(name,fn)=>docEvents[name]=fn,querySelector:()=>null};
  for(const id of ['exchangeSelect','symbolInput','intervalSelect','chartWorkspace','chartTopbar','chartBody','drawingHistoryControls','chartSymbolLabel','host']){const element=new Element('div');element.id=id;doc.body.append(element);}
  ids.get('exchangeSelect').value='BITGET';ids.get('symbolInput').value='SAHARAUSDT';ids.get('intervalSelect').value='1h';
  const parent={postMessage:data=>messages.push({data})},win={document:doc,location:new URL('https://example.test/'+(embedded?'?chart-embed=1&cell=2':'')),parent:embedded?parent:null,localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},addEventListener:(name,fn)=>events[name]=fn,SymbolPicker:{bind:()=>({open(){}})},MarketCatalog:{create:()=>({})}};
  if(!embedded)win.parent=win;
- const calls={schedule:0,dispose:0,split:0,fullscreen:[],market:[]},controller=Workspace.create(win);
- controller.bind({workspace:ids.get('chartWorkspace'),host:ids.get('host'),symbolButton:ids.get('chartSymbolLabel'),getMarket:()=>({ex:'BITGET',symbol:'SAHARAUSDT',int:'1h'}),selectMarket:m=>calls.market.push(m),onSplit:()=>calls.split++,dispose:()=>calls.dispose++,schedule:()=>calls.schedule++,fullscreen:options=>calls.fullscreen.push(options),syncFullscreen(){},jumpDate(){}});
+ const calls={schedule:0,dispose:0,split:0,fullscreen:[],market:[],navigation:[],action:[]},controller=Workspace.create(win);
+ controller.bind({workspace:ids.get('chartWorkspace'),host:ids.get('host'),symbolButton:ids.get('chartSymbolLabel'),getMarket:()=>({ex:'BITGET',symbol:'SAHARAUSDT',int:'1h'}),selectMarket:(m,n)=>{calls.market.push(m);calls.navigation.push(n);},action:a=>calls.action.push(a),onSplit:()=>calls.split++,dispose:()=>calls.dispose++,schedule:()=>calls.schedule++,fullscreen:options=>calls.fullscreen.push(options),syncFullscreen(){},jumpDate(){}});
  return {ids,doc,messages,calls,controller,parent,win,storage,frames:()=>ids.get('chartGrid')?.children.filter(x=>x.tagName==='iframe')||[],message:(source,data,origin=win.location.origin)=>events.message({source,origin,data:{channel:'funding-chart-workspace-v1',...data}}),key:event=>docEvents.keydown({target:{closest:()=>null},preventDefault(){this.defaultPrevented=true;},...event})};
 }
 test('each of the four charts maximizes in place and restores the same chart frames',t=>{
@@ -104,4 +104,40 @@ test('embedded chart requests use the parent and reflect maximize and restore la
  h.message(h.parent,{type:'layout-state',maximized:-1,fullscreen:true});assert.equal(h.controller.exitWorkspaceFullscreen(),true);assert.equal(h.messages.at(-1).data.type,'exit-workspace-fullscreen');
  h.message(h.parent,{type:'layout-state',maximized:-1,fullscreen:false});assert.equal(h.controller.fullscreenState().active,false);assert.equal(h.controller.restoreMaximized(),false);
  assert.equal(h.controller.exitWorkspaceFullscreen(),false);
+});
+test('every secondary chart receives detected coins and outside view actions without loading the first chart',t=>{
+ const h=workspaceHarness();t.after(()=>h.controller.setLayout(1));h.controller.setLayout(4);
+ for(const frame of h.frames()){
+  h.message(frame.contentWindow,{type:'ready'});h.message(frame.contentWindow,{type:'active'});
+  const previous=h.controller.activeMarket(),navigation={kind:'signal',signal:{time:1234,rate:-1}};h.messages.length=0;
+  assert.equal(h.controller.selectActive({ex:'BINGX',symbol:'NILUSDT'},navigation),true);
+  assert.equal(h.controller.runOnActive('ruler'),true);assert.equal(h.controller.runOnActive('ruler-settings'),true);
+  assert.ok(h.messages.every(message=>message.frame===frame));
+  assert.deepEqual(h.messages[0].data.market,{ex:'BINGX',symbol:'NILUSDT',int:previous.int});assert.equal(h.messages[0].data.navigation,navigation);
+  assert.equal(h.calls.market.length,0);assert.equal(h.controller.runOnActive('unknown'),false);
+ }
+ h.ids.get('chartGrid').children[0].events.pointerdown();assert.equal(h.controller.selectActive({symbol:'BTCUSDT'}),false);
+ assert.equal(h.controller.runOnActive('ruler'),false);assert.equal(h.controller.activeMarket().symbol,'SAHARAUSDT');
+});
+test('a selection made before a secondary chart is ready is queued and only the latest market is loaded',t=>{
+ const h=workspaceHarness();t.after(()=>h.controller.setLayout(1));h.controller.setLayout(4);const frame=h.frames()[1];
+ h.message(frame.contentWindow,{type:'active'});h.messages.length=0;
+ h.controller.selectActive({ex:'BINGX',symbol:'BTCUSDT'});h.controller.selectActive({symbol:'NILUSDT'});h.controller.runOnActive('lines');
+ assert.equal(h.messages.length,0);h.message(frame.contentWindow,{type:'ready'});
+ const sent=h.messages.filter(m=>m.data.type==='select'||m.data.type==='action');
+ assert.equal(sent.length,2);assert.deepEqual(sent[0].data.market,{ex:'BINGX',symbol:'NILUSDT',int:'15m'});assert.equal(sent[1].data.action,'lines');
+});
+test('embedded commands keep navigation details, run only known actions, and reject foreign sources',()=>{
+ const h=workspaceHarness({embedded:true}),navigation={kind:'signal',signal:{time:1234}};
+ h.message(h.parent,{type:'select',market:{ex:'BINGX',symbol:'NILUSDT',int:'1m'},navigation});
+ assert.equal(h.calls.market[0].symbol,'NILUSDT');assert.equal(h.calls.navigation[0],navigation);
+ h.message(h.parent,{type:'action',action:'ruler-settings'});h.message(h.parent,{type:'action',action:'unknown'});
+ h.message({}, {type:'action',action:'ruler'});h.message(h.parent,{type:'action',action:'ruler'},'https://untrusted.test');
+ assert.deepEqual(h.calls.action,['ruler-settings']);assert.equal(h.controller.selectActive({symbol:'BTCUSDT'}),false);
+});
+test('changing any versioned chart asset changes the embedded document URL',()=>{
+ const old=Workspace.assetRevision(['app.js?v=old','drawing-renderer.js?v=1']),next=Workspace.assetRevision(['app.js?v=new','drawing-renderer.js?v=1']);
+ assert.notEqual(old,next);assert.equal(Workspace.assetRevision(['app.js?v=new','drawing-renderer.js?v=1']),next);
+ const url=new URL(Workspace.embedUrl('https://example.test/?build=old',{ex:'BITGET',symbol:'NILUSDT',int:'1m'},3,next));
+ assert.equal(url.searchParams.get('build'),next);assert.equal(url.searchParams.get('cell'),'3');
 });

@@ -51,7 +51,7 @@ test('a timeframe change focuses the requested candles before starting backgroun
  node('symbolInput').value='BTCUSDT';node('exchangeSelect').value='BITGET';node('intervalSelect').value='1h';
  let focused,collecting=false,cancelled=false;const oldController=new AbortController(),dateSignal=new AbortController().signal;
  const context={AbortController,AbortSignal,DOMException,Map,Set,Uint8Array,Number,globalThis:{},$:node,duration:frames.seconds,thresholds:()=>{},
-  chartDateFocus:null,dateNavigation:{cancel:()=>{cancelled=true;}},navigationController:new AbortController(),controller:oldController,run:1,
+  chartDateFocus:null,clearLocationGuide(){},dateNavigation:{cancel:()=>{cancelled=true;}},navigationController:new AbortController(),controller:oldController,run:1,
   FundingEngine:{contract:(_,s)=>s},chartSymbolLabel:{},paneScaleSeries:[],clearRuler(){},mapped:new Map(),
   candles:{setData(){}},studyPanels:{clearData(){}},cycleMarkers:null,volume:null,funding:null,settlementCycle:null,markers:{setMarkers(){}},
   cycleValues:new Map(),cycleCaption:{},cycleBadge:{},renderList(){},status(){},startFundingUpdates(){},
