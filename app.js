@@ -24,8 +24,8 @@ let cycleMarkers=LC.createSeriesMarkers(settlementCycle,[]);
 chart.panes()[3].setStretchFactor(1.5);
 const cycleCaption=document.createElement('div');cycleCaption.style.cssText='padding:4px 12px;font-size:12px;color:#cbd5e1';cycleCaption.textContent='정산 주기: 기록 대기 · 8h 파랑 / 4h 주황 / 1h 빨강';$('coverage').before(cycleCaption);
 let cycleHistory=[],cycleTransitions=[],cycleValues=new Map(),officialCycle=null,otherCycles=[],cycleFast=new Uint8Array(0);
-// 정산 주기 배지: 현재 주기를 차트 우상단에 크게 표시 (8h가 아니면 강조)
-const cycleBadge=document.createElement('div');cycleBadge.id='cycle-badge';cycleBadge.hidden=true;cycleBadge.setAttribute('role','status');$('unified-chart').append(cycleBadge);
+// 정산 주기 배지: 코인명·시간봉 옆에 표시해 차트 도구와 겹치지 않게 함
+const cycleBadge=document.createElement('div');cycleBadge.id='cycle-badge';cycleBadge.hidden=true;cycleBadge.setAttribute('role','status');$('chartIdentityControls').after(cycleBadge);
 function updateCycleBadge(){const latest=cycleHistory.at(-1)?.hours??null,official=officialCycle?.hours??null,hours=official||latest;
  const sel=$('exchangeSelect').value,selName=$('exchangeSelect').selectedOptions[0].text;
  // 거래소별 현재 주기 (선택 거래소가 목록에 없거나 조회 실패하면 선택 거래소 값만 따로 추가)

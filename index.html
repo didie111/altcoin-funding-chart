@@ -883,10 +883,11 @@
     .pane-header.price-collapsed [data-panel-action="hide"] {width:auto;padding:3px 10px;background:#312e81;color:#e9d5ff;border-color:#a78bfa}
     .pane-header.price-collapsed [data-panel-action="hide"]::after {content:"메인 차트 보이기";margin-left:6px;font-size:11px;font-weight:600;white-space:nowrap}
     /* 정산 주기 배지 */
-    #cycle-badge {position:absolute;top:8px;right:215px;z-index:6;pointer-events:none;padding:5px 12px;border-radius:8px;font-size:13px;font-weight:800;color:#111827;box-shadow:0 2px 10px #000a;white-space:nowrap}
+    #cycle-badge {position:static;flex:0 1 auto;min-width:0;max-width:55%;align-self:center;pointer-events:auto;padding:3px 7px;border-radius:6px;font-size:11px;line-height:16px;font-weight:800;color:#111827;box-shadow:0 2px 6px #0006;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    #cycle-badge[hidden] {display:none}
     #cycle-badge.fast {font-size:14px;border:2px solid #fff;animation:cyclePulse 1.6s ease-in-out 3}
-    @keyframes cyclePulse {50%{transform:scale(1.08)}}
-    @media(max-width:700px){#cycle-badge{right:150px;font-size:11px}#cycle-badge.fast{font-size:12px}}
+    @keyframes cyclePulse {50%{filter:brightness(1.15)}}
+    @media(max-width:700px){#cycle-badge,#cycle-badge.fast{font-size:10px}}
     @media(max-width:700px){.pane-tools{gap:0}.pane-tools button,.pane-move-tools button{width:21px}.panel-values{display:none}.pane-header-left{gap:3px}.panel-title{max-width:110px}}
     #fundingSnapshot {flex:none;padding:7px 12px;border-bottom:1px solid #374151;background:#151e30;font-size:11px;line-height:1.7}
     #fundingSelected {font-weight:700;color:#e2e8f0;font-size:12px}
@@ -908,7 +909,7 @@
     @media(max-width:850px){#fundingExchangeGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
     </style>
     <link rel="stylesheet" href="chart-drawings.css?v=20261016-ruler-1">
-    <link rel="stylesheet" href="chart-workspace.css?v=20261023-cell-maximize-1">
+    <link rel="stylesheet" href="chart-workspace.css?v=20261023-left-cycle-badge-1">
 </head>
 <body>
 
@@ -1252,7 +1253,7 @@
     <script src="symbol-picker.js?v=20261022-workspace-1"></script>
     <script src="chart-workspace.js?v=20261023-date-icon-1"></script>
     <script src="scanner.js?v=20261021-upgrade-1"></script>
-    <script src="app.js?v=20261023-cell-maximize-1"></script>
+    <script src="app.js?v=20261023-left-cycle-badge-1"></script>
 </body>
 </html>
 
