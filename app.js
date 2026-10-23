@@ -628,9 +628,12 @@ function isChartFullscreen() {
   return document.fullscreenElement === chartWorkspace || chartWorkspace.classList.contains('chart-fullscreen-fallback');
 }
 function syncChartFullscreen() {
-  const active = isChartFullscreen();
-  chartWorkspace.classList.toggle('chart-is-fullscreen', active);
-  const label = active ? '차트 전체화면 해제' : '가격 차트와 모든 지표 전체화면';
+  const workspaceActive = isChartFullscreen();
+  globalThis.ChartWorkspace?.syncWorkspaceFullscreen(workspaceActive);
+  const cellState = globalThis.ChartWorkspace?.fullscreenState();
+  const active = cellState ? cellState.active : workspaceActive;
+  chartWorkspace.classList.toggle('chart-is-fullscreen', workspaceActive || active);
+  const label = cellState ? cellState.label : active ? '차트 전체화면 해제' : '가격 차트와 모든 지표 전체화면';
   chartFullscreenBtn.title = label;
   chartFullscreenBtn.setAttribute('aria-label', label);
   chartFullscreenBtn.setAttribute('aria-pressed', String(active));
@@ -640,8 +643,8 @@ function syncChartFullscreen() {
   chartFullscreenBtn.innerHTML = '<svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="' + path + '"/></svg>';
   schedule();
 }
-async function toggleChartFullscreen() {
-  if(globalThis.ChartWorkspace?.requestFullscreen())return;
+async function toggleChartFullscreen({workspace=false}={}) {
+  if(!workspace&&globalThis.ChartWorkspace?.requestFullscreen())return;
   if (chartFullscreenPending) return;
   chartFullscreenPending = true;
   chartFullscreenBtn.disabled = true;
@@ -667,7 +670,9 @@ chartFullscreenBtn.onclick = event => {event.stopPropagation(); void toggleChart
 for (const type of ['pointerdown', 'dblclick']) chartFullscreenZone.addEventListener(type, event => event.stopPropagation());
 document.addEventListener('fullscreenchange', syncChartFullscreen);
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && isChartFullscreen()) void toggleChartFullscreen();
+  if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('dialog[open]')) return;
+  if (globalThis.ChartWorkspace?.restoreMaximized() || globalThis.ChartWorkspace?.exitWorkspaceFullscreen()) {event.preventDefault();return;}
+  if (isChartFullscreen()) void toggleChartFullscreen({workspace:true});
 });
 syncChartFullscreen();
 
@@ -2014,7 +2019,7 @@ globalThis.ChartWorkspace?.bind({
  selectMarket:m=>{$('exchangeSelect').value=m.ex;$('symbolInput').value=m.symbol;$('intervalSelect').value=m.int;void loadData();},
  onSplit:()=>{if(all.length)controller?.abort();scannerController?.abort();fundingRankController?.abort();},
  dispose:()=>{controller?.abort();navigationController?.abort();stopFundingUpdates();clearTimeout(selectedGuideTimer);clearInterval(selectedCountdownTimer);clearTimeout(surgeHighlight.timer);clearInterval(surgeHighlight.countdownInterval);},
- schedule,fullscreen:toggleChartFullscreen,jumpDate:()=>$('gotoDateBtn').click()
+ schedule,syncFullscreen:syncChartFullscreen,fullscreen:toggleChartFullscreen,jumpDate:()=>$('gotoDateBtn').click()
 });
 if(!globalThis.ChartWorkspace?.embedded){setupSidebarTabs();setupScanner();setupFundingRank();}
 loadData();

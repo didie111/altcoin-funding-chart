@@ -10,7 +10,8 @@
  function create(win){
   const doc=win.document,$=id=>doc.getElementById(id),params=new URLSearchParams(win.location.search),embedded=params.get('chart-embed')==='1';
   let saved;try{saved=preferences(JSON.parse(win.localStorage.getItem(storageKey)||'{}'));}catch{saved=preferences();}
-  let mode=1,api,grid,firstCell,picker,toggle,active=0,frames=[],startup=[],disposed=false,statusNode;
+  let mode=1,api,grid,firstCell,picker,toggle,active=0,frames=[],startup=[],disposed=false,statusNode,maximized=-1,workspaceFullscreen=false,maximizeButton,workspaceButton;
+  const ownCell=embedded?Number(params.get('cell')):0;
   const markets=saved.markets;
   if(embedded)doc.documentElement.classList.add('chart-embedded');
   const explicit=params.has('symbol')||params.has('ex')||params.has('int'),initial=embedded||explicit?market(Object.fromEntries(['ex','symbol','int'].map(k=>[k,params.get(k)]))):markets[0];
@@ -18,10 +19,27 @@
   function send(message){if(embedded&&win.parent!==win)win.parent.postMessage({channel,...message},win.location.origin);}
   function persist(){if(embedded)return;try{win.localStorage.setItem(storageKey,JSON.stringify({layout:mode,markets}));}catch{}}
   function selected(index){active=index;firstCell?.classList.toggle('selected',index===0);for(const frame of frames)frame.classList.toggle('selected',Number(frame.dataset.chartCell)===index);}
+  function expandControl(button,pressed,label){if(!button)return;button.title=label;button.setAttribute('aria-label',label);button.setAttribute('aria-pressed',String(pressed));const path=pressed?'M3 7h4V3m10 4h-4V3M3 13h4v4m10-4h-4v4':'M7 3H3v4m10-4h4v4M3 13v4h4m10-4v4h-4';button.innerHTML='<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="'+path+'"/></svg>';}
+  function fullscreenState(){return embedded||mode===4?{active:maximized===ownCell,label:maximized===ownCell?'4분할로 돌아가기 (Alt+Enter)':'이 차트 최대화 (Alt+Enter)'}:null;}
+  function updateControls(){const state=fullscreenState();if(maximizeButton)maximizeButton.hidden=!state;if(workspaceButton)workspaceButton.hidden=!state;expandControl(maximizeButton,Boolean(state?.active),state?.label||'이 차트 최대화 (Alt+Enter)');expandControl(workspaceButton,workspaceFullscreen,workspaceFullscreen?'작업 영역 전체화면 해제':'작업 영역 전체화면');}
+  function broadcastLayout(){if(!embedded)for(const frame of frames)frame.contentWindow.postMessage({channel,type:'layout-state',maximized,fullscreen:workspaceFullscreen},win.location.origin);}
+  function syncWorkspaceFullscreen(value){if(embedded||workspaceFullscreen===value)return;workspaceFullscreen=value;updateControls();broadcastLayout();}
+  function setMaximized(index){
+   if(embedded||mode!==4||!Number.isInteger(index)||index< -1||index>3)return;
+   if(index>0&&!frames.some(frame=>Number(frame.dataset.chartCell)===index))return;
+   maximized=index;grid.classList.toggle('cell-maximized',index>=0);firstCell.classList.toggle('maximized',index===0);
+   for(const frame of frames)frame.classList.toggle('maximized',Number(frame.dataset.chartCell)===index);
+   if(index>=0)selected(index);updateControls();broadcastLayout();api.syncFullscreen?.();api.schedule();
+  }
+  function toggleMaximized(index){setMaximized(maximized===index?-1:index);}
+  function restoreMaximized(){if(maximized<0)return false;if(embedded)send({type:'restore'});else setMaximized(-1);return true;}
+  function requestFullscreen(){if(embedded){send({type:'maximize'});return true;}if(mode===4){toggleMaximized(0);return true;}return false;}
+  function requestWorkspaceFullscreen(){if(embedded)send({type:'workspace-fullscreen'});else void api.fullscreen({workspace:true});}
+  function exitWorkspaceFullscreen(){if(!embedded||!workspaceFullscreen)return false;send({type:'exit-workspace-fullscreen'});return true;}
   function current(){return market(api?.getMarket()||{ex:$('exchangeSelect').value,symbol:$('symbolInput').value,int:$('intervalSelect').value});}
   function choose(value,index=0){const m=market({...value,int:markets[index]?.int||current().int});if(index===0){api.selectMarket(m);return;}const frame=frames.find(f=>Number(f.dataset.chartCell)===index);if(frame)frame.contentWindow.postMessage({channel,type:'select',market:m},win.location.origin);}
   function setLayout(next){
-   if(embedded||!api)return;next=next===4?4:1;if(mode===next)return;mode=next;
+   if(embedded||!api)return;next=next===4?4:1;if(mode===next)return;if(maximized>=0)setMaximized(-1);mode=next;
    doc.body.classList.toggle('chart-layout-four',mode===4);api.workspace.classList.toggle('chart-quad',mode===4);grid.classList.toggle('four',mode===4);
    toggle.setAttribute('aria-pressed',String(mode===4));toggle.title=mode===4?'1화면으로 돌아가기':'4분할 차트';toggle.setAttribute('aria-label',toggle.title);toggle.textContent=mode===4?'▣ 1화면':'⊞ 4분할';
    for(const timer of startup)clearTimeout(timer);startup=[];
@@ -35,7 +53,7 @@
     }
     api.onSplit?.();selected(0);
    }
-   persist();api.schedule();
+   updateControls();broadcastLayout();api.syncFullscreen?.();persist();api.schedule();
   }
   function marketChanged(value){const m=market(value);if(embedded)send({type:'market',market:m});else{markets[0]=m;persist();}const badge=$('chartExchangeBadge');if(badge)badge.textContent=({BINANCE:'Binance',BYBIT:'Bybit',BINGX:'BingX',BITGET:'Bitget',MEXC:'MEXC',OKX:'OKX'})[m.ex];}
   function reportStatus(text,error){if(statusNode){statusNode.hidden=!error;statusNode.textContent=error?text:'';statusNode.title=text;}}
@@ -46,11 +64,15 @@
    api.symbolButton.onclick=()=>{if(embedded)send({type:'picker',market:current()});else picker.open(current(),0);};
    statusNode=doc.createElement('div');statusNode.className='chart-cell-status';statusNode.setAttribute('role','status');statusNode.hidden=true;api.host.append(statusNode);
    const dateButton=doc.createElement('button');dateButton.id='chartCellDate';dateButton.type='button';dateButton.className='chart-cell-date';dateButton.textContent='▦';dateButton.title='날짜로 이동';dateButton.setAttribute('aria-label','날짜로 이동');dateButton.onclick=()=>api.jumpDate();$('drawingHistoryControls').append(dateButton);
+   maximizeButton=doc.createElement('button');maximizeButton.id='chartCellMaximize';maximizeButton.type='button';maximizeButton.className='chart-workspace-control';maximizeButton.onclick=()=>{if(embedded)send({type:'maximize'});else toggleMaximized(0);};
+   workspaceButton=doc.createElement('button');workspaceButton.id='chartWorkspaceFullscreen';workspaceButton.type='button';workspaceButton.className='chart-workspace-control';workspaceButton.onclick=requestWorkspaceFullscreen;$('drawingHistoryControls').append(maximizeButton,workspaceButton);
+   doc.addEventListener('keydown',event=>{if(event.defaultPrevented||!event.altKey||event.ctrlKey||event.metaKey||event.shiftKey||event.key!=='Enter'||event.target?.closest?.('input,textarea,select,[contenteditable="true"]')||doc.querySelector('dialog[open]'))return;event.preventDefault();if(embedded)send({type:'maximize'});else if(mode===4)toggleMaximized(maximized>=0?maximized:active);else void api.fullscreen({workspace:true});});
    if(embedded){
     doc.addEventListener('pointerdown',()=>send({type:'active'}),{capture:true,passive:true});
     win.addEventListener('message',event=>{if(event.origin!==win.location.origin||event.source!==win.parent||event.data?.channel!==channel)return;
      if(event.data.type==='select')api.selectMarket(market(event.data.market,current()));
      else if(event.data.type==='dispose'){disposed=true;api.dispose();}
+     else if(event.data.type==='layout-state'){maximized=Number.isInteger(event.data.maximized)&&event.data.maximized>=-1&&event.data.maximized<=3?event.data.maximized:-1;workspaceFullscreen=event.data.fullscreen===true;updateControls();api.syncFullscreen?.();}
     });
    }else{
     grid=doc.createElement('div');grid.id='chartGrid';firstCell=doc.createElement('section');firstCell.className='chart-cell chart-cell-main selected';firstCell.setAttribute('aria-label','1번 독립 차트');firstCell.append($('chartTopbar'),$('chartBody'));grid.append(firstCell);api.workspace.prepend(grid);
@@ -64,14 +86,18 @@
      if(data.type==='market'){markets[index]=market(data.market);persist();}
      else if(data.type==='picker'){selected(index);markets[index]=market(data.market);picker.open(markets[index],index);}
      else if(data.type==='active')selected(index);
-     else if(data.type==='fullscreen')void api.fullscreen();
+     else if(data.type==='maximize')toggleMaximized(index);
+     else if(data.type==='restore')setMaximized(-1);
+     else if(data.type==='workspace-fullscreen')void api.fullscreen({workspace:true});
+     else if(data.type==='exit-workspace-fullscreen'&&workspaceFullscreen)void api.fullscreen({workspace:true});
+     else if(data.type==='ready')broadcastLayout();
     });
     if(saved.layout===4)setLayout(4);
    }
-   marketChanged(current());
+   updateControls();marketChanged(current());if(embedded)send({type:'ready'});api.syncFullscreen?.();
    win.addEventListener('pagehide',()=>{disposed=true;api.dispose();},{once:true});
   }
-  return {embedded,bind,marketChanged,reportStatus,isMulti:()=>embedded||mode===4,visible:()=>!disposed&&!doc.hidden,requestFullscreen:()=>{if(embedded&&win.parent!==win){send({type:'fullscreen'});return true;}return false;},setLayout};
+  return {embedded,bind,marketChanged,reportStatus,isMulti:()=>embedded||mode===4,visible:()=>!disposed&&!doc.hidden,requestFullscreen,requestWorkspaceFullscreen,exitWorkspaceFullscreen,restoreMaximized,fullscreenState,syncWorkspaceFullscreen,setLayout};
  }
  return {create,market,preferences,embedUrl};
 });
