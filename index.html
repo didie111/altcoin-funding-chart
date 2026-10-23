@@ -791,6 +791,8 @@
     .date-navigation-body {padding:16px 20px 6px}
     .date-navigation-fields {display:grid;grid-template-columns:1.4fr 1fr;gap:10px}
     .date-navigation-fields label {display:flex;flex-direction:column;gap:6px;color:#cbd5e1;font-size:12px}
+    .date-navigation-interval {grid-column:1/-1}
+    .date-navigation-fields select {height:34px;width:100%;min-width:0;font-size:13px}
     .date-navigation-fields input {width:100%;box-sizing:border-box;min-width:0;color-scheme:dark;height:34px;font-size:13px}
     .date-navigation-zone,.date-navigation-shortcut {color:#94a3b8;font-size:11px}
     .date-navigation-zone {margin:8px 0 12px}
@@ -908,7 +910,7 @@
     .funding-card span {overflow-wrap:anywhere}
     @media(max-width:850px){#fundingExchangeGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
     </style>
-    <link rel="stylesheet" href="chart-drawings.css?v=20261016-ruler-1">
+    <link rel="stylesheet" href="chart-drawings.css?v=20261024-ruler-date-1">
     <link rel="stylesheet" href="chart-workspace.css?v=20261023-left-cycle-badge-1">
 </head>
 <body>
@@ -1169,7 +1171,7 @@
       <div class="settings-heading"><h2 id="dateNavigationTitle">날짜로 이동</h2><button id="dateNavigationClose" type="button" aria-label="날짜 이동 닫기">×</button></div>
       <form id="dateNavigationForm">
         <div class="date-navigation-body">
-          <div class="date-navigation-fields"><label for="dateNavigationDate">날짜<input id="dateNavigationDate" type="date" min="2009-01-01" required></label><label for="dateNavigationTime">시간<input id="dateNavigationTime" type="time" step="60" required></label></div>
+          <div class="date-navigation-fields"><label for="dateNavigationDate">날짜<input id="dateNavigationDate" type="date" min="2009-01-01" required></label><label for="dateNavigationTime">시간<input id="dateNavigationTime" type="time" step="60" required></label><label for="dateNavigationInterval" class="date-navigation-interval">타임프레임<select id="dateNavigationInterval" aria-label="날짜 이동 타임프레임"></select></label></div>
           <p class="date-navigation-zone">한국 시간 · UTC+9</p>
           <div class="date-calendar-heading"><button id="dateCalendarPrevious" type="button" aria-label="이전 달">‹</button><span id="dateCalendarMonth"></span><button id="dateCalendarNext" type="button" aria-label="다음 달">›</button></div>
           <div class="date-calendar-weekdays" aria-hidden="true"><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span><span>일</span></div>
@@ -1243,17 +1245,17 @@
     <script src="funding.js?v=20261013-relay-1"></script>
     <script src="timeframes.js?v=20261014-navigation-1"></script>
     <script src="chart-data.js?v=20261015-live-1"></script>
-    <script src="date-navigation.js?v=20261014-navigation-1"></script>
+    <script src="date-navigation.js?v=20261024-ruler-date-1"></script>
     <script src="indicators.js?v=20261021-upgrade-1"></script>
-    <script src="ruler-settings.js?v=20261016-ruler-1"></script>
+    <script src="ruler-settings.js?v=20261024-ruler-date-1"></script>
     <script src="drawing-engine.js?v=20261016-drawings-1"></script>
-    <script src="drawing-renderer.js?v=20261020-ruler-arrows-1"></script>
-    <script src="chart-drawings.js?v=20261016-ruler-1"></script>
+    <script src="drawing-renderer.js?v=20261024-ruler-date-1"></script>
+    <script src="chart-drawings.js?v=20261024-ruler-date-1"></script>
     <script src="market-catalog.js?v=20261022-workspace-1"></script>
     <script src="symbol-picker.js?v=20261022-workspace-1"></script>
     <script src="chart-workspace.js?v=20261023-date-icon-1"></script>
     <script src="scanner.js?v=20261021-upgrade-1"></script>
-    <script src="app.js?v=20261023-left-cycle-badge-1"></script>
+    <script src="app.js?v=20261024-ruler-date-1"></script>
 </body>
 </html>
 
