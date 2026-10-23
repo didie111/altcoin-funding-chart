@@ -7,7 +7,7 @@ function loadFunction(start,end,context){vm.createContext(context);vm.runInConte
 test('funding and strategy markers remain chronological when their signal times interleave',()=>{
  let result;
  const context=loadFunction('function renderSignalMarkers(', 'function renderWindow(',{
-  lowerBound,signals:[{time:30,rate:-.5,type:'WARN'}],strategySignals:[{time:20,text:'BUY'},{time:35,text:'SELL'}],
+  lowerBound,fundingSignalsVisible:()=>true,signals:[{time:30,rate:-.5,type:'WARN'}],strategySignals:[{time:20,text:'BUY'},{time:35,text:'SELL'}],
   markers:{setMarkers:rows=>{result=rows;}}
  });
  context.renderSignalMarkers([{time:10},{time:40}]);

@@ -272,7 +272,7 @@ const WINDOW=10000, duration=TimeframeEngine.seconds;
 let dateNavigation=null, navigationController=null, loadedMarket=null, chartDateFocus=null;
 let historyState={id:0,buffer:[],pending:new Set(),exhausted:new Set()};
 let paneScaleSeries=[candles,volume,funding,settlementCycle];
-let studyPanels=null;
+let studyPanels=null,lastFundingSignalVisibility;
 const overlay=document.createElement('canvas');overlay.style.cssText='position:absolute;inset:0;pointer-events:none;z-index:4';$('unified-chart').append(overlay);
 const guideCountdown=document.createElement('div');guideCountdown.id='chartLocationGuide';guideCountdown.hidden=true;guideCountdown.style.cssText='position:absolute;top:12px;pointer-events:none;z-index:6;padding:7px 12px;background:#fbbf24;color:#111827;border:2px solid #fffbeb;border-radius:8px;font-size:14px;font-weight:800;white-space:nowrap;box-shadow:0 2px 10px #000b;transform:translateX(-50%)';guideCountdown.setAttribute('role','timer');guideCountdown.setAttribute('aria-label','선택 신호 기준선 남은 시간');$('unified-chart').append(guideCountdown);
 function updateGuideCountdown(){const seconds=Math.max(0,Math.ceil((selectedGuideDeadline-performance.now())/1000));const label=(selectedGuideKind==='date'?'이동 위치 · ':'기준선 ')+seconds+'초';if(guideCountdown.textContent!==label)guideCountdown.textContent=label;}
@@ -293,9 +293,9 @@ function draw(){paneLayoutCache=computePaneLayout();updatePaneHover();try{drawIn
 function setStyle(el,k,v){const c=el._st||(el._st={});if(c[k]!==v){c[k]=v;el.style[k]=v;}}
 function drawInner(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clientHeight,dpr=devicePixelRatio||1,plotWidth=chart.timeScale().width();
  if(overlay.width!==Math.round(w*dpr)||overlay.height!==Math.round(h*dpr)){overlay.width=Math.round(w*dpr);overlay.height=Math.round(h*dpr);overlay.style.width=w+'px';overlay.style.height=h+'px';}
- ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawCycleBands(w,h);drawRuler(w,h);drawSurgeHighlight(w,h,plotWidth);placeChartSymbol();placeChartNavigation();placeChartClock();placeLegendToggle();studyPanels?.position();chartDrawings?.render();globalThis.ChartWorkspace?.controlsChanged({ruler:chartDrawings?.tool==='ruler',lines:showLines});
- if(selectedGuideVisible&&selectedGuideTime!==null){const x=chart.timeScale().timeToCoordinate(selectedGuideTime);if(x!==null&&x>=0&&x<=plotWidth){guideCountdown.hidden=false;guideCountdown.style.left=Math.max(65,Math.min(plotWidth-65,x))+'px';ctx.strokeStyle=selectedGuideKind==='date'?'#60a5fa':'#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
- if(!showLines)return;
+ ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawCycleBands(w,h);drawRuler(w,h);drawSurgeHighlight(w,h,plotWidth);placeChartSymbol();placeChartNavigation();placeChartClock();placeLegendToggle();studyPanels?.position();syncFundingSignalVisibility();chartDrawings?.render();globalThis.ChartWorkspace?.controlsChanged({ruler:chartDrawings?.tool==='ruler',lines:showLines});
+ if(selectedGuideVisible&&selectedGuideTime!==null&&(selectedGuideKind==='date'||selectedSignal?.rate===undefined||fundingSignalsVisible())){const x=chart.timeScale().timeToCoordinate(selectedGuideTime);if(x!==null&&x>=0&&x<=plotWidth){guideCountdown.hidden=false;guideCountdown.style.left=Math.max(65,Math.min(plotWidth-65,x))+'px';ctx.strokeStyle=selectedGuideKind==='date'?'#60a5fa':'#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
+ if(!showLines||!fundingSignalsVisible())return;
  const range=chart.timeScale().getVisibleRange();if(!range)return;
  const ts=chart.timeScale(),iEnd=lowerBound(signals,Number(range.to)+1),pathExt=new Path2D(),pathWarn=new Path2D();let last=-100,i=lowerBound(signals,Number(range.from)),any=false;
  while(i<iEnd){const s=signals[i],x=ts.timeToCoordinate(s.time);if(x===null){i++;continue;}
@@ -775,8 +775,16 @@ function focusSignal(s, element, local=false) {
   schedule();
 }
 
-function renderSignalMarkers(part){if(!part.length)return;
- const visible=signals.slice(lowerBound(signals,part[0].time),lowerBound(signals,part.at(-1).time+1));
+function fundingSignalsVisible(){
+ if(!studyPanels)return true;
+ const panel=studyPanels.panels.get('funding');return Boolean(panel?.active&&!panel.hidden);
+}
+function syncFundingSignalVisibility(){
+ const visible=fundingSignalsVisible();if(visible===lastFundingSignalVisibility)return;
+ lastFundingSignalVisibility=visible;renderSignalMarkers(all.slice(windowStart,windowEnd));
+}
+function renderSignalMarkers(part){if(!part.length){markers.setMarkers([]);return;}
+ const visible=fundingSignalsVisible()?signals.slice(lowerBound(signals,part[0].time),lowerBound(signals,part.at(-1).time+1)):[];
  const unique=new Map();for(const s of visible){const old=unique.get(s.time);if(!old||s.rate<old.rate)unique.set(s.time,s);}
  const markerList = [...unique.values()].map(s=>({time:s.time,position:'aboveBar',color:s.type==='EXTREME'?'#a855f7':'#ef4444',shape:'arrowDown',text:s.rate.toFixed(3)+'%'}));
 
