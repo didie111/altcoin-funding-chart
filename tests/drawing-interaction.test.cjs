@@ -27,3 +27,16 @@ test('horizontal lines need one click and normal empty-chart clicks remain avail
 test('locked drawings can be selected without starting a move or changing the undo stack',()=>{
  const {m,event}=harness('cross'),item={id:'locked',tool:'trend',pane:'price',points:[{time:50,price:50},{time:100,price:70}],locked:true};m.store.add(item);m.hit=()=>({item:m.store.state.items[0],pane:{id:'price'},handle:-1});const before=m.store.past.length;m.onDown(event(75,60));assert.equal(m.selected,'locked');assert.equal(m.gesture,null);assert.equal(m.store.past.length,before);
 });
+test('a completed ruler stays fixed until unlocked, then moves without disappearing or adding a stored drawing',()=>{
+ const {m,event}=harness('ruler');m.onDown(event(100,80));m.onMove(event(220,50));m.onUp(event(220,50));
+ assert.ok(m.measurement);assert.equal(m.measurement.locked,true);assert.equal(m.store.state.items.length,0);
+ const original=E.clone(m.measurement.points);
+ m.hit=()=>({item:m.measurement,pane:{id:'price'},handle:-1});
+ m.onDown(event(150,65));m.onMove(event(170,85));m.onUp(event(170,85));
+ assert.deepEqual(m.measurement.points,original);assert.equal(m.gesture,null);
+ m.setRulerLocked(false);m.onDown(event(150,65));m.onMove(event(170,85));m.onUp(event(170,85));
+ assert.deepEqual(m.measurement.points,original.map(p=>({time:p.time+20,price:p.price+20})));
+ assert.equal(m.preview,null);assert.equal(m.store.state.items.length,0);assert.equal(m.store.past.length,0);
+ m.setRulerLocked(true);const moved=E.clone(m.measurement.points);
+ m.onDown(event(170,85));assert.equal(m.gesture,null);assert.deepEqual(m.measurement.points,moved);
+});

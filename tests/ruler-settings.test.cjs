@@ -28,3 +28,11 @@ test('directional ruler settings do not recolor ordinary drawings',()=>{
  const svg=R.geometry({tool:'trend',points:[{time:10,price:10},{time:100,price:50}],color:'#abcdef',width:2},{width:500,height:200,project:p=>({x:p.time,y:p.price}),rulerColors:{up:'#000000',down:'#ffffff'}}).svg;
  assert.match(svg,/stroke="#abcdef"/);
 });
+test('measurements are locked by default and an explicit unlock persists without replacing colors',()=>{
+ const values=new Map(),storage={getItem:k=>values.get(k),setItem:(k,v)=>values.set(k,v)};
+ const s=S.create(storage);assert.equal(s.isLocked(),true);
+ s.set({up:'#112233',down:'#aabbcc'});assert.equal(s.setLocked(false),true);
+ const restored=S.create(storage);assert.equal(restored.isLocked(),false);assert.deepEqual(restored.get(),s.get());
+ assert.equal(restored.setLocked('false'),false);assert.equal(restored.isLocked(),false);
+ restored.setLocked(true);assert.equal(S.create(storage).isLocked(),true);
+});

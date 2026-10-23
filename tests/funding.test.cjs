@@ -145,7 +145,7 @@ test('MEXC current, historical, candle and cycle requests work only through the 
 });
 function harness(options = {}) {
   const source = fs.readFileSync(path.join(__dirname, '../app.js'), 'utf8');
-  const snippet = source.slice(source.indexOf('let fundingSession = null;'), source.indexOf('async function loadData(){'));
+  const snippet = source.slice(source.indexOf('let fundingSession = null;'), source.indexOf('async function loadData('));
   const nodes = new Map();
   const node = id => {
     if (!nodes.has(id)) nodes.set(id, {textContent: '', disabled: false, title: ''});
