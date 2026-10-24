@@ -190,3 +190,45 @@ test('relay response errors retain the upstream explanation', async () => {
   await assert.rejects(client.json(req.url, req.params), /MEXC 공식 API가 JSON 대신/);
   assert.equal(calls, 1);
 });
+test('Bybit, Bitget, OKX and MEXC rate-limit codes inside HTTP 200 retry without losing API data',async()=>{
+ for(const [base,code]of [['https://api.bybit.com/v5/market/kline',10006],['https://api.bitget.com/api/v2/mix/market/history-candles','429'],['https://www.okx.com/api/v5/market/history-candles','50011'],['https://api.mexc.com/api/v1/contract/kline/BTC_USDT',510]]){
+  let clock=stamp,calls=0;const waits=[],events=[],client=createClient({now:()=>clock,wait:async ms=>{waits.push(ms);clock+=ms;},onRetry:event=>events.push(event),fetch:async()=>++calls===1?response(base.includes('bybit')?{retCode:code,retMsg:'Too many visits'}:{code,message:'rate limited'}):response({code:0,data:[1,2]})});
+  assert.deepEqual((await client.json(base)).data,[1,2]);assert.equal(calls,2);assert.deepEqual(waits,[1500]);assert.equal(events.length,1);
+ }
+});
+test('exhausted rate limits remain typed failures rather than successful empty history',async()=>{
+ let clock=stamp,calls=0;const client=createClient({now:()=>clock,wait:async ms=>{clock+=ms;},fetch:async()=>{calls++;return response({code:'50011',msg:'Rate limit reached'});}});
+ await assert.rejects(client.json('https://www.okx.com/api/v5/market/history-candles'),error=>error.name==='RateLimitError'&&/50011.*요청 제한/.test(error.message)&&error.retryAt>clock);assert.equal(calls,4);
+});
+test('Retry-After HTTP dates are honored and a long requested wait is not capped then retried too early',async()=>{
+ for(const seconds of [12,120]){
+  let clock=stamp,calls=0;const waits=[],client=createClient({now:()=>clock,wait:async ms=>{waits.push(ms);clock+=ms;},fetch:async()=>{calls++;return calls===1?{...response({},429),headers:{get:name=>name.toLowerCase()==='retry-after'?new Date(stamp+seconds*1000).toUTCString():null}}:response({code:0});}});
+  if(seconds===12){await client.json('https://api.bitget.com/api/v2/mix/market/history-candles');assert.deepEqual(waits,[12000]);assert.equal(calls,2);}
+  else{await assert.rejects(client.json('https://api.bitget.com/api/v2/mix/market/history-candles'),error=>error.name==='RateLimitError'&&error.retryAt===stamp+120000);assert.equal(calls,1);assert.deepEqual(waits,[]);}
+ }
+});
+test('Bybit reset timestamps determine the next allowed retry',async()=>{
+ let clock=stamp,calls=0;const waits=[],client=createClient({now:()=>clock,wait:async ms=>{waits.push(ms);clock+=ms;},fetch:async()=>++calls===1?{...response({retCode:10006,retMsg:'Too many visits'}),headers:{get:name=>name==='X-Bapi-Limit-Reset-Timestamp'?String(stamp+7500):null}}:response({retCode:0,result:{list:[]}})});
+ await client.json('https://api.bybit.com/v5/market/kline');assert.deepEqual(waits,[7500]);assert.equal(calls,2);
+});
+test('rate-limit cooldown is shared across chart clients but another exchange remains available',async()=>{
+ const Shared=require('../market-shared.js');let clock=stamp;const waits=[],calls=[];
+ const broker=Shared.create({now:()=>clock,wait:async ms=>{waits.push(ms);clock+=ms;}}),previous=globalThis.MarketShared;globalThis.MarketShared={...Shared,broker};
+ try{
+  const first=createClient({now:()=>clock,fetch:async()=>({...response({},429),headers:{get:name=>name.toLowerCase()==='retry-after'?'120':null}})});
+  await assert.rejects(first.json('https://api.bitget.com/limited'),{name:'RateLimitError'});
+  const other=createClient({now:()=>clock,fetch:async url=>{calls.push({url,time:clock});return response({code:0});}});
+  await other.json('https://www.okx.com/independent');assert.equal(calls[0].time,stamp);
+  await other.json('https://api.bitget.com/another-page');assert.equal(calls[1].time,stamp+120000);assert.deepEqual(waits,[120000]);
+ }finally{if(previous===undefined)delete globalThis.MarketShared;else globalThis.MarketShared=previous;}
+});
+test('canceling during API cooldown stops the retry and preserves the original abort reason',async()=>{
+ const controller=new AbortController();let calls=0;const client=createClient({fetch:async()=>{calls++;return response({},429);},wait:async(ms,signal)=>{controller.abort();signal.throwIfAborted();}});
+ await assert.rejects(client.json('https://api.bitget.com/api/v2/mix/market/history-candles',{},controller.signal),{name:'AbortError'});assert.equal(calls,1);
+});
+test('a BingX cooldown announced while another request is queued delays it without a burst on resume',async()=>{
+ const Shared=require('../market-shared.js');let clock=stamp,release,entered;const waiting=new Promise(resolve=>{entered=resolve;}),gate=new Promise(resolve=>{release=resolve;}),starts=[];
+ const broker=Shared.create({now:()=>clock,wait:async ms=>{if(ms===1150&&starts.length===1){entered();await gate;}clock+=ms;}}),signal=new AbortController().signal,task=()=>{starts.push(clock);return Promise.resolve({});};
+ await broker.reserveBingx(signal,task);const queued=broker.reserveBingx(signal,task);await waiting;broker.defer('open-api.bingx.com',stamp+10000);release();await queued;await broker.reserveBingx(signal,task);
+ assert.deepEqual(starts,[stamp,stamp+10000,stamp+11150]);
+});

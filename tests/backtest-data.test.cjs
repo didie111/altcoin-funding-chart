@@ -17,3 +17,16 @@ test('ignored historical cursors fail explicitly rather than looping or truncati
 test('memory guard rejects an oversized range rather than reporting partial results as complete',async()=>{
  const api=Data.create({fundingPage:async(ex,s,cursor,page)=>page===1?funding:[],candlePage:async()=>[bar(start),bar(start+60)]});await assert.rejects(api.loadBacktestDataset('BTCUSDT',{exchange:'BITGET',intervals:['1m'],startTime:start,endTime:start+120,maxBars:1}),/일부만 계산하지 않고 중단/);
 });
+test('fixed-minute execution loads one shared 1m series before the requested chart frames without duplicates',async()=>{
+ const calls=[],api=Data.create({fundingPage:async(ex,s,cursor,page)=>page===1?funding:[],candlePage:async(ex,s,tf)=>{calls.push(tf);return Array.from({length:82},(_,i)=>bar(start-80*(tf==='1m'?60:3600)+i*(tf==='1m'?60:3600)));}});
+ const d=await api.loadBacktestDataset('BTCUSDT',{exchange:'BITGET',intervals:['1h','1m','1h'],requireMinuteData:true,startTime:start,endTime:start+7200});
+ assert.deepEqual(calls,['1m','1h']);assert.deepEqual(Object.keys(d.timeframeCandles),['1m','1h']);
+});
+test('missing required 1m data and exhausted rate limits abort comparison instead of skipping them',async()=>{
+ for(const failure of [Error('1분봉 제공 불가'),Object.assign(Error('API 요청 제한'),{name:'RateLimitError'})]){
+  const api=Data.create({fundingPage:async(ex,s,cursor,page)=>page===1?funding:[],candlePage:async()=>{throw failure;}});
+  await assert.rejects(api.loadBacktestDataset('BTCUSDT',{exchange:'BITGET',intervals:['1h'],requireMinuteData:true,allowMissing:true,startTime:start,endTime:start+7200}),error=>error===failure);
+ }
+ const limited=Object.assign(Error('API 요청 제한'),{name:'RateLimitError'}),api=Data.create({fundingPage:async(ex,s,cursor,page)=>page===1?funding:[],candlePage:async()=>{throw limited;}});
+ await assert.rejects(api.loadBacktestDataset('BTCUSDT',{exchange:'BITGET',intervals:['1h'],allowMissing:true,startTime:start,endTime:start+7200}),error=>error===limited);
+});
