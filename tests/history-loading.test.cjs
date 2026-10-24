@@ -6,7 +6,7 @@ const stamp=Date.UTC(2026,9,14)/1000;
 const bar=time=>({time,open:10,high:11,low:9,close:10,volume:1});
 function harness(options={}){
  const nodes=new Map(),calls=[],commits=[],timeouts=[];
- const ctx={AbortSignal,AbortController,Date,DOMException,ChartData:data,FundingEngine:require('../funding.js'),duration:timeframes.seconds,
+ const ctx={AbortSignal,AbortController,Date,DOMException,ChartData:data,TimeframeEngine:timeframes,FundingEngine:require('../funding.js'),duration:timeframes.seconds,
   busy:true,run:1,loadedMarket:{ex:'BINGX',symbol:'BTCUSDT',int:'1m',id:1},navigationController:new AbortController(),
   historyState:{id:1,buffer:options.buffer??[],pending:new Set(),exhausted:new Set()},all:[bar(stamp)],rates:[],
   $:id=>{if(!nodes.has(id))nodes.set(id,{});return nodes.get(id);},

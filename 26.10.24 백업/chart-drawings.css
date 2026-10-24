@@ -1,0 +1,82 @@
+#chartWorkspace{flex:1 1 0;min-height:0;min-width:0;display:flex;flex-direction:column;position:relative;overflow:hidden;background:#111827}
+#chartTopbar{height:37px;min-height:37px;display:flex;align-items:center;gap:10px;background:#171f30;border-top:1px solid #303a4c;border-bottom:1px solid #303a4c;padding:0 8px;position:relative;z-index:12}
+#chartTopbar #chartIdentityControls{position:static;height:30px;padding:0;max-width:60%;background:transparent;flex-shrink:1;min-width:0}
+#chartTopbar #chartIdentityControls[hidden]{display:none}
+#drawingToolLabel{font-size:11px;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+#drawingHistoryControls{display:flex;align-items:center;gap:4px;margin-left:auto}
+#drawingHistoryControls button{width:32px;height:30px;display:flex;align-items:center;justify-content:center;background:transparent;color:#cbd5e1;border-radius:4px;padding:4px}
+#drawingHistoryControls button:hover{background:#303b50;color:#fff}
+#drawingHistoryControls button:disabled{opacity:.25;cursor:default;background:transparent}
+#chartBody{display:flex;flex:1 1 0;min-height:0;min-width:0;overflow:hidden;position:relative}
+#unified-chart{flex:1 1 0!important;min-width:0;overflow:hidden}
+#chartWorkspace:fullscreen,#chartWorkspace.chart-fullscreen-fallback{position:fixed!important;inset:0!important;width:100vw!important;height:100vh!important;height:100dvh!important;min-height:0;display:flex;flex:none;background:#111827;z-index:1000}
+#chartWorkspace::backdrop{background:#111827}
+.chart-has-symbol .pane-header[data-panel-id="price"]:not(.price-collapsed){margin-top:0}
+#drawingToolbar{width:45px;flex-shrink:0;min-height:0;display:flex;flex-direction:column;background:#171f30;border-right:1px solid #303a4c;z-index:12;padding:4px 2px 2px;color:#cbd5e1}
+.drawing-rail-scroll{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:#3d4860 transparent}
+#drawingToolbar button{background:transparent;color:#cbd5e1;padding:0;border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+#drawingToolbar button:hover{background:#2b364d;color:white}
+#drawingToolbar button.active,.drawing-floating button.active{background:#243d67;color:#60a5fa}
+.drawing-tool-group{height:34px;position:relative;display:flex;align-items:center}
+#drawingToolbar [data-drawing-group]{height:32px;width:33px}
+#drawingToolbar .drawing-group-menu{height:28px;width:9px;font-size:16px;transform:rotate(180deg);border-radius:2px;position:absolute;right:0}
+#drawingToolbar .drawing-utility{width:38px;height:34px;margin:1px 0}
+#drawingToolbar .drawing-favorites-toggle{border-top:1px solid #354055;border-radius:0;margin:2px 0 0}
+.drawing-divider{height:1px;background:#354055;margin:5px 4px}
+#drawingScene{position:absolute;left:0;top:0;pointer-events:none;z-index:5;overflow:hidden}
+.drawing-floating{position:absolute;display:flex;align-items:center;padding:3px;gap:2px;min-height:35px;z-index:13;background:#202b3eee;border:1px solid #445067;border-radius:6px;box-shadow:0 3px 12px #0005;max-width:calc(100% - 8px)}
+.drawing-floating[hidden]{display:none}
+.drawing-floating button{width:31px;height:29px;padding:3px;background:transparent;color:#cbd5e1;border-radius:4px;display:flex;align-items:center;justify-content:center}
+.drawing-floating button:hover{background:#3a4962;color:white}
+.drawing-floating .drawing-grip{width:17px;cursor:grab;font-size:20px;color:#94a3b8;touch-action:none}
+.drawing-floating .drawing-grip:active{cursor:grabbing}
+.drawing-empty-favorites{font-size:11px;color:#94a3b8;padding:0 5px;white-space:nowrap}
+.drawing-object-toolbar{top:59px;left:50%;transform:translateX(-50%);gap:4px}
+.drawing-object-toolbar input[type=color]{width:30px;height:27px;padding:2px;border:0;background:transparent;cursor:pointer}
+.drawing-object-toolbar select{padding:3px 2px;width:52px;height:27px;font-size:11px;background:#1b2639;border:1px solid #40506a}
+.drawing-menu{position:absolute;z-index:60;overflow:auto;overscroll-behavior:contain;background:#202b3f;border:1px solid #445167;border-radius:6px;box-shadow:0 6px 20px #0007;padding:5px;color:#e2e8f0;scrollbar-width:thin}
+.drawing-menu-title{font-size:11px;color:#94a3b8;padding:7px 9px 9px}
+.drawing-menu-row{display:flex;min-height:35px;align-items:center}
+.drawing-menu-choice{display:flex;align-items:center;gap:10px;flex:1;min-width:0;background:transparent;color:#e2e8f0;padding:7px 8px;border-radius:4px;text-align:left;font-size:12px;font-weight:400}
+.drawing-menu-choice:hover{background:#35445f}
+.drawing-menu-choice svg{flex-shrink:0}
+.drawing-menu-choice span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.drawing-menu-choice kbd{margin-left:auto;white-space:nowrap;color:#94a3b8;font-size:10px;background:transparent}
+.drawing-menu-star{width:29px;flex-shrink:0;height:30px;display:flex;align-items:center;justify-content:center;padding:4px;background:transparent;color:#75829a}
+.drawing-menu-star:hover{background:#35445f}
+.drawing-menu-star.is-favorite{color:#facc15}
+.drawing-menu-star.is-favorite svg{fill:#facc1525}
+.drawing-menu-empty{font-size:12px;padding:12px;color:#94a3b8}
+.drawing-settings-dialog{margin:auto;max-width:calc(100vw - 24px);width:440px;max-height:90vh;overflow:auto;background:#1c273a;border:1px solid #526079;border-radius:9px;color:#e2e8f0;box-shadow:0 14px 60px #0009;padding:18px}
+.drawing-settings-dialog::backdrop{background:#0007}
+.drawing-dialog-heading{display:flex;align-items:center;justify-content:space-between;margin-bottom:15px}
+.drawing-dialog-heading h2{font-size:16px}
+.drawing-dialog-heading button{background:transparent;font-size:21px;padding:0 5px;color:#94a3b8}
+.drawing-settings-dialog label{display:flex;flex-direction:column;gap:6px;font-weight:400;color:#aebad0;font-size:12px;margin:12px 0}
+.drawing-settings-dialog textarea{resize:vertical;width:100%;background:#111a2a;color:#f1f5f9;border:1px solid #46546d;border-radius:5px;font-size:14px;padding:9px}
+.drawing-settings-row{display:flex;gap:18px;align-items:flex-start}
+.drawing-settings-row label{flex:1}
+.drawing-settings-row input{width:100%}
+.drawing-settings-row input[type=color]{width:100%;height:31px;padding:2px}
+.drawing-coordinate input{width:100%}
+.drawing-dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.drawing-dialog-actions [data-cancel]{background:#36445b}
+.drawing-form-error{font-size:12px;color:#fca5a5}
+[data-drawing-ui] button:focus-visible{outline:2px solid #60a5fa;outline-offset:1px}
+@media(max-width:650px){#drawingToolLabel{display:none}.drawing-object-toolbar{left:4px;transform:none;gap:1px}.drawing-object-toolbar button{width:25px}#chartTopbar{gap:4px}#chartTopbar #chartIdentityControls{max-width:calc(100% - 112px)}#drawingToolbar{width:40px}.drawing-tool-group [data-drawing-group]{width:30px!important}#drawingToolbar .drawing-utility{width:33px}}
+
+#drawingFavorites{overflow-x:auto;scrollbar-width:thin}#drawingFavorites button{flex-shrink:0}
+
+#drawingToolbar .drawing-ruler-tool{height:32px;width:33px}
+.ruler-colors-button{width:30px;height:28px;padding:3px!important;font-size:15px}
+.ruler-colors-description{font-size:12px;color:#aebad0;line-height:1.6;margin-bottom:14px}
+.ruler-color-row{display:flex;align-items:center;gap:12px}
+.ruler-color-row input[type=color]{height:36px;width:64px;padding:3px;cursor:pointer}
+.ruler-color-row input[type=text]{width:120px;text-transform:none;font-family:monospace;font-size:14px;font-weight:400}
+#rulerColorsDialog label{margin-bottom:8px}
+#rulerColorsDialog [data-defaults]{margin-right:auto;background:#36445b}
+
+#drawingRulerLabels{position:absolute;left:0;top:0;pointer-events:none;z-index:10;overflow:hidden}
+.ruler-lock-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 8px;font-size:13px}
+#rulerLockToggle{padding:8px 12px;background:#334155;color:#e2e8f0;border:1px solid #64748b;border-radius:5px}
+#rulerLockToggle[aria-pressed=true]{background:#234b83;border-color:#60a5fa;color:#bfdbfe}

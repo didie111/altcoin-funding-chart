@@ -98,13 +98,13 @@ const FundingEngine = (() => {
     }
     return merge(result);
   }
-  function mapToCandles(bars, records, interval, warn, extreme) {
+  function mapToCandles(bars, records, interval, warn, extreme, endOfBar=time=>time+interval) {
     const mapped = new Map(), signals = [], unmapped = [];
     let index = 0;
     for (const record of records) {
       while (index + 1 < bars.length && bars[index + 1].time <= record.time) index++;
       const bar = bars[index];
-      if (!bar || record.time < bar.time || record.time >= bar.time + interval) {unmapped.push(record); continue;}
+      if (!bar || record.time < bar.time || record.time >= endOfBar(bar.time)) {unmapped.push(record); continue;}
       const old = mapped.get(bar.time);
       mapped.set(bar.time, {time: bar.time, rate: old ? Math.min(old.rate, record.rate) : record.rate, events: (old?.events ?? 0) + 1});
       const type = record.rate <= extreme ? 'EXTREME' : record.rate <= warn ? 'WARN' : null;
@@ -117,9 +117,9 @@ const FundingEngine = (() => {
   }
   // Keep observations apart from settlement history. Only values actually fetched
   // while the page is open are plotted; unseen historical estimates stay blank.
-  function observeCurrent(records, quote, interval) {
+  function observeCurrent(records, quote, interval, bucket=time=>Math.floor(time/interval)*interval) {
     if (!Number.isFinite(quote.rate) || !Number.isFinite(quote.fetchedAt) || !(interval > 0)) throw Error('현재 펀딩비 관측 값이 올바르지 않습니다.');
-    const time = Math.floor(quote.fetchedAt / interval) * interval;
+    const time = bucket(quote.fetchedAt);
     return merge(records, [{time, rate: quote.rate, observedAt: quote.fetchedAt}]);
   }
   function liveSeriesData(bars, records) {

@@ -1,12 +1,25 @@
 'use strict';
 const TimeframeEngine = (() => {
-  const seconds = Object.freeze({'1m':60,'3m':180,'5m':300,'15m':900,'30m':1800,'1h':3600,'2h':7200,'4h':14400,'1d':86400});
+  // Month seconds are used only to estimate window sizes; actual boundaries are calendar based.
+  const seconds = Object.freeze({'1m':60,'3m':180,'5m':300,'15m':900,'30m':1800,'1h':3600,'2h':7200,'4h':14400,'1d':86400,'1w':604800,'1M':2592000});
   const native = {
-    BYBIT: {'1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60','2h':'120','4h':'240','1d':'D'},
-    BITGET: {'1m':'1m','3m':'3m','5m':'5m','15m':'15m','30m':'30m','1h':'1H','4h':'4H','1d':'1Dutc'},
-    OKX: {'1m':'1m','3m':'3m','5m':'5m','15m':'15m','30m':'30m','1h':'1H','2h':'2H','4h':'4H','1d':'1Dutc'},
-    MEXC: {'1m':'Min1','5m':'Min5','15m':'Min15','30m':'Min30','1h':'Min60','4h':'Hour4','1d':'Day1'}
+    BYBIT: {'1m':'1','3m':'3','5m':'5','15m':'15','30m':'30','1h':'60','2h':'120','4h':'240','1d':'D','1w':'W','1M':'M'},
+    BITGET: {'1m':'1m','3m':'3m','5m':'5m','15m':'15m','30m':'30m','1h':'1H','4h':'4H','1d':'1Dutc','1w':'1Wutc','1M':'1Mutc'},
+    OKX: {'1m':'1m','3m':'3m','5m':'5m','15m':'15m','30m':'30m','1h':'1H','2h':'2H','4h':'4H','1d':'1Dutc','1w':'1Wutc','1M':'1Mutc'},
+    MEXC: {'1m':'Min1','5m':'Min5','15m':'Min15','30m':'Min30','1h':'Min60','4h':'Hour4','1d':'Day1','1w':'Week1','1M':'Month1'}
   };
+  function start(time, interval) {
+    const date=new Date(time*1000);
+    if(interval==='1M')return Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),1)/1000;
+    if(interval==='1w')return Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),date.getUTCDate()-(date.getUTCDay()+6)%7)/1000;
+    return Math.floor(time/seconds[interval])*seconds[interval];
+  }
+  function shift(time, interval, count) {
+    if(interval!=='1M')return time+seconds[interval]*count;
+    const date=new Date(time*1000);return Date.UTC(date.getUTCFullYear(),date.getUTCMonth()+count,1)/1000;
+  }
+  function end(time,interval){return shift(time,interval,1);}
+  function requestEnd(milliseconds,interval){const time=milliseconds/1000,first=start(time,interval);return (time===first?first:end(first,interval))*1000;}
   function plan(exchange, interval) {
     if (!seconds[interval] || !['BINANCE','BYBIT','BINGX','BITGET','MEXC','OKX'].includes(exchange)) throw Error('지원하지 않는 타임프레임입니다.');
     const source = exchange === 'MEXC' && interval === '3m' ? '1m'
@@ -47,7 +60,7 @@ const TimeframeEngine = (() => {
     let low=0, high=bars.length;
     while (low<high) {const mid=Math.floor((low+high)/2); if (bars[mid].time<=time) low=mid+1; else high=mid;}
     const index=low-1;
-    return index>=0 && time<bars[index].time+seconds[interval] ? index : -1;
+    return index>=0 && time<end(bars[index].time,interval) ? index : -1;
   }
   function kstFields(time) {
     const iso = new Date(time*1000+9*3600000).toISOString();
@@ -61,14 +74,14 @@ const TimeframeEngine = (() => {
     return value.getTime()/1000-9*3600;
   }
   async function dateWindow(page, target, interval, span, signal, now=Date.now()) {
-    const step=seconds[interval], margin=Math.ceil(span/2)+10;
-    let end=Math.min(now,Math.floor((target+margin*step)*1000)), bars=[];
+    const margin=Math.ceil(span/2)+10;
+    let end=Math.min(now,Math.floor(shift(target,interval,margin)*1000)), bars=[];
     for (let n=0;n<6;n++) {
       signal.throwIfAborted();
       const rows=sorted(await page(end,signal)).filter(bar=>bar.time*1000<=end);
       if (!rows.length) break;
       bars=sorted([...bars,...rows]);
-      if (bars[0].time<=target-margin*step) break;
+      if (bars[0].time<=shift(target,interval,-margin)) break;
       const next=rows[0].time*1000-1;
       if (next>=end) break;
       end=next;
@@ -76,6 +89,6 @@ const TimeframeEngine = (() => {
     signal.throwIfAborted();
     return indexAt(bars,target,interval)<0 ? [] : bars;
   }
-  return {seconds, plan, sorted, aggregate, indexAt, kstFields, parseKst, dateWindow};
+  return {seconds, plan, sorted, aggregate, indexAt, kstFields, parseKst, dateWindow,start,end,shift,requestEnd};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports=TimeframeEngine;

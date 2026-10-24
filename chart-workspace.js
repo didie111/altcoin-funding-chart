@@ -3,7 +3,7 @@
  else root.ChartWorkspace=api.create(root);
 })(typeof globalThis!=='undefined'?globalThis:this,function(){
  'use strict';
- const exchangeIds=['BINANCE','BYBIT','BINGX','BITGET','MEXC','OKX'],timeframes=['1m','3m','5m','15m','30m','1h','2h','4h','1d'],channel='funding-chart-workspace-v1',storageKey='funding-chart-layout-v1';
+ const exchangeIds=['BINANCE','BYBIT','BINGX','BITGET','MEXC','OKX'],timeframes=['1m','3m','5m','15m','30m','1h','2h','4h','1d','1w','1M'],channel='funding-chart-workspace-v1',storageKey='funding-chart-layout-v1';
  function market(value,fallback={ex:'BINANCE',symbol:'BTCUSDT',int:'4h'}){return {ex:exchangeIds.includes(value?.ex)?value.ex:fallback.ex,symbol:typeof value?.symbol==='string'&&/^[A-Z0-9_-]{1,48}$/.test(value.symbol)?value.symbol:fallback.symbol,int:timeframes.includes(value?.int)?value.int:fallback.int};}
  function preferences(value){return {layout:value?.layout===4?4:1,markets:Array.isArray(value?.markets)?value.markets.slice(0,4).map(m=>m?market(m):null):[]};}
  function assetRevision(sources){let hash=2166136261;for(const char of sources.join('|')){hash^=char.charCodeAt(0);hash=Math.imul(hash,16777619);}return (hash>>>0).toString(36);}
@@ -14,7 +14,8 @@
   let mode=1,api,grid,firstCell,picker,toggle,active=0,frames=[],startup=[],disposed=false,statusNode,maximized=-1,workspaceFullscreen=false,maximizeButton,workspaceButton;
   const ownCell=embedded?Number(params.get('cell')):0;
   const markets=saved.markets;
-  const controls=[],actions=new Set(['ruler','ruler-settings','lines','indicators']);
+  const controls=[],listeners=new Set(),actions=new Set(['ruler','ruler-settings','lines','indicators']);
+  function notify(){for(const listener of listeners)listener();}
   let lastControls='';
   if(embedded)doc.documentElement.classList.add('chart-embedded');
   const explicit=params.has('symbol')||params.has('ex')||params.has('int'),initial=embedded||explicit?market(Object.fromEntries(['ex','symbol','int'].map(k=>[k,params.get(k)]))):markets[0];
@@ -22,7 +23,7 @@
   function send(message){if(embedded&&win.parent!==win)win.parent.postMessage({channel,...message},win.location.origin);}
   function persist(){if(embedded)return;try{win.localStorage.setItem(storageKey,JSON.stringify({layout:mode,markets}));}catch{}}
   function applyControls(){const state=controls[active];if(!state)return;for(const [id,key]of [['btnRuler','ruler'],['btnToggleLines','lines']]){const button=$(id);button?.classList.toggle('active',state[key]);button?.setAttribute('aria-pressed',String(state[key]));}}
-  function selected(index){active=index;firstCell?.classList.toggle('selected',index===0);for(const frame of frames)frame.classList.toggle('selected',Number(frame.dataset.chartCell)===index);applyControls();}
+  function selected(index){active=index;firstCell?.classList.toggle('selected',index===0);for(const frame of frames)frame.classList.toggle('selected',Number(frame.dataset.chartCell)===index);applyControls();notify();}
   function controlsChanged(value){const state={ruler:value.ruler===true,lines:value.lines===true},key=JSON.stringify(state);controls[ownCell]=state;if(embedded&&key!==lastControls)send({type:'controls',state});lastControls=key;if(!embedded)applyControls();}
   function hasRemoteTarget(){return !embedded&&mode===4&&active>0;}
   function deliver(frame,message){if(frame.chartReady)frame.contentWindow.postMessage({channel,...message},win.location.origin);else{frame.chartQueue??=[];if(message.type==='select')frame.chartQueue=[];frame.chartQueue.push(message);}}
@@ -71,7 +72,7 @@
    }
    updateControls();broadcastLayout();api.syncFullscreen?.();persist();api.schedule();
   }
-  function marketChanged(value){const m=market(value);if(embedded)send({type:'market',market:m});else{markets[0]=m;persist();}const badge=$('chartExchangeBadge');if(badge)badge.textContent=({BINANCE:'Binance',BYBIT:'Bybit',BINGX:'BingX',BITGET:'Bitget',MEXC:'MEXC',OKX:'OKX'})[m.ex];}
+  function marketChanged(value){const m=market(value);if(embedded)send({type:'market',market:m});else{markets[0]=m;persist();notify();}const badge=$('chartExchangeBadge');if(badge)badge.textContent=({BINANCE:'Binance',BYBIT:'Bybit',BINGX:'BingX',BITGET:'Bitget',MEXC:'MEXC',OKX:'OKX'})[m.ex];}
   function reportStatus(text,error){if(statusNode){statusNode.hidden=!error;statusNode.textContent=error?text:'';statusNode.title=text;}}
   function bind(options){
    api=options;
@@ -100,7 +101,7 @@
     win.addEventListener('message',event=>{
      if(event.origin!==win.location.origin||event.data?.channel!==channel)return;
      const frame=frames.find(f=>f.contentWindow===event.source);if(!frame)return;const index=Number(frame.dataset.chartCell),data=event.data;
-     if(data.type==='market'){markets[index]=market(data.market);persist();}
+     if(data.type==='market'){markets[index]=market(data.market);persist();if(active===index)notify();}
      else if(data.type==='controls'){controls[index]={ruler:data.state?.ruler===true,lines:data.state?.lines===true};applyControls();}
      else if(data.type==='picker'){selected(index);markets[index]=market(data.market);picker.open(markets[index],index);}
      else if(data.type==='active')selected(index);
@@ -115,7 +116,7 @@
    updateControls();marketChanged(current());if(embedded)send({type:'ready'});api.syncFullscreen?.();
    win.addEventListener('pagehide',()=>{disposed=true;api.dispose();},{once:true});
   }
-  return {embedded,bind,marketChanged,reportStatus,selectActive,runOnActive,controlsChanged,activeMarket:()=>hasRemoteTarget()?market(markets[active],current()):current(),isMulti:()=>embedded||mode===4,visible:()=>!disposed&&!doc.hidden,requestFullscreen,requestWorkspaceFullscreen,exitWorkspaceFullscreen,restoreMaximized,fullscreenState,syncWorkspaceFullscreen,setLayout};
+  return {embedded,bind,marketChanged,reportStatus,selectActive,runOnActive,controlsChanged,subscribe:listener=>{listeners.add(listener);return ()=>listeners.delete(listener);},activeMarket:()=>hasRemoteTarget()?market(markets[active],current()):current(),isMulti:()=>embedded||mode===4,visible:()=>!disposed&&!doc.hidden,requestFullscreen,requestWorkspaceFullscreen,exitWorkspaceFullscreen,restoreMaximized,fullscreenState,syncWorkspaceFullscreen,setLayout};
  }
  return {create,market,preferences,embedUrl,assetRevision};
 });

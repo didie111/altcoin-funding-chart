@@ -341,10 +341,10 @@ function placeChartClock(){
  const now=Date.now()/1000,latest=all.at(-1),pane=pricePane(),step=duration[loadedMarket?.int],width=chart.timeScale().width();
  wallClock.textContent=wallTimeFormat.format(new Date())+' UTC+9';setStyle(wallClock,'right','4px');setStyle(wallClock,'bottom','3px');
  const y=latest?candles.priceToCoordinate(latest.close):null;
- const live=latest&&step&&latest.time<=now&&latest.time+step>now;
+ const live=latest&&step&&latest.time<=now&&TimeframeEngine.end(latest.time,loadedMarket.int)>now;
  priceClock.hidden=!pane||studyPanels?.priceCollapsed()||y===null||y<0||y>pane.height||windowEnd!==all.length;
  if(priceClock.hidden)return;
- priceClock.replaceChildren(Object.assign(document.createElement('span'),{textContent:latest.close.toFixed(8)}),Object.assign(document.createElement('span'),{textContent:live?ChartData.countdown(latest.time,step,now):'00:00'}));
+ priceClock.replaceChildren(Object.assign(document.createElement('span'),{textContent:latest.close.toFixed(8)}),Object.assign(document.createElement('span'),{textContent:live?ChartData.countdown(latest.time,step,now,TimeframeEngine.end(latest.time,loadedMarket.int)):'00:00'}));
  priceClock.dataset.live=String(Boolean(live));priceClock.title=live?'현재 '+$('intervalSelect').selectedOptions[0].text+' 봉 마감까지 남은 시간':'다음 실시간 캔들 확인 대기';
  setStyle(priceClock,'left',width+'px');setStyle(priceClock,'width',Math.max(70,rulerHost.clientWidth-width)+'px');setStyle(priceClock,'top',pane.top+Math.max(0,Math.min(pane.height-30,y-13))+'px');setStyle(priceClock,'background',latest.close>=latest.open?'#22c55e':'#ef4444');
 }
@@ -688,7 +688,7 @@ function windowStartFor(c){return Math.max(0,Math.min(all.length-WINDOW,Math.flo
 function lowerBound(a,t){let l=0,r=a.length;while(l<r){const m=(l+r)>>>1;if(a[m].time<t)l=m+1;else r=m;}return l;}
 function thresholds(){const warn=Number($('warnThresh').value),ext=Number($('extThresh').value);if(!$('warnThresh').value||!$('extThresh').value||!Number.isFinite(warn)||!Number.isFinite(ext)||ext>warn)throw Error('극단 경고는 1차 경고 이하의 숫자로 입력하세요.');return {warn,ext};}
 function rebuild(){const {warn,ext}=thresholds();
- const result=FundingEngine.mapToCandles(all,rates,duration[$('intervalSelect').value],warn,ext);
+ const result=FundingEngine.mapToCandles(all,rates,duration[$('intervalSelect').value],warn,ext,time=>TimeframeEngine.end(time,$('intervalSelect').value));
  mapped=result.mapped;signals=result.signals;unmappedFunding=result.unmapped;
  rebuildCycles();renderList();renderFundingBoard();}
 
@@ -696,12 +696,12 @@ function observedCycles(records){const periods=[];const allowed=[1,2,4,8,12,24];
  for(let i=0;i<periods.length;i++){const p=periods[i],before=periods[i-1],after=periods[i+1];if(before&&after&&before.hours===after.hours&&before.hours&&p.hours>before.hours){p.hours=null;p.gap=true;}}
  return periods;}
 function currentCyclePeriod(){const session=fundingSession,entry=session?.entries.get(session.ex);return ChartData.currentCycle(entry?.quote,officialCycle?.hours,rates);}
-function liveCycleValue(c){const p=currentCyclePeriod(),step=duration[loadedMarket?.int??$('intervalSelect').value];return p&&c.time+step>p.start&&c.time<p.end?{hours:p.hours,current:true,source:p.source}:cycleValues.get(c.time);}
+function liveCycleValue(c){const p=currentCyclePeriod(),step=duration[loadedMarket?.int??$('intervalSelect').value];return p&&TimeframeEngine.end(c.time,loadedMarket?.int??$('intervalSelect').value)>p.start&&c.time<p.end?{hours:p.hours,current:true,source:p.source}:cycleValues.get(c.time);}
 function rebuildCycles(){cycleHistory=observedCycles(rates);cycleTransitions=[];cycleValues=new Map();let previous=null;
  for(const p of cycleHistory){if(p.hours===null){previous=null;continue;}if(previous!==null&&previous!==p.hours)cycleTransitions.push({time:p.end,from:previous,to:p.hours});previous=p.hours;}
- let i=0;const seconds=duration[$('intervalSelect').value];for(const c of all){while(i<cycleHistory.length&&cycleHistory[i].end<=c.time)i++;let value=null,unknown=false;for(let j=i;j<cycleHistory.length&&cycleHistory[j].start<c.time+seconds;j++){const p=cycleHistory[j];if(p.end<=c.time)continue;if(p.hours===null)unknown=true;else value=value===null?p.hours:Math.min(value,p.hours);}
+ let i=0;const seconds=duration[$('intervalSelect').value];for(const c of all){while(i<cycleHistory.length&&cycleHistory[i].end<=c.time)i++;let value=null,unknown=false;for(let j=i;j<cycleHistory.length&&cycleHistory[j].start<TimeframeEngine.end(c.time,$('intervalSelect').value);j++){const p=cycleHistory[j];if(p.end<=c.time)continue;if(p.hours===null)unknown=true;else value=value===null?p.hours:Math.min(value,p.hours);}
  if(value!==null)cycleValues.set(c.time,{hours:value,mixed:unknown});}
- const current=currentCyclePeriod();if(current)for(const c of all){if(c.time+seconds>current.start&&c.time<current.end)cycleValues.set(c.time,{hours:current.hours,current:true,source:current.source});}
+ const current=currentCyclePeriod();if(current)for(const c of all){if(TimeframeEngine.end(c.time,$('intervalSelect').value)>current.start&&c.time<current.end)cycleValues.set(c.time,{hours:current.hours,current:true,source:current.source});}
  cycleFast=new Uint8Array(all.length);for(let k=0;k<all.length;k++){const v=cycleValues.get(all[k].time);if(v&&v.hours<8)cycleFast[k]=Math.round(v.hours);}
  const latest=cycleHistory.at(-1);
  const official=(officialCycle?.hours?` · 거래소 공식 현재 주기: ${officialCycle.hours}시간${officialCycle.note}`:'')+(otherCycles.length?` · 거래소별 현재 주기: ${otherCycles.map(o=>o.name+' '+o.hours+'시간').join(' / ')}`:'');
@@ -727,7 +727,7 @@ function findNearestBarIndex(t) {
   const next = lowerBound(all, sec);
   if (next < all.length && all[next].time === sec) return next;
   const previous = Math.max(0, next - 1);
-  if (next >= all.length || (sec >= all[previous].time && sec < all[previous].time + intSec)) return previous;
+  if (next >= all.length || (sec >= all[previous].time && sec < TimeframeEngine.end(all[previous].time,loadedMarket?.int??$('intervalSelect').value))) return previous;
   return sec - all[previous].time <= all[next].time - sec ? previous : next;
 }
 
@@ -871,7 +871,7 @@ async function candlePage(ex,s,int,end,signal,recent=false){
  case 'BINANCE':j=await json('https://fapi.binance.com/fapi/v1/klines',{symbol:b+'USDT',interval:plan.native,limit,endTime:end},signal);rows=j;break;
  case 'BYBIT':j=await json('https://api.bybit.com/v5/market/kline',{category:'linear',symbol:b+'USDT',interval:plan.native,limit,end},signal);rows=j.result.list;break;
  case 'BINGX':j=await json('https://open-api.bingx.com/openApi/swap/v3/quote/klines',{symbol:b+'-USDT',interval:plan.native,limit,endTime:end},signal);rows=j.data;break;
- case 'BITGET':j=await json('https://api.bitget.com/api/v2/mix/market/'+(recent?'candles':'history-candles'),{symbol:b+'USDT',productType:'USDT-FUTURES',granularity:plan.native,limit,endTime:recent?undefined:Math.ceil(end/(sourceSeconds*1000))*sourceSeconds*1000},signal);rows=j.data;break;
+ case 'BITGET':j=await json('https://api.bitget.com/api/v2/mix/market/'+(recent?'candles':'history-candles'),{symbol:b+'USDT',productType:'USDT-FUTURES',granularity:plan.native,limit,endTime:recent?undefined:TimeframeEngine.requestEnd(end,plan.source)},signal);rows=j.data;break;
  case 'OKX':j=await json('https://www.okx.com/api/v5/market/'+(recent?'candles':'history-candles'),{instId:b+'-USDT-SWAP',bar:plan.native,limit,after:end},signal);rows=j.data.map(r=>[...r.slice(0,5),r[6]]);break;
  case 'MEXC':{const sec=Math.floor(end/1000);j=await json('https://api.mexc.com/api/v1/contract/kline/'+b+'_USDT',{interval:plan.native,start:Math.max(0,sec-sourceSeconds*(limit-1)),end:sec},signal);const d=j.data;
  rows=(d.time||[]).map((t,i)=>({time:t,open:d.open[i],high:d.high[i],low:d.low[i],close:d.close[i],volume:d.vol[i]}));break;}
@@ -1012,7 +1012,7 @@ async function refreshFundingQuotes(session) {
       if (!fundingSessionActive(session)) return;
       session.entries.set(ex, {quote, error: null});
       if (ex === session.ex) {
-        session.liveRows = FundingEngine.observeCurrent(session.liveRows, quote, duration[session.interval]);
+        session.liveRows = FundingEngine.observeCurrent(session.liveRows, quote, duration[session.interval],time=>TimeframeEngine.start(time,session.interval));
         if (quote.hours) officialCycle = {hours: quote.hours, note: ''};
         renderLiveFunding(false);
         updateCurrentCycleWindow();
@@ -1037,7 +1037,7 @@ function renderFundingStudies(){
 function updateCurrentCycleWindow(){
  if(!all.length)return;
  const part=all.slice(windowStart,windowEnd),period=currentCyclePeriod();if(!period)return;
- for(const c of part){if(c.time+duration[loadedMarket.int]<=period.start||c.time>=period.end)continue;
+ for(const c of part){if(TimeframeEngine.end(c.time,loadedMarket.int)<=period.start||c.time>=period.end)continue;
   cycleValues.set(c.time,{hours:period.hours,current:true,source:period.source});
   if(period.hours<8)cycleFast[lowerBound(all,c.time)]=Math.round(period.hours);
   settlementCycle?.update({time:c.time,value:period.hours,color:cycleColor(period.hours)},c.time<part.at(-1).time);
@@ -1047,7 +1047,7 @@ function refreshFundingChart(session, recentCandles = []) {
  if(!fundingSessionActive(session)||!all.length)return;
  if(changingWindow){requestAnimationFrame(()=>refreshFundingChart(session,recentCandles));return;}
  const view=captureChartView(),previous=all,oldEnd=windowEnd,oldLast=all[oldEnd-1]?.time;
- const merged=ChartData.mergeLive(all,recentCandles,duration[session.interval]);all=merged.bars;
+ const merged=ChartData.mergeLive(all,recentCandles,duration[session.interval],Date.now()/1000,time=>TimeframeEngine.end(time,session.interval));all=merged.bars;
  if(!merged.changed.length&&studyPanels?.cacheBars===previous)studyPanels.cacheBars=all;
  const nextRates=FundingEngine.merge(rates,session.latestRows.filter(row=>row.time>=all[0].time));
  const rateChanged=!sameRates(rates,nextRates);rates=nextRates;
@@ -1129,7 +1129,7 @@ function focusMinimumFunding() {
   const min = FundingEngine.minimum(rates);
   if (!min) return;
   const index = lowerBound(all, min.time + 1) - 1, bar = all[index];
-  if (!bar || min.time >= bar.time + duration[fundingSession.interval]) return status('해당 정산 시각의 캔들 기록이 없어 이동할 수 없습니다.', true);
+  if (!bar || min.time >= TimeframeEngine.end(bar.time,fundingSession.interval)) return status('해당 정산 시각의 캔들 기록이 없어 이동할 수 없습니다.', true);
   focusSignal({time: bar.time, eventTime: min.time, rate: min.rate}, $('fundingMinimumBtn'));
 }
 
@@ -1171,9 +1171,9 @@ async function requestChartHistory(request){
    const useful=rows.filter(c=>c.time>=request.from&&c.time<=request.to&&c.time*1000<=request.end);
    if(!await commitHistoryRows(useful,id)){state.exhausted.add(key);if(!useful.length)status('이 구간의 추가 캔들 기록을 거래소가 제공하지 않습니다.');return;}
    // Fetch the corresponding settlements as well; prices do not wait for them.
-   const cursor=ex==='BINANCE'?useful[0].time*1000:useful.at(-1).time*1000+duration[int]*1000;
+   const cursor=ex==='BINANCE'?useful[0].time*1000:TimeframeEngine.end(useful.at(-1).time,int)*1000;
    try{const history=await fundingPage(ex,symbol,cursor,1,signal);signal.throwIfAborted();if(id!==run)return;
-     const merged=FundingEngine.merge(rates,history.filter(r=>r.time>=useful[0].time-duration[int]&&r.time<=useful.at(-1).time+duration[int]));
+     const merged=FundingEngine.merge(rates,history.filter(r=>r.time>=TimeframeEngine.shift(useful[0].time,int,-1)&&r.time<TimeframeEngine.end(useful.at(-1).time,int)));
      if(!sameRates(rates,merged)){rates=merged;rebuild();renderFundingStudies();}
    }catch(error){if(error.name!=='AbortError'&&id===run)status('캔들 이동 완료 · 해당 구간 정산 이력 조회 실패: '+fundingError(error),true);}
  }catch(error){if(error.name!=='AbortError'&&id===run){status('과거 구간 조회 실패: '+fundingError(error),true);state.exhausted.add(key);setTimeout(()=>state.exhausted.delete(key),15000);}}
@@ -1184,7 +1184,7 @@ function scheduleVisibleHistory(){
    if(changingWindow||!all.length)return;const range=chart.timeScale().getVisibleLogicalRange();if(!range)return;
    const absolute={from:range.from+windowStart,to:range.to+windowStart},middle=(absolute.from+absolute.to)/2;
    if(((range.from<80&&windowStart>0)||(range.to>windowEnd-windowStart-80&&windowEnd<all.length))&&windowStartFor(middle)!==windowStart){renderWindow(middle,false,240,absolute);return;}
-   for(const request of ChartData.historyRequests(all,absolute,duration[loadedMarket.int]))void requestChartHistory(request);
+   for(const request of ChartData.historyRequests(all,absolute,duration[loadedMarket.int],Date.now()/1000,{start:t=>TimeframeEngine.start(t,loadedMarket.int),end:t=>TimeframeEngine.end(t,loadedMarket.int),shift:(t,n)=>TimeframeEngine.shift(t,loadedMarket.int,n)}))void requestChartHistory(request);
  },180);
 }
 async function jumpToChartDate(target,signal,interval=loadedMarket?.int){
@@ -1197,7 +1197,7 @@ async function jumpToChartDate(target,signal,interval=loadedMarket?.int){
  const span=Math.max(60,Math.min(180,chart.timeScale().getVisibleLogicalRange()?.to-chart.timeScale().getVisibleLogicalRange()?.from||180));
  let index=TimeframeEngine.indexAt(all,target,int);
  if(index>=0){chartDateFocus={id,time:target,span};selectedSignal=null;clearRuler();renderWindow(index,true,span);showLocationGuide(all[index].time,'date');status('날짜 이동 완료 · '+date(target));return;}
- const end=Math.min(Date.now(),Math.floor((target+(Math.ceil(span/2)+10)*duration[int])*1000));
+ const end=Math.min(Date.now(),Math.floor(TimeframeEngine.shift(target,int,Math.ceil(span/2)+10)*1000));
  const cursor=ex==='BINANCE'?Math.max(0,(target-3*86400)*1000):end;
  const [candlesResult,historyResult]=await Promise.allSettled([
    TimeframeEngine.dateWindow((edge,abort)=>candlePage(ex,symbol,int,edge,abort),target,int,span,requestSignal),
@@ -1208,7 +1208,7 @@ async function jumpToChartDate(target,signal,interval=loadedMarket?.int){
  const rows=candlesResult.value;
  if(!rows.length)throw Error('해당 날짜의 '+$('intervalSelect').selectedOptions[0].text+' 기록을 거래소가 제공하지 않습니다. 상장일·보관 범위를 확인하세요.');
  chartDateFocus={id,time:target,span};all=uniqueSorted([...all,...rows]);
- if(historyResult.status==='fulfilled')rates=FundingEngine.merge(rates,historyResult.value.filter(row=>row.time>=rows[0].time&&row.time<rows.at(-1).time+duration[int]));
+ if(historyResult.status==='fulfilled')rates=FundingEngine.merge(rates,historyResult.value.filter(row=>row.time>=rows[0].time&&row.time<TimeframeEngine.end(rows.at(-1).time,int)));
  rebuild();index=TimeframeEngine.indexAt(all,target,int);selectedSignal=null;clearRuler();renderWindow(index,true,span);showLocationGuide(all[index].time,'date');
  $('coverage').textContent='날짜 조회: '+date(target)+' · 주변 캔들 '+date(rows[0].time)+' ~ '+date(rows.at(-1).time)+' · 거래소가 제공하는 실제 기록. 정산 기록이 없는 구간은 공백입니다.'+(historyResult.status==='rejected'?' · 이 구간의 정산 기록 조회 실패: '+fundingError(historyResult.reason):'');
  status('날짜 이동 완료 · '+date(target));
@@ -2049,5 +2049,5 @@ globalThis.ChartWorkspace?.bind({
  schedule,syncFullscreen:syncChartFullscreen,fullscreen:toggleChartFullscreen,jumpDate:()=>$('gotoDateBtn').click()
 });
 $('searchBtn').onclick=loadInputMarket;$('symbolInput').onkeydown=e=>{if(e.key==='Enter')loadInputMarket();};$('exchangeSelect').onchange=loadInputMarket;
-if(!globalThis.ChartWorkspace?.embedded){setupSidebarTabs();setupScanner();setupFundingRank();}
+if(!globalThis.ChartWorkspace?.embedded){setupSidebarTabs();setupScanner();setupFundingRank();globalThis.ChartDashboard?.bind({workspace:chartWorkspace,selectMarket:loadDetectedMarket,chartWorkspace:globalThis.ChartWorkspace});}
 loadData();

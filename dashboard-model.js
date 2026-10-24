@@ -1,0 +1,26 @@
+(function(root,factory){
+ 'use strict';const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.DashboardModel=api;
+})(typeof globalThis!=='undefined'?globalThis:this,function(){
+ 'use strict';
+ const exchanges=Object.freeze({BINANCE:'Binance',BYBIT:'Bybit',BINGX:'BingX',BITGET:'Bitget',MEXC:'MEXC',OKX:'OKX'});
+ const hosts={BINANCE:['www.binance.com'],BYBIT:['announcements.bybit.com'],BINGX:['bingx.com','www.bingx.com'],BITGET:['www.bitget.com'],MEXC:['www.mexc.com','www.mexc.fm'],OKX:['www.okx.com']};
+ const labels={'1m':'1분','3m':'3분','5m':'5분','15m':'15분','30m':'30분','1h':'1시간','2h':'2시간','4h':'4시간','1d':'일봉','1w':'주봉','1M':'월봉'};
+ function notice(value){
+  if(!exchanges[value?.exchange]||typeof value.title!=='string'||!value.title.trim())return null;
+  let url;try{url=new URL(value.url);if(url.protocol!=='https:'||url.username||url.password||!hosts[value.exchange].includes(url.hostname))return null;}catch{return null;}
+  url.hash='';
+  const publishedAt=Number(value.publishedAt),checkedAt=Number(value.checkedAt);
+  const symbols=[...new Set((Array.isArray(value.symbols)?value.symbols:[]).filter(s=>typeof s==='string'&&/^[A-Z0-9]{1,28}$/.test(s)))].slice(0,25);
+  return {id:value.exchange+':'+url.pathname.replace(/\/$/,''),exchange:value.exchange,title:value.title.trim().slice(0,350),url:url.href,dateOnly:value.dateOnly===true,effectiveAt:Number(value.effectiveAt)>0?Number(value.effectiveAt):null,publishedAt:Number.isFinite(publishedAt)&&publishedAt>0?publishedAt:null,checkedAt:Number.isFinite(checkedAt)&&checkedAt>0?checkedAt:null,symbols,scope:['futures','spot','alpha','margin'].includes(value.scope)?value.scope:'other',change:value.change===true};
+ }
+ function mergeNotices(...lists){const map=new Map();for(const values of lists)for(const value of values||[]){const n=notice(value);if(n)map.set(n.id,{...map.get(n.id),...n,publishedAt:n.publishedAt||map.get(n.id)?.publishedAt||null,effectiveAt:n.change?n.effectiveAt:n.effectiveAt||map.get(n.id)?.effectiveAt||null,symbols:n.symbols.length?n.symbols:map.get(n.id)?.symbols||[]});}return [...map.values()].sort((a,b)=>(b.publishedAt||0)-(a.publishedAt||0)).slice(0,240);}
+ function filterNotices(values,{exchange='ALL',scope='all',query=''}={}){const q=query.trim().toLocaleLowerCase();return values.filter(n=>(exchange==='ALL'||n.exchange===exchange)&&(scope==='all'||n.scope===scope)&&(!q||[n.title,n.exchange,exchanges[n.exchange],...n.symbols].join(' ').toLocaleLowerCase().includes(q)));}
+ function settings(value={}){
+  const day=new Date().toISOString().slice(0,10),prior=new Date(Date.now()-90*86400000).toISOString().slice(0,10);
+  const date=(v,f)=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&!Number.isNaN(Date.parse(v))&&new Date(v).toISOString().slice(0,10)===v?v:f;
+  const number=(v,f,min,max)=>Number.isFinite(Number(v))&&Number(v)>=min&&Number(v)<=max?Number(v):f;
+  return {start:date(value.start,prior),end:date(value.end,day),capital:number(value.capital,10000,1,1e12),orderSize:number(value.orderSize,10,0.01,100),commission:number(value.commission,0.05,0,10),slippage:number(value.slippage,0,0,10000),height:number(value.height,280,180,900),open:value.open===true};
+ }
+ function validateSettings(value){const s=settings(value);if(value.start!==s.start||value.end!==s.end||s.start>s.end)throw Error('시작일과 종료일을 확인해 주세요.');for(const key of ['capital','orderSize','commission','slippage'])if(Number(value[key])!==s[key])throw Error('설정값의 허용 범위를 확인해 주세요.');return s;}
+ return {exchanges,labels,notice,mergeNotices,filterNotices,settings,validateSettings};
+});
