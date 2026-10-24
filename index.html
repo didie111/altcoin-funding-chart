@@ -911,7 +911,8 @@
     @media(max-width:850px){#fundingExchangeGrid{grid-template-columns:repeat(3,minmax(0,1fr))}}
     </style>
     <link rel="stylesheet" href="chart-drawings.css?v=20261024-ruler-date-1">
-    <link rel="stylesheet" href="chart-workspace.css?v=20261023-left-cycle-badge-1">
+    <link rel="stylesheet" href="chart-workspace.css?v=20261024-dashboard-1">
+    <link rel="stylesheet" href="dashboard.css?v=20261024-dashboard-1">
 </head>
 <body>
 
@@ -980,6 +981,8 @@
                   <option value="2h">2시간</option>
                   <option value="4h" selected>4시간</option>
                   <option value="1d">1일 (일봉)</option>
+                  <option value="1w">1주 (주봉)</option>
+                  <option value="1M">1개월 (월봉)</option>
                 </select>
               </div>
               <span id="drawingToolLabel" aria-live="polite">크로스</span>
@@ -1003,14 +1006,17 @@
         <!-- 사이드바 패널 (탭: 급등락 스캐너 / 펀딩비 신호 / 전략 신호) -->
         <div id="signal-sidebar">
             <div class="sidebar-tab-bar">
-                <button type="button" class="sidebar-tab-btn active" data-tab="tab-scanner" id="tabBtnScanner">🚀 5일 급등락</button>
+                <button type="button" class="sidebar-tab-btn active" data-tab="tab-delistings" id="tabBtnDelistings">상장폐지 소식</button>
+                <button type="button" class="sidebar-tab-btn" data-tab="tab-scanner" id="tabBtnScanner">🚀 5일 급등락</button>
                 <button type="button" class="sidebar-tab-btn" data-tab="tab-funding-rank" id="tabBtnFundingRank">🔥 펀딩비 순위</button>
                 <button type="button" class="sidebar-tab-btn" data-tab="tab-funding" id="tabBtnFunding">⚡ 펀딩 신호 <span id="signalCountTag">0</span></button>
                 <button type="button" class="sidebar-tab-btn" data-tab="tab-strategy" id="tabBtnStrategy">🎯 전략 신호</button>
             </div>
 
+            <div class="sidebar-panel active" id="tab-delistings" aria-label="거래소 상장폐지 소식"></div>
+
             <!-- 패널 1: 5일 급등락 스캐너 -->
-            <div class="sidebar-panel active" id="tab-scanner">
+            <div class="sidebar-panel" id="tab-scanner">
                 <div class="scanner-switch-bar" style="display:flex; gap:3px; padding:6px 10px 0; background:#182232;">
                     <button type="button" class="btn-scanner-switch active" data-target="tab-scanner" style="flex:1; padding:5px 4px; font-size:10.5px; font-weight:800; border-radius:4px; border:none; cursor:pointer; background:#2563eb; color:#fff;">🚀 5일 급등락</button>
                     <button type="button" class="btn-scanner-switch" data-target="tab-funding-rank" style="flex:1; padding:5px 4px; font-size:10.5px; font-weight:800; border-radius:4px; border:none; cursor:pointer; background:#374151; color:#94a3b8;">🔥 펀딩비 순위</button>
@@ -1230,6 +1236,8 @@
           <div class="settings-row"><label for="rsiTFHour2">2시간</label><input id="rsiTFHour2" name="timeframes" value="2h" type="checkbox"></div>
           <div class="settings-row"><label for="rsiTF4">4시간</label><input id="rsiTF4" name="timeframes" value="4h" type="checkbox"></div>
           <div class="settings-row"><label for="rsiTFD">일봉</label><input id="rsiTFD" name="timeframes" value="1d" type="checkbox"></div>
+          <div class="settings-row"><label for="rsiTFW">주봉</label><input id="rsiTFW" name="timeframes" value="1w" type="checkbox"></div>
+          <div class="settings-row"><label for="rsiTFM">월봉</label><input id="rsiTFM" name="timeframes" value="1M" type="checkbox"></div>
         </div>
         <p id="rsi-settings-error" role="alert"></p>
         <div class="settings-footer"><button id="rsiDefaults" class="secondary" type="button">기본 설정</button><div><button class="secondary" type="button" data-close-dialog="rsiSettingsDialog">취소</button> <button type="submit">확인</button></div></div>
@@ -1242,20 +1250,22 @@
     <script src="market-shared.js?v=20261022-workspace-1"></script>
     <script src="relay-config.js?v=20261013-relay-1"></script>
     <script src="market-api.js?v=20261022-workspace-1"></script>
-    <script src="funding.js?v=20261013-relay-1"></script>
-    <script src="timeframes.js?v=20261014-navigation-1"></script>
-    <script src="chart-data.js?v=20261015-live-1"></script>
+    <script src="funding.js?v=20261024-dashboard-1"></script>
+    <script src="timeframes.js?v=20261024-dashboard-1"></script>
+    <script src="chart-data.js?v=20261024-dashboard-1"></script>
     <script src="date-navigation.js?v=20261024-ruler-date-1"></script>
-    <script src="indicators.js?v=20261021-upgrade-1"></script>
+    <script src="indicators.js?v=20261024-dashboard-1"></script>
     <script src="ruler-settings.js?v=20261024-ruler-date-1"></script>
     <script src="drawing-engine.js?v=20261016-drawings-1"></script>
     <script src="drawing-renderer.js?v=20261024-ruler-date-1"></script>
     <script src="chart-drawings.js?v=20261024-ruler-date-1"></script>
     <script src="market-catalog.js?v=20261022-workspace-1"></script>
     <script src="symbol-picker.js?v=20261022-workspace-1"></script>
-    <script src="chart-workspace.js?v=20261024-active-cells-1"></script>
+    <script src="chart-workspace.js?v=20261024-dashboard-1"></script>
     <script src="scanner.js?v=20261021-upgrade-1"></script>
-    <script src="app.js?v=20261024-funding-visibility-1"></script>
+    <script src="dashboard-model.js?v=20261024-dashboard-1"></script>
+    <script src="dashboard.js?v=20261024-dashboard-1"></script>
+    <script src="app.js?v=20261024-dashboard-1"></script>
 </body>
 </html>
 

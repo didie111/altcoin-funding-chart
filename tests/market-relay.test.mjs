@@ -25,11 +25,11 @@ test('whole-market catalogs and tickers accept only the explicit public routes w
 test('new chart intervals pass the relay allowlist while invented interval names remain blocked', async () => {
   const calls=[];let clock=stamp;
   const relay=createMarketRelay({now:()=>clock,wait:async ms=>{clock+=ms;},fetch:async url=>{calls.push(new URL(url));return reply({code:0,data:[]});}});
-  for(const interval of ['1m','3m','5m','15m','30m','1h','2h','4h','1d']){
+  for(const interval of ['1m','3m','5m','15m','30m','1h','2h','4h','1d','1w','1M']){
     assert.equal((await relay.handle(request('BINGX','/openApi/swap/v3/quote/klines',{symbol:'BTC-USDT',interval,limit:'1000',endTime:String(stamp)}))).status,200);
     assert.equal(calls.at(-1).searchParams.get('interval'),interval);
   }
-  for(const interval of ['Min1','Min5','Min15','Min30','Min60','Hour4','Day1']){
+  for(const interval of ['Min1','Min5','Min15','Min30','Min60','Hour4','Day1','Week1','Month1']){
     assert.equal((await relay.handle(request('MEXC','/api/v1/contract/kline/BTC_USDT',{interval,start:'1000',end:'2000'}))).status,200);
     assert.equal(calls.at(-1).searchParams.get('interval'),interval);
   }

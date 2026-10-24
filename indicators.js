@@ -733,6 +733,7 @@ class StudyPanelManager {
 
       if (saved?.rsi) {
         const settings={...saved.rsi};
+        if(!saved.calendarVersion && Array.isArray(settings.timeframes) && ['1m','3m','5m','15m','30m','1h','2h','4h','1d'].every(v=>settings.timeframes.includes(v))) settings.timeframes=Object.keys(TimeframeEngine.seconds);
         if(!saved.navigationVersion && Array.isArray(settings.timeframes) && ['15m','1h','4h','1d'].every(v=>settings.timeframes.includes(v))) settings.timeframes=Object.keys(TimeframeEngine.seconds);
         this.settings = RsiEngine.normalize(settings);
       }
@@ -1909,6 +1910,7 @@ class StudyPanelManager {
         this.storageKey,
         JSON.stringify({
           navigationVersion: 1,
+          calendarVersion: 1,
           order: this.order,
           panels,
           rsi: this.settings

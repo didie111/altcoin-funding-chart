@@ -17,7 +17,7 @@ test('funding and strategy markers remain chronological when their signal times 
 test('signal navigation retains containing bars and nearest gap edges with logarithmic history lookup',()=>{
  let probes=0;
  const rows=new Proxy(Array.from({length:100000},(_,i)=>({time:1000+i*60})),{get(target,key){if(/^\d+$/.test(String(key)))probes++;return Reflect.get(target,key);}});
- const context=loadFunction('function findNearestBarIndex(', 'function focusSignal(',{all:rows,lowerBound,duration:{'1m':60},loadedMarket:{int:'1m'}});
+ const context=loadFunction('function findNearestBarIndex(', 'function focusSignal(',{all:rows,lowerBound,TimeframeEngine:require('../timeframes.js'),duration:{'1m':60},loadedMarket:{int:'1m'}});
  assert.equal(context.findNearestBarIndex(1000+99000*60+59),99000);
  assert.ok(probes<50,'large histories must not be scanned for every strategy point');
  context.all=[{time:1000},{time:1600}];
