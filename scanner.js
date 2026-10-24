@@ -232,10 +232,14 @@ const ScannerEngine = (() => {
     // 4. BingX
     const fetchBingx = async () => {
       try {
-        const res = await fetch('https://open-api.bingx.com/openApi/swap/v2/quote/premiumIndex', { signal, cache: 'no-store' });
-        if (!res.ok) return;
-        const json = await res.json();
-        const list = json.data;
+        let json;
+        if (typeof MarketAPI !== 'undefined' && typeof MarketAPI.json === 'function') {
+          json = await MarketAPI.json('https://open-api.bingx.com/openApi/swap/v2/quote/premiumIndex', {}, signal).catch(() => null);
+        } else {
+          const res = await fetch('https://open-api.bingx.com/openApi/swap/v2/quote/premiumIndex', { signal, cache: 'no-store' }).catch(() => null);
+          json = res?.ok ? await res.json().catch(() => null) : null;
+        }
+        const list = json?.data;
         if (!Array.isArray(list)) return;
         for (const item of list) {
           if (!item.symbol || !item.symbol.endsWith('-USDT')) continue;
@@ -262,10 +266,14 @@ const ScannerEngine = (() => {
     // 5. MEXC
     const fetchMexc = async () => {
       try {
-        const res = await fetch('https://contract.mexc.com/api/v1/contract/ticker', { signal, cache: 'no-store' });
-        if (!res.ok) return;
-        const json = await res.json();
-        const list = json.data;
+        let json;
+        if (typeof MarketAPI !== 'undefined' && typeof MarketAPI.json === 'function') {
+          json = await MarketAPI.json('https://api.mexc.com/api/v1/contract/ticker', {}, signal).catch(() => null);
+        } else {
+          const res = await fetch('https://api.mexc.com/api/v1/contract/ticker', { signal, cache: 'no-store' }).catch(() => null);
+          json = res?.ok ? await res.json().catch(() => null) : null;
+        }
+        const list = json?.data;
         if (!Array.isArray(list)) return;
         for (const item of list) {
           if (!item.symbol || !item.symbol.endsWith('_USDT')) continue;

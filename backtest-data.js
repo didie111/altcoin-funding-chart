@@ -1,0 +1,57 @@
+(function(root,factory){
+ 'use strict';if(typeof module==='object'&&module.exports){require('./relay-config.js');module.exports=factory(require('./market-api.js'),require('./timeframes.js'),require('./funding.js'));}else root.BacktestData=factory(MarketAPI,TimeframeEngine,FundingEngine);
+})(typeof globalThis!=='undefined'?globalThis:this,function(API,T,F){
+ 'use strict';const ALL_TIMEFRAMES=Object.keys(T.seconds);
+ async function candlePage(ex,symbol,tf,end,signal){
+  const b=symbol.replace(/[-_]/g,'').replace(/USDT$/,''),plan=T.plan(ex,tf),limit=ex==='BITGET'?200:ex==='OKX'?300:1000;let data,rows;
+  if(ex==='BINANCE'){data=await API.json('https://fapi.binance.com/fapi/v1/klines',{symbol:b+'USDT',interval:plan.native,limit,endTime:end},signal);rows=data;}
+  else if(ex==='BYBIT'){data=await API.json('https://api.bybit.com/v5/market/kline',{category:'linear',symbol:b+'USDT',interval:plan.native,limit,end},signal);rows=data.result.list;}
+  else if(ex==='BINGX'){data=await API.json('https://open-api.bingx.com/openApi/swap/v3/quote/klines',{symbol:b+'-USDT',interval:plan.native,limit,endTime:end},signal);rows=data.data;}
+  else if(ex==='BITGET'){data=await API.json('https://api.bitget.com/api/v2/mix/market/history-candles',{symbol:b+'USDT',productType:'USDT-FUTURES',granularity:plan.native,limit,endTime:T.requestEnd(end,plan.source)},signal);rows=data.data;}
+  else if(ex==='OKX'){data=await API.json('https://www.okx.com/api/v5/market/history-candles',{instId:b+'-USDT-SWAP',bar:plan.native,limit,after:end},signal);rows=data.data.map(r=>[...r.slice(0,5),r[6]]);}
+  else if(ex==='MEXC'){const sec=Math.floor(end/1000);data=await API.json('https://api.mexc.com/api/v1/contract/kline/'+b+'_USDT',{interval:plan.native,start:Math.max(0,sec-T.seconds[plan.source]*1999),end:sec},signal);const d=data.data;rows=(d.time||[]).map((time,i)=>({time,open:d.open[i],high:d.high[i],low:d.low[i],close:d.close[i],volume:d.vol[i]}));}
+  else throw Error('지원하지 않는 거래소입니다.');
+  if(!Array.isArray(rows))throw Error('캔들 응답 형식이 올바르지 않습니다.');const parsed=rows.map(API.candle);if(parsed.some(c=>!c))throw Error('올바르지 않은 캔들이 포함되어 있습니다.');return T.aggregate(parsed,tf,plan.source);
+ }
+ async function fundingPage(ex,symbol,cursor,page,signal){const request=F.historyRequest(ex,symbol,cursor,page);return F.normalizeHistory(ex,await API.json(request.url,request.params,signal),symbol);}
+ function create(adapter={}){
+  const candles=adapter.candlePage||candlePage,funding=adapter.fundingPage||fundingPage;
+  async function loadBacktestDataset(symbol,options={}){
+   const ex=options.exchange||'BINANCE',end=Math.min(options.endTime??Date.now()/1000,Date.now()/1000),start=options.startTime??end-7*86400,intervals=options.intervals||['5m'],signal=options.signal||new AbortController().signal,onProgress=options.onProgress||(()=>{}),maxBars=options.maxBars??500000;
+   if(!Number.isFinite(start)||!Number.isFinite(end)||start>=end||start<0)throw Error('테스트 기간을 확인하세요.');symbol=String(symbol).trim().toUpperCase().replace(/[-_]/g,'').replace(/USDT$/,'')+'USDT';if(!/^[A-Z0-9]{1,28}USDT$/.test(symbol))throw Error('코인 심볼을 확인하세요.');
+   for(const tf of intervals)T.plan(ex,tf);signal.throwIfAborted();
+   const timeframeCandles={},coverage={},allFunding=new Map(),fundingStart=Math.max(0,start-48*3600);let totalCount=0,pages=0,cursor=ex==='BINANCE'?fundingStart*1000:Math.floor(end*1000)-1,page=1;
+   for(;;){
+    signal.throwIfAborted();const rows=F.merge(await funding(ex,symbol,cursor,page,signal));signal.throwIfAborted();pages++;
+    for(const r of rows)if(r.time>=fundingStart&&r.time<end)allFunding.set(r.time,r);
+    onProgress({phase:'funding',pages,count:allFunding.size,exchange:ex});
+    if(!rows.length){if(ex==='BINGX'&&cursor/1000-90*86400>fundingStart){cursor-=90*86400000;continue;}break;}
+    if(ex==='BINANCE'){const next=rows.at(-1).time*1000+1;if(next<=cursor)throw Error('펀딩비 API의 과거 페이지가 진행되지 않습니다.');if(next>=end*1000)break;cursor=next;}
+    else{if(rows[0].time<=fundingStart)break;const next=rows[0].time*1000-1;if(next>=cursor&&!['BITGET','MEXC'].includes(ex))throw Error('펀딩비 API의 과거 페이지가 진행되지 않습니다.');if(['BITGET','MEXC'].includes(ex)&&page>1&&rows.every(r=>r.time>=cursor/1000))throw Error('펀딩비 API가 같은 페이지를 반복했습니다.');cursor=next;page++;}
+   }
+   if(!allFunding.size)throw Error('선택 기간의 공식 정산 기록이 없어 진입 조건을 검증할 수 없습니다.');
+   for(const tf of intervals){try{
+    const warmupStart=Math.max(0,T.shift(T.start(start,tf),tf,-Math.max(80,(options.rsiPeriod||14)*3))),map=new Map();let edge=Math.floor(end*1000)-1,tfPages=0;
+    for(;;){
+     signal.throwIfAborted();const pageRows=T.sorted(await candles(ex,symbol,tf,edge,signal,false)),rows=pageRows.filter(b=>b.time*1000<=edge);signal.throwIfAborted();tfPages++;if(!rows.length&&pageRows.length)throw Error(tf+' 캔들 API의 과거 커서가 진행되지 않습니다.');
+     if(!rows.length)break;
+     for(const b of rows)if(b.time>=warmupStart&&T.end(b.time,tf)<=end)map.set(b.time,b);
+     if(map.size+totalCount>maxBars)throw Error('선택 기간의 데이터가 '+maxBars.toLocaleString()+'봉을 초과합니다. 기간을 나누어 실행해 주세요. 일부만 계산하지 않고 중단했습니다.');
+     onProgress({phase:'candles',timeframe:tf,pages:tfPages,count:map.size,exchange:ex});
+     if(rows[0].time<=warmupStart)break;const next=rows[0].time*1000-1;if(next>=edge)throw Error(tf+' 캔들 API의 과거 페이지가 진행되지 않습니다.');edge=next;
+    }
+    const values=[...map.values()].sort((a,b)=>a.time-b.time);if(!values.length)throw Error(tf+'의 해당 기간 캔들 기록을 거래소가 제공하지 않습니다.');
+    const inside=values.filter(b=>b.time>=start);if(!inside.length)throw Error(tf+'의 선택 기간에 완성된 캔들이 없습니다.');
+    timeframeCandles[tf]=values;totalCount+=values.length;coverage[tf]={first:inside[0].time,last:inside.at(-1).time,count:inside.length,endMissing:T.end(inside.at(-1).time,tf)<T.start(end,tf),warmup:values.length-inside.length,startMissing:inside[0].time>T.end(T.start(start,tf),tf)};
+   }catch(error){signal.throwIfAborted();if(!options.allowMissing||/초과|반복|진행되지/.test(error.message))throw error;coverage[tf]={error:error.message};}}
+   if(!Object.keys(timeframeCandles).length)throw Error('선택 기간의 캔들을 불러오지 못했습니다.');
+   const fundingRecords=[...allFunding.values()].sort((a,b)=>a.time-b.time),gaps=[];if(!fundingRecords.length)throw Error('선택 기간의 공식 정산 기록이 없어 진입 조건을 검증할 수 없습니다.');
+   for(const [tf,rows]of Object.entries(timeframeCandles))for(let i=1;i<rows.length;i++)if(T.end(rows[i-1].time,tf)<rows[i].time)gaps.push({timeframe:tf,from:T.end(rows[i-1].time,tf),to:rows[i].time});
+   return {symbol,exchange:ex,startTime:start,endTime:end,fundingRecords,timeframeCandles,coverage,gaps,source:'official-exchange-api',fundingCoverage:{first:fundingRecords[0]?.time??null,last:fundingRecords.at(-1)?.time??null,count:fundingRecords.length}};
+  }
+  return {loadBacktestDataset};
+ }
+ async function fetchBinanceFundingHistory(symbol,limit=1000,signal=new AbortController().signal){const request=F.historyRequest('BINANCE',symbol,Date.now()-90*86400000,1);request.params.limit=Math.min(1000,limit);return F.normalizeHistory('BINANCE',await API.json(request.url,request.params,signal),symbol);}
+ async function fetchBinanceKlines(symbol,interval='5m',startTime=null,endTime=null,limit=1000,signal=new AbortController().signal){const params={symbol:String(symbol).toUpperCase().replace(/USDT$/,'')+'USDT',interval,limit:Math.min(1500,limit)};if(startTime)params.startTime=startTime>=1e11?startTime:startTime*1000;if(endTime)params.endTime=endTime>=1e11?endTime:endTime*1000;const data=await API.json('https://fapi.binance.com/fapi/v1/klines',params,signal);return T.sorted(data.map(API.candle));}
+ return {ALL_TIMEFRAMES,create,...create(),fetchBinanceFundingHistory,fetchBinanceKlines};
+});

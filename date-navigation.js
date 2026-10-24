@@ -6,7 +6,7 @@ function dateNavigationRequest(day,clock,interval,now=Date.now()/1000){
  if(!DateNavigationFrames.seconds[interval])throw Error('지원하지 않는 타임프레임입니다.');
  return {time,interval};
 }
-function bindDateNavigation({currentTime, currentTimeframe=()=>document.getElementById('intervalSelect').value, jump}) {
+function bindDateNavigation({currentTime, currentTimeframe=()=>document.getElementById('intervalSelect').value, marketKey=()=>'chart', jump}) {
   const dialog=document.getElementById('dateNavigationDialog'), form=document.getElementById('dateNavigationForm');
   const day=document.getElementById('dateNavigationDate'), clock=document.getElementById('dateNavigationTime');
   const interval=document.getElementById('dateNavigationInterval');
@@ -14,6 +14,7 @@ function bindDateNavigation({currentTime, currentTimeframe=()=>document.getEleme
   const message=document.getElementById('dateNavigationMessage'), submit=document.getElementById('dateNavigationSubmit');
   const calendar=document.getElementById('dateCalendarDays'), label=document.getElementById('dateCalendarMonth');
   let month, task=null, taskNumber=0;
+  const remembered=new Map();
   const today=()=>DateNavigationFrames.kstFields(Date.now()/1000).date;
   function renderCalendar() {
     const year=month.getUTCFullYear(), number=month.getUTCMonth();
@@ -34,7 +35,7 @@ function bindDateNavigation({currentTime, currentTimeframe=()=>document.getEleme
   function setMonth() {const parts=day.value.split('-').map(Number); if(parts.length===3 && parts.every(Number.isFinite)) {month=new Date(Date.UTC(parts[0],parts[1]-1,1));renderCalendar();}}
   function open() {
     if(dialog.open)return;
-    const value=DateNavigationFrames.kstFields(currentTime()); day.value=value.date; clock.value=value.time;interval.value=currentTimeframe();
+    const value=remembered.get(marketKey())||DateNavigationFrames.kstFields(currentTime()); day.value=value.date; clock.value=value.time;interval.value=currentTimeframe();
     day.max=today(); message.textContent=''; setMonth(); dialog.showModal(); day.focus();
   }
   function cancel() {taskNumber++;task?.abort();task=null;submit.disabled=false;submit.textContent='가기';}
@@ -53,7 +54,7 @@ function bindDateNavigation({currentTime, currentTimeframe=()=>document.getEleme
     catch(error){message.textContent=error.message;return;}
     task?.abort();task=new AbortController();const number=++taskNumber;
     submit.disabled=true;submit.textContent='조회 중…';message.textContent='선택한 날짜의 기록을 확인하고 있습니다.';
-    try {await jump(request.time,task.signal,request.interval);if(number===taskNumber && dialog.open)dialog.close();}
+    try {const key=marketKey();await jump(request.time,task.signal,request.interval);if(number===taskNumber){remembered.set(key,{date:day.value,time:clock.value});if(dialog.open)dialog.close();}}
     catch(error){if(number===taskNumber && error.name!=='AbortError')message.textContent=error.message;}
     finally {if(number===taskNumber){submit.disabled=false;submit.textContent='가기';task=null;}}
   };

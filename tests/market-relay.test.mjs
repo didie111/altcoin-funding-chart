@@ -22,6 +22,11 @@ test('whole-market catalogs and tickers accept only the explicit public routes w
  assert.equal((await relay.handle(request('MEXC','/api/v1/private/order/list',{}))).status,400);
 });
 
+test('the funding scanner can request the official whole-market BingX premium list without a symbol',async()=>{
+ const calls=[];const relay=createMarketRelay({fetch:async url=>{calls.push(new URL(url));return reply({code:0,data:[]});}});
+ const response=await relay.handle(request('BINGX','/openApi/swap/v2/quote/premiumIndex',{}));assert.equal(response.status,200);assert.equal(calls[0].searchParams.has('symbol'),false);
+ assert.equal((await relay.handle(request('BINGX','/openApi/swap/v2/quote/fundingRate',{}))).status,400);
+});
 test('new chart intervals pass the relay allowlist while invented interval names remain blocked', async () => {
   const calls=[];let clock=stamp;
   const relay=createMarketRelay({now:()=>clock,wait:async ms=>{clock+=ms;},fetch:async url=>{calls.push(new URL(url));return reply({code:0,data:[]});}});

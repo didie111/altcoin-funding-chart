@@ -67,8 +67,8 @@ function workspaceHarness({embedded=false,saved={}}={}){
  ids.get('exchangeSelect').value='BITGET';ids.get('symbolInput').value='SAHARAUSDT';ids.get('intervalSelect').value='1h';
  const parent={postMessage:data=>messages.push({data})},win={document:doc,location:new URL('https://example.test/'+(embedded?'?chart-embed=1&cell=2':'')),parent:embedded?parent:null,localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},addEventListener:(name,fn)=>events[name]=fn,SymbolPicker:{bind:()=>({open(){}})},MarketCatalog:{create:()=>({})}};
  if(!embedded)win.parent=win;
- const calls={schedule:0,dispose:0,split:0,fullscreen:[],market:[],navigation:[],action:[]},controller=Workspace.create(win);
- controller.bind({workspace:ids.get('chartWorkspace'),host:ids.get('host'),symbolButton:ids.get('chartSymbolLabel'),getMarket:()=>({ex:'BITGET',symbol:'SAHARAUSDT',int:'1h'}),selectMarket:(m,n)=>{calls.market.push(m);calls.navigation.push(n);},action:a=>calls.action.push(a),onSplit:()=>calls.split++,dispose:()=>calls.dispose++,schedule:()=>calls.schedule++,fullscreen:options=>calls.fullscreen.push(options),syncFullscreen(){},jumpDate(){}});
+ const calls={schedule:0,dispose:0,split:0,fullscreen:[],market:[],navigation:[],action:[],backtest:[]},controller=Workspace.create(win);
+ controller.bind({workspace:ids.get('chartWorkspace'),host:ids.get('host'),symbolButton:ids.get('chartSymbolLabel'),getMarket:()=>({ex:'BITGET',symbol:'SAHARAUSDT',int:'1h'}),selectMarket:(m,n)=>{calls.market.push(m);calls.navigation.push(n);},action:a=>calls.action.push(a),backtest:value=>calls.backtest.push(value),onSplit:()=>calls.split++,dispose:()=>calls.dispose++,schedule:()=>calls.schedule++,fullscreen:options=>calls.fullscreen.push(options),syncFullscreen(){},jumpDate(){}});
  return {ids,doc,messages,calls,controller,parent,win,storage,frames:()=>ids.get('chartGrid')?.children.filter(x=>x.tagName==='iframe')||[],message:(source,data,origin=win.location.origin)=>events.message({source,origin,data:{channel:'funding-chart-workspace-v1',...data}}),key:event=>docEvents.keydown({target:{closest:()=>null},preventDefault(){this.defaultPrevented=true;},...event})};
 }
 test('each of the four charts maximizes in place and restores the same chart frames',t=>{
@@ -140,4 +140,22 @@ test('changing any versioned chart asset changes the embedded document URL',()=>
  assert.notEqual(old,next);assert.equal(Workspace.assetRevision(['app.js?v=new','drawing-renderer.js?v=1']),next);
  const url=new URL(Workspace.embedUrl('https://example.test/?build=old',{ex:'BITGET',symbol:'NILUSDT',int:'1m'},3,next));
  assert.equal(url.searchParams.get('build'),next);assert.equal(url.searchParams.get('cell'),'3');
+});
+
+test('backtest overlays and dated trade jumps follow each selected pane instead of the first chart',t=>{
+ const h=workspaceHarness();h.controller.setLayout(4);t.after(()=>h.controller.setLayout(1));
+ for(const frame of h.frames()){
+  h.message(frame.contentWindow,{type:'ready'});h.message(frame.contentWindow,{type:'active'});h.messages.length=0;
+  const value={market:{ex:'BITGET',symbol:'BTCUSDT',int:'1m'},signals:[],trades:[]};h.controller.setBacktest(value);h.controller.selectActive(value.market,{kind:'date',time:1234});
+  assert.equal(h.messages.filter(m=>m.data.type==='backtest-result').length,1);assert.ok(h.messages.every(m=>m.frame===frame));assert.equal(h.calls.backtest.length,0);assert.equal(h.calls.market.length,0);
+ }
+});
+test('a queued backtest result survives a trade navigation before its target frame is ready',t=>{
+ const h=workspaceHarness();h.controller.setLayout(4);t.after(()=>h.controller.setLayout(1));const frame=h.frames()[1];h.message(frame.contentWindow,{type:'active'});
+ h.controller.setBacktest({market:{ex:'BITGET',symbol:'BTCUSDT',int:'1m'},signals:[],trades:[]});h.controller.selectActive({symbol:'BTCUSDT',int:'1m'},{kind:'date',time:1234});h.messages.length=0;h.message(frame.contentWindow,{type:'ready'});
+ assert.equal(h.messages.filter(m=>m.frame===frame&&m.data.type==='backtest-result').length,1);assert.equal(h.messages.filter(m=>m.frame===frame&&m.data.type==='select').length,1);
+});
+test('an embedded chart accepts backtest annotations only from its trusted parent',()=>{
+ const h=workspaceHarness({embedded:true}),value={market:{ex:'BITGET',symbol:'BTCUSDT',int:'1m'},signals:[],trades:[]};
+ h.message(h.parent,{type:'backtest-result',value},'https://foreign.test');assert.equal(h.calls.backtest.length,0);h.message({}, {type:'backtest-result',value});assert.equal(h.calls.backtest.length,0);h.message(h.parent,{type:'backtest-result',value});assert.equal(h.calls.backtest[0],value);
 });

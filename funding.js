@@ -94,7 +94,7 @@ const FundingEngine = (() => {
       const actual = ex === 'OKX' && hasActual ? row.realizedRate : row.fundingRate;
       const rate = percent(actual);
       if (time === null || rate === null) throw Error('펀딩비 이력에 비어 있거나 잘못된 값이 있습니다.');
-      if (time <= Math.floor(now / 1000)) result.push({time, rate});
+      if (time <= Math.floor(now / 1000)) {const markPrice=numeric(row.markPrice);result.push({time, rate,...(markPrice>0?{markPrice}:{})});}
     }
     return merge(result);
   }

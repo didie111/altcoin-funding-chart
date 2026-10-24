@@ -19,7 +19,7 @@
   const day=new Date().toISOString().slice(0,10),prior=new Date(Date.now()-90*86400000).toISOString().slice(0,10);
   const date=(v,f)=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&!Number.isNaN(Date.parse(v))&&new Date(v).toISOString().slice(0,10)===v?v:f;
   const number=(v,f,min,max)=>Number.isFinite(Number(v))&&Number(v)>=min&&Number(v)<=max?Number(v):f;
-  return {start:date(value.start,prior),end:date(value.end,day),capital:number(value.capital,10000,1,1e12),orderSize:number(value.orderSize,10,0.01,100),commission:number(value.commission,0.05,0,10),slippage:number(value.slippage,0,0,10000),height:number(value.height,280,180,900),open:value.open===true};
+  return {start:date(value.start,prior),end:date(value.end,day),capital:number(value.capital,10000,1,1e12),orderSize:number(value.orderSize,10,0.01,100),commission:number(value.commission,0.05,0,10),slippage:number(value.slippage,.03,0,10),height:number(value.height,280,180,900),open:value.open===true};
  }
  function validateSettings(value){const s=settings(value);if(value.start!==s.start||value.end!==s.end||s.start>s.end)throw Error('시작일과 종료일을 확인해 주세요.');for(const key of ['capital','orderSize','commission','slippage'])if(Number(value[key])!==s[key])throw Error('설정값의 허용 범위를 확인해 주세요.');return s;}
  return {exchanges,labels,notice,mergeNotices,filterNotices,settings,validateSettings};
