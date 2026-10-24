@@ -269,7 +269,7 @@ function drawSurgeHighlight(w, h, plotWidth) {
 }
 
 const WINDOW=10000, duration=TimeframeEngine.seconds;
-let dateNavigation=null, navigationController=null, loadedMarket=null, chartDateFocus=null;
+let dateNavigation=null, navigationController=null, loadedMarket=null, chartDateFocus=null, chartBacktestResult=null;
 let historyState={id:0,buffer:[],pending:new Set(),exhausted:new Set()};
 let paneScaleSeries=[candles,volume,funding,settlementCycle];
 let studyPanels=null,lastFundingSignalVisibility;
@@ -293,7 +293,7 @@ function draw(){paneLayoutCache=computePaneLayout();updatePaneHover();try{drawIn
 function setStyle(el,k,v){const c=el._st||(el._st={});if(c[k]!==v){c[k]=v;el.style[k]=v;}}
 function drawInner(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clientHeight,dpr=devicePixelRatio||1,plotWidth=chart.timeScale().width();
  if(overlay.width!==Math.round(w*dpr)||overlay.height!==Math.round(h*dpr)){overlay.width=Math.round(w*dpr);overlay.height=Math.round(h*dpr);overlay.style.width=w+'px';overlay.style.height=h+'px';}
- ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawCycleBands(w,h);drawRuler(w,h);drawSurgeHighlight(w,h,plotWidth);placeChartSymbol();placeChartNavigation();placeChartClock();placeLegendToggle();studyPanels?.position();syncFundingSignalVisibility();chartDrawings?.render();globalThis.ChartWorkspace?.controlsChanged({ruler:chartDrawings?.tool==='ruler',lines:showLines});
+ ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawCycleBands(w,h);drawRuler(w,h);drawSurgeHighlight(w,h,plotWidth);if(globalThis.BacktestOverlay?.matches(chartBacktestResult,loadedMarket))globalThis.BacktestOverlay.draw(ctx,chartBacktestResult,{chart,series:candles,bars:all,windowStart,pane:pricePane(),width:plotWidth});placeChartSymbol();placeChartNavigation();placeChartClock();placeLegendToggle();studyPanels?.position();syncFundingSignalVisibility();chartDrawings?.render();globalThis.ChartWorkspace?.controlsChanged({ruler:chartDrawings?.tool==='ruler',lines:showLines});
  if(selectedGuideVisible&&selectedGuideTime!==null&&(selectedGuideKind==='date'||selectedSignal?.rate===undefined||fundingSignalsVisible())){const x=chart.timeScale().timeToCoordinate(selectedGuideTime);if(x!==null&&x>=0&&x<=plotWidth){guideCountdown.hidden=false;guideCountdown.style.left=Math.max(65,Math.min(plotWidth-65,x))+'px';ctx.strokeStyle=selectedGuideKind==='date'?'#60a5fa':'#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
  if(!showLines||!fundingSignalsVisible())return;
  const range=chart.timeScale().getVisibleRange();if(!range)return;
@@ -783,6 +783,7 @@ function syncFundingSignalVisibility(){
  const visible=fundingSignalsVisible();if(visible===lastFundingSignalVisibility)return;
  lastFundingSignalVisibility=visible;renderSignalMarkers(all.slice(windowStart,windowEnd));
 }
+function setChartBacktest(value){chartBacktestResult=value?.market&&Array.isArray(value.signals)&&Array.isArray(value.trades)?value:null;renderSignalMarkers(all.slice(windowStart,windowEnd));schedule();}
 function renderSignalMarkers(part){if(!part.length){markers.setMarkers([]);return;}
  const visible=fundingSignalsVisible()?signals.slice(lowerBound(signals,part[0].time),lowerBound(signals,part.at(-1).time+1)):[];
  const unique=new Map();for(const s of visible){const old=unique.get(s.time);if(!old||s.rate<old.rate)unique.set(s.time,s);}
@@ -802,6 +803,7 @@ function renderSignalMarkers(part){if(!part.length){markers.setMarkers([]);retur
    }
  }
 
+ if(globalThis.BacktestOverlay?.matches(chartBacktestResult,loadedMarket))markerList.push(...globalThis.BacktestOverlay.markers(chartBacktestResult,part));
  markers.setMarkers(markerList.length<=400?markerList.sort((a,b)=>a.time-b.time):[]);
 }
 function renderWindow(center,focus=true,span=240,preservedRange=null){if(!all.length)return;changingWindow=true;clearTimeout(navTimer);windowStart=windowStartFor(center);windowEnd=Math.min(all.length,windowStart+WINDOW);const part=all.slice(windowStart,windowEnd),{warn,ext}=thresholds();
@@ -1259,10 +1261,10 @@ chartDrawings=bindChartDrawings({
  zoom:item=>{const [a,b]=item.points,from=DrawingEngine.timeLogical(all,Math.min(a.time,b.time),duration[loadedMarket.int])-windowStart,to=DrawingEngine.timeLogical(all,Math.max(a.time,b.time),duration[loadedMarket.int])-windowStart;if(to-from<2)return;moveChartRange({from,to});const pane=getPaneLayout().find(p=>studyPanels.panelForPane(chart.panes()[p.index])?.id===item.pane);if(pane&&a.price!==b.price){pane.series.priceScale().setVisibleRange({from:Math.min(a.price,b.price),to:Math.max(a.price,b.price)});}schedule();}
 });
 rulerBtn.onclick=()=>chartDrawings.setTool(chartDrawings.tool==='ruler'?'cross':'ruler');
-dateNavigation=bindDateNavigation({currentTimeframe:()=>loadedMarket?.int||$('intervalSelect').value,currentTime:()=>Math.min(Date.now()/1000,captureChartView()?.time??Date.now()/1000),jump:jumpToChartDate});
+dateNavigation=bindDateNavigation({marketKey:()=>(loadedMarket?.ex||$('exchangeSelect').value)+':'+(loadedMarket?.symbol||$('symbolInput').value),currentTimeframe:()=>loadedMarket?.int||$('intervalSelect').value,currentTime:()=>Math.min(Date.now()/1000,captureChartView()?.time??Date.now()/1000),jump:jumpToChartDate});
 $('fundingRefreshBtn').onclick=()=>{if(fundingSession&&!fundingSession.abort.signal.aborted)void refreshFundingSession(fundingSession);else loadData();};
 $('fundingMinimumBtn').onclick=focusMinimumFunding;
-for(const id of ['exchangeSelect','intervalSelect'])$(id).onchange=loadData;
+for(const id of ['exchangeSelect','intervalSelect'])$(id).onchange=event=>{const target=id==='intervalSelect'?chartDateFocus?.time:null;void loadData(Number.isFinite(target)?{dateTarget:target,timeframe:$('intervalSelect').value}:{}).catch(error=>{if(error.name!=='AbortError')status(error.message,true);});};
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&fundingSession)void refreshFundingSession(fundingSession);});
 for(const p of studyPanels.active()){const s=studyPanels.primary(p);if(s&&p.stretch>0)s.getPane().setStretchFactor(p.stretch);}
 
@@ -2023,10 +2025,10 @@ async function selectWorkspaceMarket(m,navigation){
  $('exchangeSelect').value=m.ex;$('symbolInput').value=m.symbol;$('intervalSelect').value=m.int;
  try{
   if(navigation?.kind==='surge')triggerSurgeHighlight(navigation.coin);
-  const target=navigation?.kind==='signal'?Number(navigation.signal?.eventTime||navigation.signal?.time):null;
+  const target=navigation?.kind==='date'?Number(navigation.time):navigation?.kind==='signal'?Number(navigation.signal?.eventTime||navigation.signal?.time):null;
   const task=loadData(Number.isFinite(target)?{dateTarget:target,timeframe:m.int}:{}),id=run;
   await task;if(id!==run)return;
-  if(Number.isFinite(target))focusSignal({...navigation.signal},null,true);
+  if(Number.isFinite(target)&&navigation.kind==='signal')focusSignal({...navigation.signal},null,true);
  }catch(error){if(error.name!=='AbortError')status(error.message,true);}
 }
 const chartViewActions={};
@@ -2042,12 +2044,12 @@ function loadInputMarket(){
 }
 globalThis.ChartWorkspace?.bind({
  workspace:chartWorkspace,host:rulerHost,symbolButton:chartSymbolLabel,
- getMarket:()=>loadedMarket||{ex:$('exchangeSelect').value,symbol:$('symbolInput').value,int:$('intervalSelect').value},
+ backtest:setChartBacktest,getMarket:()=>loadedMarket||{ex:$('exchangeSelect').value,symbol:$('symbolInput').value,int:$('intervalSelect').value},
  selectMarket:selectWorkspaceMarket,action:action=>chartViewActions[action]?.(),
  onSplit:()=>{if(all.length)controller?.abort();scannerController?.abort();fundingRankController?.abort();},
  dispose:()=>{controller?.abort();navigationController?.abort();stopFundingUpdates();clearLocationGuide();clearTimeout(surgeHighlight.timer);clearInterval(surgeHighlight.countdownInterval);},
  schedule,syncFullscreen:syncChartFullscreen,fullscreen:toggleChartFullscreen,jumpDate:()=>$('gotoDateBtn').click()
 });
 $('searchBtn').onclick=loadInputMarket;$('symbolInput').onkeydown=e=>{if(e.key==='Enter')loadInputMarket();};$('exchangeSelect').onchange=loadInputMarket;
-if(!globalThis.ChartWorkspace?.embedded){setupSidebarTabs();setupScanner();setupFundingRank();globalThis.ChartDashboard?.bind({workspace:chartWorkspace,selectMarket:loadDetectedMarket,chartWorkspace:globalThis.ChartWorkspace});}
+if(!globalThis.ChartWorkspace?.embedded){setupSidebarTabs();setupScanner();setupFundingRank();globalThis.ChartDashboard?.bind({workspace:chartWorkspace,selectMarket:loadDetectedMarket,chartWorkspace:globalThis.ChartWorkspace,backtestData:globalThis.BacktestData?.create({candlePage,fundingPage}),onBacktestJump:async(m,time)=>{if(globalThis.ChartWorkspace?.selectActive(m,{kind:'date',time}))return;if(loadedMarket&&m.ex===loadedMarket.ex&&m.symbol===loadedMarket.symbol&&m.int===loadedMarket.int)await jumpToChartDate(time,new AbortController().signal,m.int);else await selectWorkspaceMarket(m,{kind:'date',time});}});}
 loadData();

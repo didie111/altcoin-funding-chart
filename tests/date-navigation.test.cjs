@@ -15,8 +15,9 @@ function dialogHarness(jump){
  node('intervalSelect').options=Object.keys(frames.seconds).map(value=>({value,cloneNode(){return {...this};}}));node('intervalSelect').value='1h';
  const document={getElementById:node,createElement:element,addEventListener(){},querySelector:()=>null};
  const previous=global.document;global.document=document;
- const api=bindDateNavigation({currentTime:()=>target,currentTimeframe:()=>node('intervalSelect').value,jump});
- return {api,node,restore:()=>{global.document=previous;}};
+ const clock={time:target};
+ const api=bindDateNavigation({currentTime:()=>clock.time,currentTimeframe:()=>node('intervalSelect').value,jump});
+ return {api,node,clock,restore:()=>{global.document=previous;}};
 }
 test('the calendar opens at the chart timeframe and submits its own selected timeframe',async()=>{
  const calls=[],h=dialogHarness(async(...args)=>calls.push(args));
@@ -27,6 +28,10 @@ test('the calendar opens at the chart timeframe and submits its own selected tim
   await h.node('dateNavigationForm').onsubmit({preventDefault(){}});
   assert.equal(calls[0][0],target);assert.equal(calls[0][2],'1m');assert.equal(h.node('dateNavigationDialog').open,false);
  }finally{h.restore();}
+});
+test('the last successful date survives a timeframe change and a new latest chart time',async()=>{
+ const h=dialogHarness(async()=>{});
+ try{h.api.open();h.node('dateNavigationDate').value='2026-09-20';h.node('dateNavigationTime').value='10:15';await h.node('dateNavigationForm').onsubmit({preventDefault(){}});h.clock.time=Date.now()/1000;h.node('intervalSelect').value='3m';h.api.open();assert.equal(h.node('dateNavigationDate').value,'2026-09-20');assert.equal(h.node('dateNavigationTime').value,'10:15');assert.equal(h.node('dateNavigationInterval').value,'3m');}finally{h.restore();}
 });
 test('closing a pending date request aborts it and stale completion leaves a newly opened panel alone',async()=>{
  let resolve,signal;const h=dialogHarness((_,abort)=>{signal=abort;return new Promise(done=>resolve=done);});

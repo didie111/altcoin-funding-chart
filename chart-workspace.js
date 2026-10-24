@@ -26,7 +26,7 @@
   function selected(index){active=index;firstCell?.classList.toggle('selected',index===0);for(const frame of frames)frame.classList.toggle('selected',Number(frame.dataset.chartCell)===index);applyControls();notify();}
   function controlsChanged(value){const state={ruler:value.ruler===true,lines:value.lines===true},key=JSON.stringify(state);controls[ownCell]=state;if(embedded&&key!==lastControls)send({type:'controls',state});lastControls=key;if(!embedded)applyControls();}
   function hasRemoteTarget(){return !embedded&&mode===4&&active>0;}
-  function deliver(frame,message){if(frame.chartReady)frame.contentWindow.postMessage({channel,...message},win.location.origin);else{frame.chartQueue??=[];if(message.type==='select')frame.chartQueue=[];frame.chartQueue.push(message);}}
+  function deliver(frame,message){if(frame.chartReady)frame.contentWindow.postMessage({channel,...message},win.location.origin);else{frame.chartQueue??=[];if(message.type==='select')frame.chartQueue=frame.chartQueue.filter(item=>item.type==='backtest-result').slice(-1);frame.chartQueue.push(message);}}
   function expandControl(button,pressed,label,kind='chart'){
    if(!button)return;button.title=label;button.setAttribute('aria-label',label);button.setAttribute('aria-pressed',String(pressed));
    const shape=kind==='workspace'
@@ -53,6 +53,7 @@
   function exitWorkspaceFullscreen(){if(!embedded||!workspaceFullscreen)return false;send({type:'exit-workspace-fullscreen'});return true;}
   function current(){return market(api?.getMarket()||{ex:$('exchangeSelect').value,symbol:$('symbolInput').value,int:$('intervalSelect').value});}
   function choose(value,index=0,navigation){const m=market(value,markets[index]||current());if(index===0){api.selectMarket(m,navigation);return;}const frame=frames.find(f=>Number(f.dataset.chartCell)===index);if(frame){markets[index]=m;persist();deliver(frame,{type:'select',market:m,navigation});}}
+  function setBacktest(value,index=active){if(embedded)return;if(mode===1||index===0){api.backtest?.(value);return;}const frame=frames.find(f=>Number(f.dataset.chartCell)===index);if(frame)deliver(frame,{type:'backtest-result',value});}
   function selectActive(value,navigation){if(!hasRemoteTarget())return false;choose(value,active,navigation);return true;}
   function runOnActive(action){if(!hasRemoteTarget()||!actions.has(action))return false;const frame=frames.find(f=>Number(f.dataset.chartCell)===active);if(!frame)return false;deliver(frame,{type:'action',action});return true;}
   function setLayout(next){
@@ -87,7 +88,8 @@
    if(embedded){
     doc.addEventListener('pointerdown',()=>send({type:'active'}),{capture:true,passive:true});doc.addEventListener('focusin',()=>send({type:'active'}));
     win.addEventListener('message',event=>{if(event.origin!==win.location.origin||event.source!==win.parent||event.data?.channel!==channel)return;
-     if(event.data.type==='select')api.selectMarket(market(event.data.market,current()),event.data.navigation);
+     if(event.data.type==='backtest-result')api.backtest?.(event.data.value);
+     else if(event.data.type==='select')api.selectMarket(market(event.data.market,current()),event.data.navigation);
      else if(event.data.type==='action'&&actions.has(event.data.action))api.action?.(event.data.action);
      else if(event.data.type==='dispose'){disposed=true;api.dispose();}
      else if(event.data.type==='layout-state'){maximized=Number.isInteger(event.data.maximized)&&event.data.maximized>=-1&&event.data.maximized<=3?event.data.maximized:-1;workspaceFullscreen=event.data.fullscreen===true;updateControls();api.syncFullscreen?.();}
@@ -116,7 +118,7 @@
    updateControls();marketChanged(current());if(embedded)send({type:'ready'});api.syncFullscreen?.();
    win.addEventListener('pagehide',()=>{disposed=true;api.dispose();},{once:true});
   }
-  return {embedded,bind,marketChanged,reportStatus,selectActive,runOnActive,controlsChanged,subscribe:listener=>{listeners.add(listener);return ()=>listeners.delete(listener);},activeMarket:()=>hasRemoteTarget()?market(markets[active],current()):current(),isMulti:()=>embedded||mode===4,visible:()=>!disposed&&!doc.hidden,requestFullscreen,requestWorkspaceFullscreen,exitWorkspaceFullscreen,restoreMaximized,fullscreenState,syncWorkspaceFullscreen,setLayout};
+  return {embedded,bind,marketChanged,reportStatus,selectActive,runOnActive,controlsChanged,setBacktest,activeCell:()=>active,subscribe:listener=>{listeners.add(listener);return ()=>listeners.delete(listener);},activeMarket:()=>hasRemoteTarget()?market(markets[active],current()):current(),isMulti:()=>embedded||mode===4,visible:()=>!disposed&&!doc.hidden,requestFullscreen,requestWorkspaceFullscreen,exitWorkspaceFullscreen,restoreMaximized,fullscreenState,syncWorkspaceFullscreen,setLayout};
  }
  return {create,market,preferences,embedUrl,assetRevision};
 });

@@ -42,7 +42,7 @@ const MarketAPI = (() => {
     }
     async function fetchJson(base, params = {}, signal = new AbortController().signal) {
       const bingx = new URL(base).hostname === 'open-api.bingx.com';
-      const mexc = new URL(base).hostname === 'api.mexc.com';
+      const mexc = new URL(base).hostname === 'api.mexc.com' || new URL(base).hostname === 'contract.mexc.com';
       const viaRelay = Boolean(relayUrl) && (bingx || mexc);
       const name = bingx ? 'BingX' : mexc ? 'MEXC' : new URL(base).hostname;
       const fallback = bingx ? base.replace('https://open-api.bingx.com/', 'https://open-api.bingx.pro/') : null;
@@ -127,4 +127,6 @@ const MarketAPI = (() => {
   return {createClient, candle, ...createClient()};
 })();
 
+if (typeof globalThis !== 'undefined') globalThis.MarketAPI = MarketAPI;
+if (typeof window !== 'undefined') window.MarketAPI = MarketAPI;
 if (typeof module !== 'undefined' && module.exports) module.exports = MarketAPI;

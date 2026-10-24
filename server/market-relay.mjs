@@ -36,7 +36,8 @@ function targetFor(input) {
     params.set(key, value);
   };
   const number = (min, max) => value => /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) >= min && Number(value) <= max;
-  if (bingx || history || catalog) add('symbol', value => (bingx ? /^[A-Z0-9]{1,32}-USDT$/ : /^[A-Z0-9]{1,32}_USDT$/).test(value), !catalog);
+  const allPremium=bingx&&path.endsWith('/premiumIndex')&&!input.searchParams.has('symbol');
+  if (bingx || history || catalog) add('symbol', value => (bingx ? /^[A-Z0-9]{1,32}-USDT$/ : /^[A-Z0-9]{1,32}_USDT$/).test(value), !catalog&&!allPremium);
   if (bingx && (history || candles)) {
     add('limit', number(1, 1000)); add('startTime', number(0, 1e15)); add('endTime', number(0, 1e15));
   }
