@@ -55,7 +55,7 @@
   }
   $('btRunBtn').onclick=()=>void run('single');$('btRunAllBtn').onclick=()=>void run('compare');$('btOptimizeBtn').onclick=()=>void run('optimize');$('btCancelBtn').onclick=cancel;
   $('btShowChart').onclick=()=>{if(single)chartWorkspace.setBacktest?.({...single.result,market:single.meta.market});};$('btClearChart').onclick=()=>chartWorkspace.setBacktest?.(null);
-  function selectView(next){view=next;for(const button of dock.querySelectorAll('[data-bt-view]')){const chosen=button.dataset.btView===view;button.setAttribute('aria-selected',String(chosen));button.tabIndex=chosen?0:-1;}$('btReport').setAttribute('aria-labelledby','btView-'+view);render();}
+  function selectView(next){view=next;for(const button of dock.querySelectorAll('[data-bt-view]')){const chosen=button.dataset.btView===view;button.setAttribute('aria-selected',String(chosen));button.tabIndex=chosen?0:-1;}$('btReport').setAttribute('aria-labelledby','btView-'+view);render();$('btReport').scrollTop=0;}
   const tabs=Array.from(dock.querySelectorAll('[data-bt-view]'));tabs.forEach((button,index)=>{button.onclick=()=>selectView(button.dataset.btView);button.onkeydown=event=>{if(!['ArrowLeft','ArrowRight'].includes(event.key))return;event.preventDefault();const next=tabs[(index+(event.key==='ArrowRight'?1:tabs.length-1))%tabs.length];selectView(next.dataset.btView);next.focus();};});
   function table(head,rows){return '<div class="bt-table-scroll"><table class="bt-table"><thead><tr>'+head.map(x=>'<th>'+x+'</th>').join('')+'</tr></thead><tbody>'+rows.join('')+'</tbody></table></div>';}
   const row=values=>'<tr>'+values.map(x=>'<td>'+x+'</td>').join('')+'</tr>';
