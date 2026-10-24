@@ -10,8 +10,20 @@ const MarketAPI = (() => {
       signal.addEventListener('abort', abort, {once: true});
     });
   }
-  function createClient({fetch: fetcher = (...args) => globalThis.fetch(...args), now = Date.now, wait = sleep, requestTimeout = 10000, relayUrl = globalThis.MARKET_RELAY_URL || null} = {}) {
+  function createClient({fetch: fetcher = (...args) => globalThis.fetch(...args), now = Date.now, wait = sleep, requestTimeout = 10000, relayUrl = globalThis.MARKET_RELAY_URL || null, onRetry} = {}) {
     let bingxQueue = Promise.resolve(), lastBingxStart = null;
+    const cooldowns=new Map();
+    function limitError(message,delay=0){const error=Error(message);error.name='RateLimitError';error.retryAt=now()+delay;return error;}
+    function retryDelay(response,attempt){const raw=response.headers?.get('retry-after'),seconds=raw===null||raw===undefined||String(raw).trim()===''?NaN:Number(raw),date=Number.isFinite(seconds)?NaN:Date.parse(raw),reset=Number(response.headers?.get('X-Bapi-Limit-Reset-Timestamp')),explicit=Math.max(Number.isFinite(seconds)?seconds*1000:Number.isFinite(date)?date-now():0,reset>now()?reset-now():0);return explicit>0?explicit:1500*2**attempt;}
+    async function rateWait(host,name,response,attempt,message){
+      const delay=retryDelay(response,attempt);cooldowns.set(host,Math.max(cooldowns.get(host)||0,now()+delay));globalThis.MarketShared?.broker.defer?.(host,now()+delay);
+      if(attempt===3||delay>60000)throw limitError(message+' · API 요청 제한입니다. '+Math.ceil(delay/1000)+'초 이상 기다린 뒤 다시 실행해 주세요.',delay);
+      const detail={exchange:name,host,delay,attempt:attempt+1};if(onRetry)onRetry(detail);else if(typeof globalThis.dispatchEvent==='function'&&typeof globalThis.CustomEvent==='function')globalThis.dispatchEvent(new CustomEvent('market-api-wait',{detail}));
+    }
+    async function cooldown(host,signal){
+      const broker=globalThis.MarketShared?.broker;if(broker?.waitForCooldown)await broker.waitForCooldown(host,signal);
+      for(;;){signal.throwIfAborted();const delay=(cooldowns.get(host)||0)-now();if(delay<=0)return;await wait(delay,signal);}
+    }
     async function fetchTimed(url, signal, timeout = requestTimeout) {
       const controller = new AbortController();
       const abort = () => controller.abort(signal.reason);
@@ -29,8 +41,10 @@ const MarketAPI = (() => {
       if(globalThis.MarketShared)return globalThis.MarketShared.broker.reserveBingx(signal,request);
       const turn = bingxQueue.then(async () => {
         signal.throwIfAborted();
+        await cooldown('open-api.bingx.com',signal);
         const delay = lastBingxStart === null ? 0 : lastBingxStart + 1150 - now();
         if (delay > 0) await wait(delay, signal);
+        await cooldown('open-api.bingx.com',signal);
         signal.throwIfAborted();
         lastBingxStart = now();
         // Start fetch before releasing the queue; reserving a slot alone can let
@@ -41,13 +55,15 @@ const MarketAPI = (() => {
       return await turn;
     }
     async function fetchJson(base, params = {}, signal = new AbortController().signal) {
-      const bingx = new URL(base).hostname === 'open-api.bingx.com';
-      const mexc = new URL(base).hostname === 'api.mexc.com' || new URL(base).hostname === 'contract.mexc.com';
+      const host=new URL(base).hostname;
+      const bingx = host === 'open-api.bingx.com';
+      const mexc = host === 'api.mexc.com' || host === 'contract.mexc.com';
       const viaRelay = Boolean(relayUrl) && (bingx || mexc);
       const name = bingx ? 'BingX' : mexc ? 'MEXC' : new URL(base).hostname;
       const fallback = bingx ? base.replace('https://open-api.bingx.com/', 'https://open-api.bingx.pro/') : null;
       for (let attempt = 0; attempt < 4; attempt++) {
         signal.throwIfAborted();
+        await cooldown(host,signal);
         const request = (endpoint = base) => {
           const query = bingx ? {...params, timestamp: now()} : params;
           const routed = viaRelay ? {...query, exchange: bingx ? 'BINGX' : 'MEXC', path: new URL(base).pathname} : query;
@@ -80,7 +96,8 @@ const MarketAPI = (() => {
           try {failure = await response.json();} catch {}
           if (failure?.code === 'RELAY_ERROR') throw Error(failure.message || name + ' 중계 조회 실패');
         }
-        if (response.status === 429 || response.status >= 500) {
+        if(response.status===429){await rateWait(host,name,response,attempt,name+' HTTP 429');continue;}
+        if (response.status >= 500) {
           if (attempt === 3) throw Error(name + ' HTTP ' + response.status + ': 요청 제한 또는 서버 오류');
           const retryAfter = Number(response.headers?.get('retry-after'));
           await wait(retryAfter > 0 ? Math.min(retryAfter * 1000, 30000) : 1500 * 2 ** attempt, signal);
@@ -96,7 +113,9 @@ const MarketAPI = (() => {
         const code = result.retCode ?? result.code;
         if (code !== undefined && !['0', '00000'].includes(String(code))) {
           const message = name + ' API ' + code + ': ' + (result.retMsg || result.msg || result.message || '요청 실패');
-          if (bingx && ['100410', '100500', '109500'].includes(String(code)) && attempt < 3) {
+          const limited=(bingx&&String(code)==='100410')||(mexc&&String(code)==='510')||(host==='api.bybit.com'&&String(code)==='10006')||(host==='www.okx.com'&&String(code)==='50011')||(host==='api.bitget.com'&&String(code)==='429');
+          if(limited){await rateWait(host,name,response,attempt,message);continue;}
+          if (bingx && ['100500', '109500'].includes(String(code)) && attempt < 3) {
             await wait(1500 * 2 ** attempt, signal);
             continue;
           }

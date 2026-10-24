@@ -85,7 +85,7 @@ function printHelp() {
   --timeframe <tf>         타임프레임 (1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 1d, 1w, 1M / 기본값: 5m)
   --all-timeframes         1분봉부터 월봉까지 전체 타임프레임 일괄 비교 백테스트
   --splits <0-10>          분할 매수 횟수 (0/1은 1회, 2~10회, 기본값: 5)
-  --split-trigger <mode>   분할 매수 트리거 (rsi_cross_up, step_pct, rsi_oversold, bar / 기본값: rsi_cross_up)
+  --split-trigger <mode>   분할 매수 트리거 (rsi_cross_up, rsi_cross_up_1m, step_pct, rsi_oversold, bar / 기본값: rsi_cross_up)
   --min-funding <pct>      음펀비 진입 기준 (기본값: -0.5%)
   --rsi-oversold <num>     RSI 과매도 기준선 (기본값: 30)
   --tp <pct>               목표 익절률 % (기본값: 2.0%)
@@ -134,11 +134,11 @@ async function main() {
     console.log(`📡 거래소 API로부터 [${options.symbol}] 펀딩비 및 캔들 데이터를 수집하는 중...`);
     try {
       dataset = await BacktestData.loadBacktestDataset(options.symbol, {
-        exchange:options.exchange,startTime:options.startTime,endTime:options.endTime,allowMissing:options.allTimeframes,
+        exchange:options.exchange,startTime:options.startTime,endTime:options.endTime,allowMissing:options.allTimeframes,requireMinuteData:options.optimize||options.splitTrigger==='rsi_cross_up_1m',
         intervals: options.allTimeframes ? BacktestData.ALL_TIMEFRAMES : [options.timeframe]
       });
       console.log(`✓ 펀딩비 레코드 수집: ${dataset.fundingRecords.length}개`);
-      console.log(`✓ 1시간 주기 & 음펀비 <= -0.5% 해당 세션: ${dataset.targetSessionsCount}회 감지`);
+      console.log(`✓ 실제 수집 주기: ${Object.keys(dataset.timeframeCandles).join(', ')}`);
     } catch (err) {
       console.error(`거래소 API 수집 실패: ${err.message}. 실제 데이터가 없어 실행을 중단합니다.`);process.exitCode=1;return;
     }
@@ -176,12 +176,12 @@ async function main() {
     }
 
     const optResult = BacktestEngine.optimizeStrategy(candles, dataset.fundingRecords, {
-      baseConfig: strategyConfig,
+      baseConfig: strategyConfig,minuteCandles:dataset.timeframeCandles['1m'],
       splitCounts: [5, 7, 10],
       rsiOversolds: [20, 25, 30],
       takeProfitPcts: [1.0, 1.5, 2.0, 3.0, 5.0],
       stopLossPcts: [2.0, 3.0, 5.0, 0],
-      splitTriggers: ['step_pct', 'rsi_oversold'],
+      splitTriggers: ['step_pct', 'rsi_cross_up', 'rsi_cross_up_1m', 'rsi_oversold'],
       minTrades: 1
     });
 
@@ -263,7 +263,7 @@ async function main() {
       process.exit(1);
     }
 
-    const result = BacktestEngine.runBacktest(candles, dataset.fundingRecords, strategyConfig);
+    const result = BacktestEngine.runBacktest(candles, dataset.fundingRecords, strategyConfig,{minuteCandles:dataset.timeframeCandles['1m']});
     outputPayload.single = result;
     const s = result.summary;
 

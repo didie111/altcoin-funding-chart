@@ -11,7 +11,9 @@
  const abortError=()=>new DOMException('요청이 취소됐습니다.','AbortError');
  function copy(value){const result=structuredClone(value);if(value?.__marketFetchedAt)Object.defineProperty(result,'__marketFetchedAt',{value:value.__marketFetchedAt});return result;}
  function create({now=Date.now,wait=(ms,signal)=>new Promise((resolve,reject)=>{const done=()=>{signal.removeEventListener('abort',abort);resolve();},timer=setTimeout(done,ms),abort=()=>{clearTimeout(timer);reject(signal.reason||abortError());};signal.addEventListener('abort',abort,{once:true});}),maxEntries=48}={}){
-  const cache=new Map();let queue=Promise.resolve(),lastStart=-Infinity;
+  const cache=new Map(),cooldowns=new Map();let queue=Promise.resolve(),lastStart=-Infinity;
+  function defer(host,until){cooldowns.set(host,Math.max(cooldowns.get(host)||0,until));}
+  async function waitForCooldown(host,signal){for(;;){signal.throwIfAborted();const delay=(cooldowns.get(host)||0)-now();if(delay<=0)return;await wait(delay,signal);}}
   function request(key,producer,signal=new AbortController().signal,ttl=2000){
    if(signal.aborted)return Promise.reject(signal.reason||abortError());
    let entry=cache.get(key);
@@ -36,10 +38,10 @@
    });
   }
   async function reserveBingx(signal,task){
-   const turn=queue.then(async()=>{signal.throwIfAborted();const delay=lastStart+1150-now();if(delay>0)await wait(delay,signal);signal.throwIfAborted();lastStart=now();return {response:task()};});
+   const turn=queue.then(async()=>{signal.throwIfAborted();await waitForCooldown('open-api.bingx.com',signal);const delay=lastStart+1150-now();if(delay>0)await wait(delay,signal);await waitForCooldown('open-api.bingx.com',signal);signal.throwIfAborted();lastStart=now();return {response:task()};});
    queue=turn.catch(()=>{});return turn;
   }
-  return {request,reserveBingx};
+  return {request,reserveBingx,defer,waitForCooldown};
  }
  function key(base,params){return base+'?'+new URLSearchParams(Object.entries(params||{}).filter(([,v])=>v!==undefined).sort(([a],[b])=>a.localeCompare(b)));}
  function ttl(base){return /contracts$|exchangeInfo$|instruments-info$|contract\/detail$|public\/instruments$/.test(base)?300000:/ticker|tickers|premiumIndex/.test(base)?8000:/funding/.test(base)?15000:2000;}

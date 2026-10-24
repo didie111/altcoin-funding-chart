@@ -17,7 +17,8 @@
  function create(adapter={}){
   const candles=adapter.candlePage||candlePage,funding=adapter.fundingPage||fundingPage;
   async function loadBacktestDataset(symbol,options={}){
-   const ex=options.exchange||'BINANCE',end=Math.min(options.endTime??Date.now()/1000,Date.now()/1000),start=options.startTime??end-7*86400,intervals=options.intervals||['5m'],signal=options.signal||new AbortController().signal,onProgress=options.onProgress||(()=>{}),maxBars=options.maxBars??500000;
+   const ex=options.exchange||'BINANCE',end=Math.min(options.endTime??Date.now()/1000,Date.now()/1000),start=options.startTime??end-7*86400,intervals=[...new Set([...(options.intervals||['5m']),...(options.requireMinuteData?['1m']:[])])],signal=options.signal||new AbortController().signal,onProgress=options.onProgress||(()=>{}),maxBars=options.maxBars??500000;
+   if(options.requireMinuteData){intervals.splice(intervals.indexOf('1m'),1);intervals.unshift('1m');}
    if(!Number.isFinite(start)||!Number.isFinite(end)||start>=end||start<0)throw Error('테스트 기간을 확인하세요.');symbol=String(symbol).trim().toUpperCase().replace(/[-_]/g,'').replace(/USDT$/,'')+'USDT';if(!/^[A-Z0-9]{1,28}USDT$/.test(symbol))throw Error('코인 심볼을 확인하세요.');
    for(const tf of intervals)T.plan(ex,tf);signal.throwIfAborted();
    const timeframeCandles={},coverage={},allFunding=new Map(),fundingStart=Math.max(0,start-48*3600);let totalCount=0,pages=0,cursor=ex==='BINANCE'?fundingStart*1000:Math.floor(end*1000)-1,page=1;
@@ -43,7 +44,7 @@
     const values=[...map.values()].sort((a,b)=>a.time-b.time);if(!values.length)throw Error(tf+'의 해당 기간 캔들 기록을 거래소가 제공하지 않습니다.');
     const inside=values.filter(b=>b.time>=start);if(!inside.length)throw Error(tf+'의 선택 기간에 완성된 캔들이 없습니다.');
     timeframeCandles[tf]=values;totalCount+=values.length;coverage[tf]={first:inside[0].time,last:inside.at(-1).time,count:inside.length,endMissing:T.end(inside.at(-1).time,tf)<T.start(end,tf),warmup:values.length-inside.length,startMissing:inside[0].time>T.end(T.start(start,tf),tf)};
-   }catch(error){signal.throwIfAborted();if(!options.allowMissing||/초과|반복|진행되지/.test(error.message))throw error;coverage[tf]={error:error.message};}}
+   }catch(error){signal.throwIfAborted();if(!options.allowMissing||(options.requireMinuteData&&tf==='1m')||error.name==='RateLimitError'||/초과|반복|진행되지/.test(error.message))throw error;coverage[tf]={error:error.message};}}
    if(!Object.keys(timeframeCandles).length)throw Error('선택 기간의 캔들을 불러오지 못했습니다.');
    const fundingRecords=[...allFunding.values()].sort((a,b)=>a.time-b.time),gaps=[];if(!fundingRecords.length)throw Error('선택 기간의 공식 정산 기록이 없어 진입 조건을 검증할 수 없습니다.');
    for(const [tf,rows]of Object.entries(timeframeCandles))for(let i=1;i<rows.length;i++)if(T.end(rows[i-1].time,tf)<rows[i].time)gaps.push({timeframe:tf,from:T.end(rows[i-1].time,tf),to:rows[i].time});
