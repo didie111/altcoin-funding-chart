@@ -55,6 +55,7 @@ chart.panes()[0].setStretchFactor(6);chart.panes()[1].setStretchFactor(1.5);char
 funding.createPriceLine({price:0,color:'#6b7280',lineWidth:1,lineStyle:LC.LineStyle.Dotted,axisLabelVisible:false});
 const markers=LC.createSeriesMarkers(candles,[]);
 let all=[],rates=[],signals=[],mapped=new Map(),unmappedFunding=[],controller,run=0,windowStart=0,windowEnd=0,showLines=true,busy=false,selectedSignal=null,changingWindow=false;
+let signalSidebar=null,signalSettings=SignalSidebar.settings(),signalFundingPage=0;
 let selectedGuideVisible=false, selectedGuideTimer, selectedCountdownTimer, selectedGuideDeadline=0, selectedGuideTime=null, selectedGuideKind='signal';
 
 // [🚀 5일 급등락 하이라이트 상태 관리]
@@ -826,36 +827,7 @@ function renderWindow(center,focus=true,span=240,preservedRange=null){if(!all.le
    const ix=Math.max(0,Math.min(part.length-1,center-windowStart));resetScales();const rng=centeredRange(ix,Math.min(span,Math.max(20,all.length*1.2)));if(center>=all.length-1)latestOffset=rng.to-ix;chart.timeScale().setVisibleLogicalRange(rng);
   }
  }else if(preservedRange){chart.timeScale().setVisibleLogicalRange({from:preservedRange.from-windowStart,to:preservedRange.to-windowStart});}requestAnimationFrame(()=>{changingWindow=false;schedule();scheduleVisibleHistory();});}
-let listOffset=0;function renderList(){listOffset=0;$('signalListContainer').replaceChildren();$('signalCountTag').textContent=signals.length+'개';appendList();}
-function appendList(){const container=$('signalListContainer');container.querySelector('.more')?.remove();const end=Math.min(signals.length,listOffset+100);const fragment=document.createDocumentFragment();
- const tfText = $('intervalSelect').selectedOptions[0]?.text || '';
- for(;listOffset<end;listOffset++){
-   const s=signals[signals.length-1-listOffset], el=document.createElement('div');
-   el.className='signal-item '+s.type;
-   s.timeframe = '정산 펀딩비 (' + tfText + ')';
-   s.title = `펀딩비 ${s.rate.toFixed(6)}%`;
-   el.innerHTML = `
-     <div class="signal-info" style="width:100%;">
-       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:3px;">
-         <span style="background:#2563eb; color:#fff; font-size:10px; font-weight:800; padding:1px 6px; border-radius:4px;">⏱️ ${s.type==='EXTREME'?'극단 경고':'1차 경고'}</span>
-         <span class="signal-rate ${s.type}">${s.rate.toFixed(4)}%</span>
-       </div>
-       <div style="font-size:11px; font-weight:700; color:#f1f5f9; margin-bottom:2px;">
-         📅 ${date(s.eventTime || s.time)}
-       </div>
-       <div style="font-size:10px; color:#9ca3af;">
-         봉 시각: ${date(s.time)} (정산 기준)
-       </div>
-     </div>
-     <button type="button" class="btn-move" style="margin-left:8px; white-space:nowrap;">이동</button>
-   `;
-   el.onclick=()=>focusSignal(s,el);
-   fragment.append(el);
- }
- container.append(fragment);
- if(listOffset<signals.length){const b=document.createElement('button');b.className='more';b.textContent='신호 100개 더 보기';b.onclick=appendList;container.append(b);}
- if(!signals.length)container.textContent='설정 조건에 해당하는 펀딩비 신호 없음';
-}
+function renderList(){signalSidebar?.publish();}
 chart.subscribeCrosshairMove(p=>{studyPanels?.updateLegend(p.time??null);if(selectedSignal)return;if(!p.time)return;const setKey=t=>{const el=$('chart-key');if(el.textContent!==t)el.textContent=t;};const c=p.seriesData.get(candles),v=volume?p.seriesData.get(volume):undefined,f=funding?p.seriesData.get(funding):undefined,cycle=settlementCycle?p.seriesData.get(settlementCycle):undefined,live=fundingLive?p.seriesData.get(fundingLive):undefined;setKey(`${date(Number(p.time))} · 종가 ${c?.close??'—'} · 거래량 ${v?.value??'—'} · 정산 펀딩비 ${f?.value!==undefined?f.value.toFixed(6)+'%':'기록 없음'} (봉 내 최저 실현율) · 관측 현재율 ${live?.value!==undefined?live.value.toFixed(6)+'%':'기록 없음'} (미정산) · 정산 간격 ${cycle?.value!==undefined?cycle.value+'시간':'기록 없음'}`);});
 let navTimer;chart.timeScale().subscribeVisibleLogicalRangeChange(r=>{schedule();if(r&&!changingWindow)scheduleVisibleHistory();});
 new ResizeObserver(schedule).observe($('unified-chart'));
@@ -1217,7 +1189,7 @@ async function jumpToChartDate(target,signal,interval=loadedMarket?.int){
 }
 
 async function loadData(options={}){const dateTarget=Number.isFinite(options.dateTarget)?options.dateTarget:null;if(options.timeframe&&duration[options.timeframe])$('intervalSelect').value=options.timeframe;try{thresholds();}catch(e){if(dateTarget!==null)throw e;return status(e.message,true);}const symbol=$('symbolInput').value.trim().toUpperCase();if(!/^[A-Z0-9_-]+$/.test(symbol)){if(dateTarget!==null)throw Error('유효한 심볼을 입력하세요.');return status('유효한 심볼을 입력하세요.',true);}
- chartDateFocus=null;clearLocationGuide();if(dateTarget===null)dateNavigation?.cancel();navigationController?.abort();navigationController=new AbortController();controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;loadedMarket={ex,symbol,int,id};globalThis.ChartWorkspace?.marketChanged(loadedMarket);historyState={id,buffer:[],pending:new Set(),exhausted:new Set()};$('historyLoading').hidden=true;chartSymbolLabel.textContent=FundingEngine.contract(ex,symbol);chartSymbolLabel.title=ex+' · '+chartSymbolLabel.textContent+' · '+$('intervalSelect').selectedOptions[0].text;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();strategySignals=[];if($('strategyCurrentCoinLabel'))$('strategyCurrentCoinLabel').textContent=`[${symbol}] 전략 신호`;if($('strategyCountTag'))$('strategyCountTag').textContent='0개';if($('strategyListContainer'))$('strategyListContainer').innerHTML=`<div style="color:#9ca3af;font-size:11px;text-align:center;padding:25px;line-height:1.6;"><span style="color:#60a5fa;font-weight:700;">[${symbol}]</span> 신호 데이터 분석 중...<br><span style="font-size:10px;color:#6b7280;">차트 로드 완료 후 전략 신호가 즉시 업데이트됩니다.</span></div>`;candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
+ chartDateFocus=null;clearLocationGuide();if(dateTarget===null)dateNavigation?.cancel();navigationController?.abort();navigationController=new AbortController();controller?.abort();controller=new AbortController();const signal=controller.signal,id=++run,ex=$('exchangeSelect').value,int=$('intervalSelect').value;loadedMarket={ex,symbol,int,id};globalThis.ChartWorkspace?.marketChanged(loadedMarket);historyState={id,buffer:[],pending:new Set(),exhausted:new Set()};$('historyLoading').hidden=true;chartSymbolLabel.textContent=FundingEngine.contract(ex,symbol);chartSymbolLabel.title=ex+' · '+chartSymbolLabel.textContent+' · '+$('intervalSelect').selectedOptions[0].text;busy=true;clearRuler();selectedSignal=null;for(const s of paneScaleSeries)resetCustomPriceRange(s);all=[];rates=[];signals=[];mapped.clear();strategySignals=[];signalFundingPage=0;candles.setData([]);volume?.setData([]);funding?.setData([]);settlementCycle?.setData([]);cycleMarkers?.setMarkers([]);studyPanels?.clearData();cycleHistory=[];cycleTransitions=[];cycleValues.clear();cycleFast=new Uint8Array(0);officialCycle=null;otherCycles=[];unmappedFunding=[];cycleCaption.textContent='정산 주기: 이력 수집 중';cycleBadge.hidden=true;markers.setMarkers([]);renderList();
  $('coverage').textContent='선택 거래소 USDT 무기한 선물 · 제공 가능한 이력 끝까지 수집 · 과거 구간은 날짜로 이동(Alt+G) 또는 하단 슬라이더로 이동 · 전체 이력은 계속 수집';
  status(`${ex} ${symbol} · 과거 이력 수집 시작`);startFundingUpdates(ex,symbol,int,id);
  const context={ex,symbol,int,id,signal};
@@ -1233,7 +1205,7 @@ async function collectMarketHistory({ex,symbol,int,id,signal}){
  let candleEnd=Date.now(),chunks=[],count=0,candleNote='',fundNote='';historyState.buffer=chunks;
  try{for(;;){const rows=uniqueSorted(await candlePage(ex,symbol,int,candleEnd,signal)).filter(c=>c.time*1000<=candleEnd);if(id!==run)return;signal.throwIfAborted();if(!rows.length){candleNote='API 이력 끝';break;}chunks.push(rows);count+=rows.length;status(`${ex} ${symbol} · 캔들 ${count.toLocaleString()}봉 수집 중`);if(chunks.length===1){const view=chartDateFocus?.id===run?captureChartView():null;all=ChartData.mergeHistory(all,rows);rates=FundingEngine.merge(rates,(fundingSession?.latestRows??[]).filter(f=>f.time>=all[0].time));rebuild();if(view)restoreChartView(view,false);else renderWindow(all.length-1);}else if(!changingWindow){const range=chart.timeScale().getVisibleLogicalRange();if(range&&windowStart+range.from<80&&rows.at(-1).time>=all[0].time-duration[int])await commitHistoryRows(rows,id);}const next=rows[0].time*1000-1;if(next>=candleEnd){candleNote='API 페이지 진행 불가';break;}candleEnd=next;if(candleEnd<=0){candleNote='이력 끝';break;}if(globalThis.ChartWorkspace?.isMulti()){candleNote='최근 구간 · 과거 이동 시 추가 조회';break;}await pause(ex==='BINGX'?1150:350,signal);}
  }catch(e){candleNote=e.name==='AbortError'?'사용자 중지':e.message;}
- if(id!==run)return;const collectedView=captureChartView();all=ChartData.mergeHistory(all,chunks.flat());if(!all.length){busy=false;renderFundingBoard();return status(`${ex}: ${candleNote||'해당 심볼 데이터 없음'}`,true);}rebuild();restoreChartView(collectedView,false);if(!await settleChartView(id))return;
+ if(id!==run)return;const collectedView=captureChartView();all=ChartData.mergeHistory(all,chunks.flat());if(!all.length){busy=false;renderFundingBoard();signalSidebar?.publish();return status(`${ex}: ${candleNote||'해당 심볼 데이터 없음'}`,true);}rebuild();restoreChartView(collectedView,false);if(!await settleChartView(id))return;
  if(!signal.aborted){let cursor=ex==='BINANCE'?all[0].time*1000:Date.now(),parts=[],previous=-1;
  try{for(let page=1;;page++){const rows=await fundingPage(ex,symbol,cursor,page,signal);if(id!==run)return;signal.throwIfAborted();if(!rows.length){fundNote='API 이력 끝';break;}const useful=rows.filter(f=>f.time>=all[0].time);parts.push(useful);if(globalThis.ChartWorkspace?.isMulti()){fundNote='최근 구간 · 과거 이동 시 추가 조회';break;}status(`${ex} · ${all.length.toLocaleString()}봉 / 펀딩비 ${parts.reduce((n,a)=>n+a.length,0).toLocaleString()}건 수집 중`);
  const edge=ex==='BINANCE'?rows.at(-1).time:rows[0].time;if(edge===previous){fundNote='API 페이지 반복: 제공 범위까지만 표시';break;}previous=edge;cursor=ex==='BINANCE'?edge*1000+1:edge*1000-1;if((ex==='BINANCE'&&cursor>=Date.now())||(ex!=='BINANCE'&&edge<=all[0].time)){fundNote='캔들 구간 수집 완료';break;}await pause(ex==='BINGX'?1150:350,signal);}
@@ -1336,10 +1308,10 @@ function calculateStrategySignals() {
   }
 
   const symbol = loadedMarket?.symbol || $('symbolInput').value.trim().toUpperCase();
-  const rsiOn = $('stratRsiToggle')?.checked ?? true;
-  const fundingRsiOn = $('stratFundingRsiToggle')?.checked ?? true;
-  const comboOn = $('stratComboToggle')?.checked ?? false;
-  const fundingThresh = Number($('stratFundingThresh')?.value ?? -0.5);
+  const rsiOn = signalSettings.rsi;
+  const fundingRsiOn = signalSettings.fundingRsi;
+  const comboOn = signalSettings.combo;
+  const fundingThresh = signalSettings.fundingThreshold;
   const currentTfText = $('intervalSelect').selectedOptions[0]?.text || $('intervalSelect').value;
 
   // 1) 1시간봉 RSI 모멘텀 반전 신호 (과매도 ≤30 탈출 30돌파 BUY / 과매수 ≥70 이탈 70돌파 SELL)
@@ -1512,80 +1484,27 @@ function calculateStrategySignals() {
   renderStrategyList();
 }
 
-function renderStrategyList() {
-  const container = $('strategyListContainer');
-  if (!container) return;
-  container.innerHTML = '';
-
-  const symbol = loadedMarket?.symbol || $('symbolInput').value.trim().toUpperCase();
-  if ($('strategyCurrentCoinLabel')) {
-    $('strategyCurrentCoinLabel').textContent = `[${symbol}] 전략 신호`;
-  }
-
-  // 타 코인 신호가 섞이지 않도록 현재 심볼 신호만 선별
-  const coinSignals = strategySignals.filter(s => !s.symbol || s.symbol === symbol);
-
-  // 탭 필터(전체 / ⚡펀딩+RSI / ⏱️1h RSI / 🚀5일 결합) 적용
-  const filtered = coinSignals.filter(s => {
-    if (currentStrategyFilter === 'all') return true;
-    return s.category === currentStrategyFilter;
-  });
-
-  if ($('strategyCountTag')) {
-    $('strategyCountTag').textContent = currentStrategyFilter === 'all'
-      ? `${coinSignals.length}개`
-      : `${filtered.length}개 / 전체 ${coinSignals.length}개`;
-  }
-
-  if (!filtered.length) {
-    const filterLabels = {
-      all: '전략',
-      funding_rsi: '펀딩비 + RSI',
-      rsi: '1시간봉 RSI',
-      combo: '5일 급등락 결합'
-    };
-    const fName = filterLabels[currentStrategyFilter] || '조건 부합';
-    container.innerHTML = `<div style="color:#9ca3af;font-size:11px;text-align:center;padding:25px;line-height:1.6;"><strong>[${symbol}]</strong>에서 조건에 부합하는 <span style="color:#93c5fd;">${fName}</span> 신호가 없습니다.</div>`;
-    return;
-  }
-
-  const reversed = [...filtered].reverse().slice(0, 80);
-  for (const s of reversed) {
-    const el = document.createElement('div');
-    el.className = 'signal-item ' + s.type;
-    el.style.borderLeftColor = s.color;
-    el.style.background = s.type.includes('BUY')
-      ? 'rgba(34, 197, 94, 0.12)'
-      : (s.type.includes('SELL') ? 'rgba(239, 68, 68, 0.12)' : 'rgba(249, 115, 22, 0.12)');
-    const priceStr = (typeof ScannerEngine !== 'undefined') ? ScannerEngine.formatPrice(s.price) : s.price.toFixed(4);
-
-    el.innerHTML = `
-      <div class="signal-info" style="width:100%;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-          <span style="background:#1e3a8a; color:#93c5fd; font-size:10px; font-weight:800; padding:2px 7px; border-radius:4px; border:1px solid #3b82f6;">⏱️ ${s.timeframe}</span>
-          <span style="font-size:11px; font-weight:800; color:${s.color};">${s.badgeText}</span>
-        </div>
-        <div style="font-size:12px; font-weight:800; color:#f8fafc; margin-bottom:3px;">
-          📅 ${date(s.eventTime || s.time)}
-        </div>
-        <div style="font-size:11px; color:#cbd5e1; font-weight:600; line-height:1.4;">
-          ${s.title}
-        </div>
-        <div style="font-size:10px; color:#94a3af; margin-top:3px; line-height:1.4;">
-          ${s.conditionDesc || ''} · <span style="color:#e2e8f0;">가격: <strong>$${priceStr}</strong></span>
-        </div>
-      </div>
-      <button type="button" class="btn-move" style="margin-left:8px; white-space:nowrap;">이동</button>
-    `;
-
-    el.onclick = () => {
-      focusSignal(s, el);
-    };
-
-    container.appendChild(el);
-  }
+function renderStrategyList(){signalSidebar?.publish();}
+function localSignalSnapshot(){
+ const market=loadedMarket||{ex:$('exchangeSelect').value,symbol:$('symbolInput').value,int:$('intervalSelect').value};
+ return SignalSidebar.snapshot({market,revision:run,settings:signalSettings,filter:currentStrategyFilter,strategy:strategySignals,funding:signals,page:signalFundingPage,loading:busy});
 }
-
+function applySignalCommand(command){
+ if(command.kind==='settings'){
+  const patch={};for(const key of ['rsi','fundingRsi','combo'])if(typeof command.patch?.[key]==='boolean')patch[key]=command.patch[key];
+  if(typeof command.patch?.fundingThreshold==='number'&&Number.isFinite(command.patch.fundingThreshold))patch.fundingThreshold=command.patch.fundingThreshold;
+  signalSettings=SignalSidebar.settings({...signalSettings,...patch});calculateStrategySignals();renderSignalMarkers(all.slice(windowStart,windowEnd));schedule();
+ }else if(command.kind==='filter'){
+  currentStrategyFilter=['all','funding_rsi','rsi','combo'].includes(command.filter)?command.filter:'all';
+ }else if(command.kind==='page'){
+  signalFundingPage=Number.isInteger(command.page)?Math.max(0,Math.min(command.page,Math.max(0,Math.ceil(signals.length/100)-1))):0;
+ }else if(command.kind==='focus'){
+  const source=command.source==='strategy'?strategySignals:command.source==='funding'?signals:[];
+  const s=source.find(s=>s.time===command.time&&s.type===command.type&&s.eventTime===command.eventTime);
+  if(s)focusSignal({...s},null,true);
+ }
+ signalSidebar?.publish();
+}
 
 // [사이드바 탭 전환 관리]
 function setupSidebarTabs() {
@@ -1608,12 +1527,7 @@ function setupSidebarTabs() {
       startFundingRankScan();
     }
 
-    if ($('fundingCountBadge')) {
-      $('fundingCountBadge').textContent = signals.length + '개';
-    }
-    if ($('signalCountTag')) {
-      $('signalCountTag').textContent = signals.length + '개';
-    }
+    signalSidebar?.render?.();
   }
 
   tabs.forEach(btn => {
@@ -1699,33 +1613,6 @@ function setupScanner() {
   }
 
   startBtn.onclick = startScan;
-
-  ['stratRsiToggle', 'stratFundingRsiToggle', 'stratComboToggle', 'stratFundingThresh'].forEach(id => {
-    const el = $(id);
-    if (el) {
-      el.onchange = () => {
-        calculateStrategySignals();
-        renderSignalMarkers(all.slice(windowStart, windowEnd));
-        schedule();
-      };
-    }
-  });
-
-  const stratFilterBtns = document.querySelectorAll('.btn-strat-filter');
-  stratFilterBtns.forEach(btn => {
-    btn.onclick = () => {
-      stratFilterBtns.forEach(b => {
-        b.classList.remove('active');
-        b.style.background = '#374151';
-        b.style.color = '#cbd5e1';
-      });
-      btn.classList.add('active');
-      btn.style.background = '#2563eb';
-      btn.style.color = '#ffffff';
-      currentStrategyFilter = btn.dataset.filter || 'all';
-      renderStrategyList();
-    };
-  });
 
   // 페이지 시작 시 1회 백그라운드 스캔 자동 시작
   setTimeout(() => {
@@ -2044,12 +1931,14 @@ function loadInputMarket(){
 }
 globalThis.ChartWorkspace?.bind({
  workspace:chartWorkspace,host:rulerHost,symbolButton:chartSymbolLabel,
+ signalSnapshot:localSignalSnapshot,signalCommand:applySignalCommand,
  backtest:setChartBacktest,getMarket:()=>loadedMarket||{ex:$('exchangeSelect').value,symbol:$('symbolInput').value,int:$('intervalSelect').value},
  selectMarket:selectWorkspaceMarket,action:action=>chartViewActions[action]?.(),
  onSplit:()=>{if(all.length)controller?.abort();scannerController?.abort();fundingRankController?.abort();},
- dispose:()=>{controller?.abort();navigationController?.abort();stopFundingUpdates();clearLocationGuide();clearTimeout(surgeHighlight.timer);clearInterval(surgeHighlight.countdownInterval);},
+ dispose:()=>{signalSidebar?.dispose();controller?.abort();navigationController?.abort();stopFundingUpdates();clearLocationGuide();clearTimeout(surgeHighlight.timer);clearInterval(surgeHighlight.countdownInterval);},
  schedule,syncFullscreen:syncChartFullscreen,fullscreen:toggleChartFullscreen,jumpDate:()=>$('gotoDateBtn').click()
 });
+signalSidebar=SignalSidebar.bind({workspace:globalThis.ChartWorkspace,document,formatTime:date,formatPrice:price=>typeof ScannerEngine!=='undefined'?ScannerEngine.formatPrice(price):Number(price).toFixed(4)});
 $('searchBtn').onclick=loadInputMarket;$('symbolInput').onkeydown=e=>{if(e.key==='Enter')loadInputMarket();};$('exchangeSelect').onchange=loadInputMarket;
 if(!globalThis.ChartWorkspace?.embedded){setupSidebarTabs();setupScanner();setupFundingRank();globalThis.ChartDashboard?.bind({workspace:chartWorkspace,selectMarket:loadDetectedMarket,chartWorkspace:globalThis.ChartWorkspace,backtestData:globalThis.BacktestData?.create({candlePage,fundingPage}),onBacktestJump:async(m,time)=>{if(globalThis.ChartWorkspace?.selectActive(m,{kind:'date',time}))return;if(loadedMarket&&m.ex===loadedMarket.ex&&m.symbol===loadedMarket.symbol&&m.int===loadedMarket.int)await jumpToChartDate(time,new AbortController().signal,m.int);else await selectWorkspaceMarket(m,{kind:'date',time});}});}
 loadData();

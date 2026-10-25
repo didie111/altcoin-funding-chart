@@ -15,6 +15,19 @@
   const ownCell=embedded?Number(params.get('cell')):0;
   const markets=saved.markets;
   const controls=[],listeners=new Set(),actions=new Set(['ruler','ruler-settings','lines','indicators']);
+  const signalViews=[],signalRevisions=[],signalListeners=new Set();let signalsWatched=false;
+  const sameMarket=(a,b)=>a&&b&&a.ex===b.ex&&a.symbol===b.symbol&&a.int===b.int;
+  function notifySignals(){for(const listener of signalListeners)listener();}
+  function signalsChanged(){if(embedded){if(signalsWatched)send({type:'signals',value:api?.signalSnapshot?.()});}else if(active===0)notifySignals();}
+  function activeSignals(){return hasRemoteTarget()?signalViews[active]||null:api?.signalSnapshot?.()||null;}
+  function watchSignals(){if(!embedded)for(const frame of frames)if(frame.chartReady)frame.contentWindow.postMessage({channel,type:'signals-watch',enabled:Number(frame.dataset.chartCell)===active},win.location.origin);}
+  function signalCommand(command,index=active,expectedMarket,revision){
+   if(embedded||index!==active||!['settings','filter','page','focus'].includes(command?.kind))return false;
+   const target=hasRemoteTarget()?market(markets[index],current()):current();if(expectedMarket&&!sameMarket(target,expectedMarket))return false;
+   if(index===0||mode===1){if(revision!==undefined&&revision!==api?.signalSnapshot?.()?.revision)return false;api?.signalCommand?.(command);return true;}
+   const frame=frames.find(f=>Number(f.dataset.chartCell)===index);if(!frame?.chartReady)return false;
+   deliver(frame,{type:'signal-command',command,market:target,revision});return true;
+  }
   function notify(){for(const listener of listeners)listener();}
   let lastControls='';
   if(embedded)doc.documentElement.classList.add('chart-embedded');
@@ -23,7 +36,7 @@
   function send(message){if(embedded&&win.parent!==win)win.parent.postMessage({channel,...message},win.location.origin);}
   function persist(){if(embedded)return;try{win.localStorage.setItem(storageKey,JSON.stringify({layout:mode,markets}));}catch{}}
   function applyControls(){const state=controls[active];if(!state)return;for(const [id,key]of [['btnRuler','ruler'],['btnToggleLines','lines']]){const button=$(id);button?.classList.toggle('active',state[key]);button?.setAttribute('aria-pressed',String(state[key]));}}
-  function selected(index){active=index;firstCell?.classList.toggle('selected',index===0);for(const frame of frames)frame.classList.toggle('selected',Number(frame.dataset.chartCell)===index);applyControls();notify();}
+  function selected(index){const changed=active!==index;active=index;firstCell?.classList.toggle('selected',index===0);for(const frame of frames)frame.classList.toggle('selected',Number(frame.dataset.chartCell)===index);applyControls();notify();if(changed){watchSignals();notifySignals();}}
   function controlsChanged(value){const state={ruler:value.ruler===true,lines:value.lines===true},key=JSON.stringify(state);controls[ownCell]=state;if(embedded&&key!==lastControls)send({type:'controls',state});lastControls=key;if(!embedded)applyControls();}
   function hasRemoteTarget(){return !embedded&&mode===4&&active>0;}
   function deliver(frame,message){if(frame.chartReady)frame.contentWindow.postMessage({channel,...message},win.location.origin);else{frame.chartQueue??=[];if(message.type==='select')frame.chartQueue=frame.chartQueue.filter(item=>item.type==='backtest-result').slice(-1);frame.chartQueue.push(message);}}
@@ -52,7 +65,7 @@
   function requestWorkspaceFullscreen(){if(embedded)send({type:'workspace-fullscreen'});else void api.fullscreen({workspace:true});}
   function exitWorkspaceFullscreen(){if(!embedded||!workspaceFullscreen)return false;send({type:'exit-workspace-fullscreen'});return true;}
   function current(){return market(api?.getMarket()||{ex:$('exchangeSelect').value,symbol:$('symbolInput').value,int:$('intervalSelect').value});}
-  function choose(value,index=0,navigation){const m=market(value,markets[index]||current());if(index===0){api.selectMarket(m,navigation);return;}const frame=frames.find(f=>Number(f.dataset.chartCell)===index);if(frame){markets[index]=m;persist();deliver(frame,{type:'select',market:m,navigation});}}
+  function choose(value,index=0,navigation){const m=market(value,markets[index]||current());if(index===0){api.selectMarket(m,navigation);return;}const frame=frames.find(f=>Number(f.dataset.chartCell)===index);if(frame){markets[index]=m;signalViews[index]=null;persist();if(active===index)notifySignals();deliver(frame,{type:'select',market:m,navigation});}}
   function setBacktest(value,index=active){if(embedded)return;if(mode===1||index===0){api.backtest?.(value);return;}const frame=frames.find(f=>Number(f.dataset.chartCell)===index);if(frame)deliver(frame,{type:'backtest-result',value});}
   function selectActive(value,navigation){if(!hasRemoteTarget())return false;choose(value,active,navigation);return true;}
   function runOnActive(action){if(!hasRemoteTarget()||!actions.has(action))return false;const frame=frames.find(f=>Number(f.dataset.chartCell)===active);if(!frame)return false;deliver(frame,{type:'action',action});return true;}
@@ -61,7 +74,7 @@
    doc.body.classList.toggle('chart-layout-four',mode===4);api.workspace.classList.toggle('chart-quad',mode===4);grid.classList.toggle('four',mode===4);
    toggle.setAttribute('aria-pressed',String(mode===4));toggle.title=mode===4?'1화면으로 돌아가기':'4분할 차트';toggle.setAttribute('aria-label',toggle.title);toggle.textContent=mode===4?'▣ 1화면':'⊞ 4분할';
    for(const timer of startup)clearTimeout(timer);startup=[];
-   if(mode===1){for(const frame of frames){frame.contentWindow.postMessage({channel,type:'dispose'},win.location.origin);frame.remove();}frames=[];selected(0);}
+   if(mode===1){for(const frame of frames){frame.contentWindow.postMessage({channel,type:'dispose'},win.location.origin);frame.remove();}frames=[];signalViews.length=0;signalRevisions.length=0;selected(0);}
    else{
     const primary=current();markets[0]=primary;const intervals=[primary.int,'1h','15m','5m'],revision=assetRevision(Array.from(doc.querySelectorAll?.('script[src],link[rel="stylesheet"]')||[],element=>element.src||element.href));
     for(let index=1;index<=3;index++){
@@ -73,7 +86,7 @@
    }
    updateControls();broadcastLayout();api.syncFullscreen?.();persist();api.schedule();
   }
-  function marketChanged(value){const m=market(value);if(embedded)send({type:'market',market:m});else{markets[0]=m;persist();notify();}const badge=$('chartExchangeBadge');if(badge)badge.textContent=({BINANCE:'Binance',BYBIT:'Bybit',BINGX:'BingX',BITGET:'Bitget',MEXC:'MEXC',OKX:'OKX'})[m.ex];}
+  function marketChanged(value){const m=market(value);if(embedded)send({type:'market',market:m,revision:value.id});else{markets[0]=m;persist();notify();if(active===0)notifySignals();}const badge=$('chartExchangeBadge');if(badge)badge.textContent=({BINANCE:'Binance',BYBIT:'Bybit',BINGX:'BingX',BITGET:'Bitget',MEXC:'MEXC',OKX:'OKX'})[m.ex];}
   function reportStatus(text,error){if(statusNode){statusNode.hidden=!error;statusNode.textContent=error?text:'';statusNode.title=text;}}
   function bind(options){
    api=options;
@@ -89,6 +102,8 @@
     doc.addEventListener('pointerdown',()=>send({type:'active'}),{capture:true,passive:true});doc.addEventListener('focusin',()=>send({type:'active'}));
     win.addEventListener('message',event=>{if(event.origin!==win.location.origin||event.source!==win.parent||event.data?.channel!==channel)return;
      if(event.data.type==='backtest-result')api.backtest?.(event.data.value);
+     else if(event.data.type==='signals-watch'){signalsWatched=event.data.enabled===true;signalsChanged();}
+     else if(event.data.type==='signal-command'&&sameMarket(event.data.market,current())&&event.data.revision===api?.signalSnapshot?.()?.revision&&['settings','filter','page','focus'].includes(event.data.command?.kind))api.signalCommand?.(event.data.command);
      else if(event.data.type==='select')api.selectMarket(market(event.data.market,current()),event.data.navigation);
      else if(event.data.type==='action'&&actions.has(event.data.action))api.action?.(event.data.action);
      else if(event.data.type==='dispose'){disposed=true;api.dispose();}
@@ -103,7 +118,11 @@
     win.addEventListener('message',event=>{
      if(event.origin!==win.location.origin||event.data?.channel!==channel)return;
      const frame=frames.find(f=>f.contentWindow===event.source);if(!frame)return;const index=Number(frame.dataset.chartCell),data=event.data;
-     if(data.type==='market'){markets[index]=market(data.market);persist();if(active===index)notify();}
+     if(data.type==='market'){markets[index]=market(data.market);signalViews[index]=null;signalRevisions[index]=Number.isInteger(data.revision)?data.revision:null;persist();if(active===index){notify();notifySignals();}}
+     else if(data.type==='signals'){
+      const value=data.value;if(!value||!sameMarket(value.market,markets[index])||value.revision!==signalRevisions[index])return;
+      signalViews[index]=value;if(active===index)notifySignals();
+     }
      else if(data.type==='controls'){controls[index]={ruler:data.state?.ruler===true,lines:data.state?.lines===true};applyControls();}
      else if(data.type==='picker'){selected(index);markets[index]=market(data.market);picker.open(markets[index],index);}
      else if(data.type==='active')selected(index);
@@ -111,14 +130,14 @@
      else if(data.type==='restore')setMaximized(-1);
      else if(data.type==='workspace-fullscreen')void api.fullscreen({workspace:true});
      else if(data.type==='exit-workspace-fullscreen'&&workspaceFullscreen)void api.fullscreen({workspace:true});
-     else if(data.type==='ready'){frame.chartReady=true;for(const message of frame.chartQueue||[])deliver(frame,message);frame.chartQueue=[];broadcastLayout();}
+     else if(data.type==='ready'){frame.chartReady=true;for(const message of frame.chartQueue||[])deliver(frame,message);frame.chartQueue=[];broadcastLayout();watchSignals();}
     });
     if(saved.layout===4)setLayout(4);
    }
    updateControls();marketChanged(current());if(embedded)send({type:'ready'});api.syncFullscreen?.();
    win.addEventListener('pagehide',()=>{disposed=true;api.dispose();},{once:true});
   }
-  return {embedded,bind,marketChanged,reportStatus,selectActive,runOnActive,controlsChanged,setBacktest,activeCell:()=>active,subscribe:listener=>{listeners.add(listener);return ()=>listeners.delete(listener);},activeMarket:()=>hasRemoteTarget()?market(markets[active],current()):current(),isMulti:()=>embedded||mode===4,visible:()=>!disposed&&!doc.hidden,requestFullscreen,requestWorkspaceFullscreen,exitWorkspaceFullscreen,restoreMaximized,fullscreenState,syncWorkspaceFullscreen,setLayout};
+  return {embedded,bind,marketChanged,reportStatus,selectActive,runOnActive,controlsChanged,setBacktest,signalsChanged,activeSignals,signalCommand,subscribeSignals:listener=>{signalListeners.add(listener);return ()=>signalListeners.delete(listener);},activeCell:()=>active,subscribe:listener=>{listeners.add(listener);return ()=>listeners.delete(listener);},activeMarket:()=>hasRemoteTarget()?market(markets[active],current()):current(),isMulti:()=>embedded||mode===4,visible:()=>!disposed&&!doc.hidden,requestFullscreen,requestWorkspaceFullscreen,exitWorkspaceFullscreen,restoreMaximized,fullscreenState,syncWorkspaceFullscreen,setLayout};
  }
  return {create,market,preferences,embedUrl,assetRevision};
 });
