@@ -1442,7 +1442,7 @@ class StudyPanelManager {
 
   updateFundingLegend() {
     const values = this.headers?.get('funding')?.querySelector('.panel-values');
-    if (values) {values.textContent = fundingLegend(); values.style.color = '#fbbf24';}
+    if (values) {values.textContent = fundingLegend(); values.style.color = '#fbbf24';values.title='거래소의 현재 미정산율 · 일반 화면 약 10초, 4분할 약 20초마다 조회 · 막대는 해당 봉 안의 확정 정산율 중 최저값';}
   }
 
   updateLegend(time = null) {
@@ -1514,7 +1514,7 @@ class StudyPanelManager {
     title.className = 'panel-title';
     title.type = 'button';
     title.textContent = p.title;
-    title.title = p.id === 'rsi' ? 'RSI 설정' : '패널 설정';
+    title.title = p.id === 'rsi' ? 'RSI 설정' : p.id === 'funding' ? '막대: 해당 봉 안의 확정 정산율 중 최저값 · 노란선: 조회한 현재 미정산율 · 더블클릭: 패널 설정' : p.id === 'cycle' ? '과거 봉: 정산 기록 간격으로 관측한 최소 주기 · 최신 미정산 구간: 공식 현재 주기 우선 · 기록 누락 시 차이가 날 수 있음' : '패널 설정';
     title.ondblclick = () => this.openSettings(p.id);
     left.append(title);
 
