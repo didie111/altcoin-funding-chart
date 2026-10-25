@@ -39,59 +39,6 @@
   backtestView=root.BacktestUI?.bind({workspace,dock,dialog,chartWorkspace,getPreferences:()=>pref,openSettings,dataSource:backtestData,onJump:onBacktestJump,requestChartView:()=>setMaximized(false)});
   bindNews({doc,$,workspace,selectMarket,chartWorkspace,icon});
  }
- function bindNews({doc,$,workspace,selectMarket,icon}){
-  const tab=$('tabBtnDelistings'),panel=$('tab-delistings'),sidebar=$('signal-sidebar');if(!tab||!panel)return;
-  const sources={BINANCE:'https://www.binance.com/en/support/announcement/list/161',BYBIT:'https://announcements.bybit.com/en/?category=delistings',BINGX:'https://bingx.com/en/support/categories/360002065274',BITGET:'https://www.bitget.com/support/sections/12508313443290',MEXC:'https://www.mexc.com/announcements/delistings',OKX:'https://www.okx.com/help/section/announcements-delistings'};
-  panel.innerHTML='<div class="news-header"><div class="news-eyebrow"><i class="news-dot"></i>EXCHANGE NOTICE</div><div class="news-heading-row"><h2>상장폐지 소식</h2><button id="newsExpand" type="button" title="소식 넓게 보기" aria-label="소식 넓게 보기" aria-pressed="false">'+icon('expand')+'</button><button id="newsSidebarClose" type="button" aria-label="소식 닫기">'+icon('close')+'</button></div><p>거래소의 공식 공지를 한곳에서.<br>차트를 보면서 변경 소식을 확인하세요.</p></div><div class="news-filters"><label class="news-search">'+icon('search')+'<input type="search" id="newsSearch" placeholder="코인·공지 검색" aria-label="상장폐지 코인·공지 검색"></label><div id="newsExchanges" class="news-exchanges" role="group" aria-label="거래소 필터"></div><div class="news-scopes" role="group" aria-label="시장 필터"><button type="button" data-scope="all" aria-pressed="true">전체</button><button type="button" data-scope="futures" aria-pressed="false">선물</button><button type="button" data-scope="spot" aria-pressed="false">현물</button><span class="news-count" id="newsCount"></span></div></div><div class="news-update"><span id="newsUpdate" role="status">공식 공지를 불러오는 중</span><button type="button" id="newsRefresh">'+icon('refresh',12)+' 새로고침</button></div><div class="news-list" id="newsList" aria-label="공식 상장폐지 공지"></div><div class="news-source-note">게시일 기준 정렬 · 원문에서 적용 일정과 변경 공지를 확인하세요.<details><summary>6개 거래소 공식 출처·수집 상태</summary><div class="news-source-links" id="newsSources"></div></details></div>';
-  const toggle=doc.createElement('button');toggle.id='chartNewsToggle';toggle.type='button';toggle.title='상장폐지 소식 열기';toggle.setAttribute('aria-label','상장폐지 소식 열기');toggle.innerHTML=icon('news',15)+'<span>소식</span>';$('backtestDock').querySelector('.backtest-bar').insertBefore(toggle,$('backtestDock').querySelector('.backtest-actions'));
-  let items=[],filter={exchange:'ALL',scope:'all',query:''},lastAttempt=0,busy=false,controller,states={},readSnapshot=false,interval;
-  const originalParent=sidebar.parentNode,originalNext=sidebar.nextSibling;
-  function restoreSidebar(){if(sidebar.parentNode!==originalParent)originalParent.insertBefore(sidebar,originalNext?.parentNode===originalParent?originalNext:null);}
-  function openNews(){tab.click();if(root.innerWidth<=1100||doc.fullscreenElement===workspace||workspace.classList.contains('chart-fullscreen-fallback')){if(doc.fullscreenElement===workspace||workspace.classList.contains('chart-fullscreen-fallback'))workspace.append(sidebar);doc.body.classList.add('news-drawer-open');}void load(false);}
-  toggle.onclick=()=>{if(doc.body.classList.contains('news-drawer-open')){$('newsSidebarClose').click();}else openNews();};
-  $('newsSidebarClose').onclick=()=>{doc.body.classList.remove('news-drawer-open');restoreSidebar();toggle.focus();};
-  doc.addEventListener('fullscreenchange',()=>{if(!doc.fullscreenElement)restoreSidebar();});
-  $('newsExpand').onclick=()=>{const wide=doc.body.classList.toggle('news-wide');$('newsExpand').setAttribute('aria-pressed',String(wide));$('newsExpand').innerHTML=icon(wide?'restore':'expand');$('newsExpand').title=wide?'소식 너비 줄이기':'소식 넓게 보기';$('newsExpand').setAttribute('aria-label',$('newsExpand').title);};
-  const nameButton=(id,label)=>{const button=doc.createElement('button');button.type='button';button.textContent=label;button.setAttribute('aria-pressed',String(id==='ALL'));button.onclick=()=>{filter.exchange=id;for(const b of $('newsExchanges').children)b.setAttribute('aria-pressed',String(b===button));render();};return button;};
-  $('newsExchanges').append(nameButton('ALL','전체'),...Object.entries(M.exchanges).map(([id,name])=>nameButton(id,name)));
-  for(const button of panel.querySelectorAll('[data-scope]'))button.onclick=()=>{filter.scope=button.dataset.scope;for(const b of panel.querySelectorAll('[data-scope]'))b.setAttribute('aria-pressed',String(b===button));render();};
-  $('newsSearch').oninput=event=>{filter.query=event.target.value;render();};
-  const date=value=>value?new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit'}).format(value):'게시일 미제공';
-  function render(){
-   const values=M.filterNotices(items,filter),frag=doc.createDocumentFragment();$('newsCount').textContent=values.length+'건';
-   for(const n of values.slice(0,60)){
-    const card=doc.createElement('article');card.className='news-card';card.dataset.exchange=n.exchange;card.dataset.noticeId=n.id;
-    const top=doc.createElement('div');top.className='news-card-top';const ex=doc.createElement('span');ex.className='news-exchange';ex.textContent=M.exchanges[n.exchange];const scope=doc.createElement('span');scope.className='news-scope '+n.scope;scope.textContent=({futures:'선물',spot:'현물',alpha:'Alpha',margin:'마진',other:'거래 지원'})[n.scope];const time=doc.createElement('time');time.textContent=date(n.publishedAt);if(n.publishedAt){time.dateTime=new Date(n.publishedAt).toISOString();time.title='게시일 '+new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'full',...(n.dateOnly?{}:{timeStyle:'short'})}).format(n.publishedAt)+(n.dateOnly?'':' KST');}top.append(ex,scope,time);
-    const heading=doc.createElement('h3'),link=doc.createElement('a');link.href=n.url;link.target='_blank';link.rel='noopener noreferrer';
-    const summary=n.symbols.length?n.symbols.join(', ')+(n.change?' · 상장폐지 일정 변경':n.scope==='futures'?' · 선물 상장폐지':n.scope==='spot'?' · 현물 거래 지원 종료':' · 거래 지원 변경'):n.title;
-    link.textContent=summary;heading.append(link);card.append(top,heading);
-    if(n.symbols.length){const chips=doc.createElement('div');chips.className='news-symbols';for(const symbol of n.symbols.slice(0,10)){const chip=doc.createElement('span');chip.textContent=symbol;chips.append(chip);}card.append(chips);const details=doc.createElement('details'),label=doc.createElement('summary'),title=doc.createElement('p');label.textContent='공식 공지 제목';title.textContent=n.title;details.append(label,title);card.append(details);}
-    if(n.effectiveAt){const schedule=doc.createElement('p');schedule.className='news-effective';schedule.textContent='거래 종료 · '+new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(n.effectiveAt)+' KST';card.append(schedule);}
-    if(n.change){const change=doc.createElement('span');change.className='news-change';change.textContent='일정 변경 공지 · 최종 일정은 원문 확인';card.append(change);}
-    const bottom=doc.createElement('div');bottom.className='news-card-bottom';const original=doc.createElement('a');original.href=n.url;original.target='_blank';original.rel='noopener noreferrer';original.innerHTML='공식 원문 '+icon('link',12);bottom.append(original);
-    // This project charts USDT perpetuals. Spot/Alpha notices must not silently open a different market.
-    if(n.scope==='futures'&&n.symbols.length){for(const symbol of n.symbols.slice(0,3)){const button=doc.createElement('button');button.type='button';button.className='news-chart-link';button.textContent=symbol+' 차트';button.title='선택한 차트에 '+M.exchanges[n.exchange]+' '+symbol+'USDT 선물 불러오기';button.onclick=()=>{selectMarket({ex:n.exchange,symbol:symbol+'USDT'});if(root.innerWidth<=650)$('newsSidebarClose').click();};bottom.append(button);}}
-    card.append(bottom);frag.append(card);
-   }
-   if(!values.length){const empty=doc.createElement('p');empty.className='news-empty';empty.textContent=busy?'공식 공지를 확인하고 있습니다.':'조건에 맞는 공지가 없습니다. 검색어나 필터를 바꿔 보세요.';frag.append(empty);}
-   $('newsList').replaceChildren(frag);
-   const sf=doc.createDocumentFragment();for(const [id,url]of Object.entries(sources)){const a=doc.createElement('a');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=M.exchanges[id]+' ↗';const small=doc.createElement('small'),s=states[id];small.textContent=s?.status==='ok'?'확인 '+date(s.checkedAt):s?.status==='error'?'갱신 지연 · 보관 공지 표시':'공식 출처 · 수집본 표시';a.append(small);sf.append(a);}$('newsSources').replaceChildren(sf);
-  }
-  async function load(force){
-   if(busy||(!force&&Date.now()-lastAttempt<900000))return;busy=true;lastAttempt=Date.now();controller=new AbortController();$('newsRefresh').disabled=true;$('newsUpdate').textContent='공식 출처 확인 중…';
-   try{
-    if(!readSnapshot){const response=await fetch('data/delistings.json?v=20261024',{signal:controller.signal});if(!response.ok)throw Error('수집본을 불러오지 못했습니다.');const data=await response.json();items=M.mergeNotices(items,data.items);readSnapshot=true;render();}
-    const base=root.MARKET_RELAY_URL;if(!base)throw Error('갱신 서버 연결 정보가 없습니다.');const url=new URL(base);url.pathname=url.pathname.replace(/\/market\/?$/,'/news');url.search='';
-    const response=await fetch(url,{signal:AbortSignal.any([controller.signal,AbortSignal.timeout(14000)]),cache:'no-store',credentials:'omit'});if(!response.ok)throw Error('갱신 연결 지연');const data=await response.json();if(!Array.isArray(data.items)||!data.sources)throw Error('공지 응답 확인 필요');
-    items=M.mergeNotices(items,data.items);states=data.sources;const failed=Object.values(states).filter(s=>s.status!=='ok').length;
-    $('newsUpdate').textContent=(failed?'일부 갱신 지연 · 보관 공지 함께 표시':'공식 공지 확인 완료')+' · '+new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'}).format(Date.now())+' KST';render();
-   }catch(error){if(error.name!=='AbortError'){$('newsUpdate').textContent=items.length?'갱신 지연 · 마지막 수집 공지 표시 (2026.10.24)':'공지를 불러오지 못했습니다. 아래 공식 출처를 이용하세요.';render();}}
-   finally{busy=false;$('newsRefresh').disabled=false;}
-  }
-  tab.addEventListener('click',()=>void load(false));$('newsRefresh').onclick=()=>void load(true);
-  interval=setInterval(()=>{if(!doc.hidden&&panel.classList.contains('active'))void load(false);},60000);
-  root.addEventListener('pagehide',()=>{controller?.abort();clearInterval(interval);},{once:true});
-  if(panel.classList.contains('active'))void load(false);
- }
+ function bindNews(options){root.ChartNews?.bind(options);}
  root.ChartDashboard={bind};
 })(typeof globalThis!=='undefined'?globalThis:this);

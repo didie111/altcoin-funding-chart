@@ -15,6 +15,10 @@ test('combined exchange, market and symbol filters never mix spot and perpetual 
  assert.equal(M.filterNotices(values,{exchange:'BYBIT'}).length,0);
  assert.equal(M.filterNotices(values,{scope:'spot',query:'btc'}).length,0);
 });
+test('archived notices are not truncated at 240 and publication dates filter by Korean calendar day',()=>{
+ const values=M.mergeNotices(Array.from({length:400},(_,i)=>({...source,url:source.url+'/'+i,publishedAt:Date.parse('2026-09-01T15:00:00Z')+i*1000})));
+ assert.equal(values.length,400);assert.equal(M.filterNotices(values,{start:'2026-09-02',end:'2026-09-02'}).length,400);assert.equal(M.filterNotices(values,{end:'2026-09-01'}).length,0);
+});
 test('backtest preferences restore numeric fields with bounded dimensions and sane defaults',()=>{
  assert.equal(M.settings({capital:Infinity}).capital,10000);assert.equal(M.settings({height:90000}).height,280);
  const value=M.validateSettings({start:'2022-01-01',end:'2022-12-31',capital:'25000',orderSize:'25',commission:'0.03',slippage:'2'});
