@@ -22,28 +22,58 @@ function clean(exchange,row,checkedAt){
  url.hash='';const publishedAt=Number(row.publishedAt);
  return {exchange,dateOnly:row.dateOnly===true,title:title.slice(0,350),url:url.href,publishedAt:publishedAt>0&&Number.isFinite(publishedAt)?publishedAt:null,checkedAt,symbols:symbolsIn(title),scope:classify(title),change:/postpone|delay|suspend delisting|cancel.*delist/i.test(title)};
 }
-export function parseNews(exchange,body,checkedAt=Date.now()){
- let rows=[];
+export function newsPageUrl(exchange,page=1){
+ if(!Object.hasOwn(newsSources,exchange)||!Number.isSafeInteger(page)||page<1||page>10000)throw Error('잘못된 공지 페이지입니다.');
+ const url=new URL(newsSources[exchange]);
+ if(exchange==='BINANCE')url.searchParams.set('pageNo',String(page));
+ else if(exchange==='BYBIT')url.searchParams.set('page',String(page));
+ else if(exchange==='BITGET'&&page>1)url.pathname+='/'+page;
+ else if(exchange==='OKX')return 'https://www.okx.com/help/section/announcements-delistings'+(page>1?'/page/'+page:'');
+ else if(page>1)url.searchParams.set('page',String(page));
+ return url.href;
+}
+export function parseNewsPage(exchange,body,checkedAt=Date.now()){
+ let rows=[],total=null,hasNext=null;
  if(exchange==='BINANCE'){
   const data=JSON.parse(body);if(data.code!=='000000')throw Error('공식 공지 API 응답 확인 필요');
-  rows=(data.data?.catalogs||[]).flatMap(c=>c.articles||[]).map(a=>({title:a.title,url:'https://www.binance.com/en/support/announcement/detail/'+a.code,publishedAt:a.releaseDate}));
+  const catalogs=data.data?.catalogs;if(!Array.isArray(catalogs))throw Error('공식 공지 목록 형식 확인 필요');
+  rows=catalogs.flatMap(c=>c.articles||[]).map(a=>({title:a.title,url:'https://www.binance.com/en/support/announcement/detail/'+a.code,publishedAt:a.releaseDate}));
+  if(Number.isFinite(Number(catalogs[0]?.total)))total=Number(catalogs[0].total);
  }else if(exchange==='BYBIT'){
-  const data=JSON.parse(body);if(data.retCode!==0)throw Error('공식 공지 API 응답 확인 필요');rows=(data.result?.list||[]).map(a=>({title:a.title,url:a.url,publishedAt:a.publishTime||a.dateTimestamp}));
- }else if(exchange==='OKX'){
-  const data=JSON.parse(body);if(data.code!=='0')throw Error('공식 공지 API 응답 확인 필요');rows=(data.data||[]).flatMap(d=>d.details||[]).map(a=>({title:a.title,url:a.url,publishedAt:a.businessPTime||a.pTime}));
+  const data=JSON.parse(body);if(data.retCode!==0||!Array.isArray(data.result?.list))throw Error('공식 공지 API 응답 확인 필요');
+  rows=data.result.list.map(a=>({title:a.title,url:a.url,publishedAt:a.publishTime||a.dateTimestamp}));
+  if(Number.isFinite(Number(data.result.total)))total=Number(data.result.total);
+ }else if(exchange==='OKX'&&body.trim().startsWith('{')){
+  const data=JSON.parse(body);if(data.code!=='0'||!Array.isArray(data.data))throw Error('공식 공지 API 응답 확인 필요');
+  rows=data.data.flatMap(d=>d.details||[]).map(a=>({title:a.title,url:a.url,publishedAt:a.businessPTime||a.pTime}));
  }else{
-  const path=exchange==='BITGET'?/\/support\/articles\/\d+/:exchange==='MEXC'?/\/announcements\/article\/[a-z0-9-]+/:/\/en\/support\/articles\/\d+/;
-  const origin=exchange==='BITGET'?'https://www.bitget.com':exchange==='MEXC'?'https://www.mexc.com':'https://bingx.com';
+  const path=exchange==='BITGET'?/\/support\/articles\/\d+/:exchange==='MEXC'?/\/announcements\/article\/[a-z0-9-]+/:exchange==='OKX'?/\/help\/(?!section\/)[a-z0-9-]+/:/\/en\/support\/articles\/\d+/;
+  const origin=exchange==='BITGET'?'https://www.bitget.com':exchange==='MEXC'?'https://www.mexc.com':exchange==='OKX'?'https://www.okx.com':'https://bingx.com';
   const anchors=[...body.matchAll(/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
-  for(const match of anchors){if(!path.test(match[1]))continue;const following=body.slice(match.index+match[0].length,match.index+match[0].length+500),iso=following.match(/datetime=["']([^"']+)["']/i)?.[1];
-   // Unlabelled page-local dates are not converted to a guessed timezone.
-   const date=plain(following).match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
-   rows.push({title:plain(match[2]),url:new URL(match[1],origin).href,publishedAt:iso?Date.parse(iso):date?Date.parse(date+'T00:00:00Z'):null,dateOnly:!iso&&Boolean(date)});
+  for(let i=0;i<anchors.length;i++){
+   const match=anchors[i];if(!path.test(match[1]))continue;
+   const end=match.index+match[0].length,following=body.slice(end,Math.min(end+600,anchors[i+1]?.index??body.length));
+   const inside=plain(match[2]),after=plain(following),iso=(match[2]+following).match(/datetime=["']([^"']+)["']/i)?.[1];
+   // Read publication labels beside the link, never a scheduled date in its headline.
+   const date=after.match(/\b(20\d{2}-\d{2}-\d{2})\b/)?.[1];
+   const english=(after+' '+(inside.match(/Published on (.+)$/i)?.[1]||'')).match(/\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),?\s+(20\d{2})\b/i);
+   const publication=iso?Date.parse(iso):date?Date.parse(date+'T00:00:00Z'):english?Date.parse(english[0]+' 00:00:00 UTC'):null;
+   rows.push({title:inside.replace(/\s*Published on .+$/i,''),url:new URL(match[1],origin).href,publishedAt:publication,dateOnly:!iso&&Boolean(publication)});
   }
+  if(!rows.length){
+   if(/no (?:articles|results|announcements) found/i.test(plain(body)))hasNext=false;
+   else throw Error('공식 목록을 읽지 못했습니다. 보관 공지를 표시합니다.');
+  }
+  const showing=plain(body).match(/Showing\s+([\d,]+)[–-]([\d,]+)\s+of\s+([\d,]+)/i);
+  if(showing){total=Number(showing[3].replace(/,/g,''));hasNext=Number(showing[2].replace(/,/g,''))<total;}
  }
  const unique=new Map();for(const row of rows){const item=clean(exchange,row,checkedAt);if(item&&!unique.has(item.url))unique.set(item.url,item);}
- if(!unique.size)throw Error('공식 목록을 읽지 못했습니다. 보관 공지를 표시합니다.');
- return [...unique.values()].slice(0,25);
+ return {items:[...unique.values()],rawCount:rows.length,total,hasNext,keys:[...new Set(rows.map(r=>r.url))].sort()};
+}
+export function parseNews(exchange,body,checkedAt=Date.now()){
+ const result=parseNewsPage(exchange,body,checkedAt);
+ if(!result.items.length)throw Error('공식 목록을 읽지 못했습니다. 보관 공지를 표시합니다.');
+ return result.items.slice(0,25);
 }
 function allowedOrigin(origin,input){try{return !origin||origin===input.origin||origin==='https://didie111.github.io'||['localhost','127.0.0.1','[::1]'].includes(new URL(origin).hostname);}catch{return false;}}
 export function createDelistingNews({fetch:fetcher=(...args)=>globalThis.fetch(...args),now=Date.now,timeout=5500}={}){

@@ -50,6 +50,12 @@
 .news-source-note{font-size:10px;color:#8397b3;line-height:1.7;padding:10px 13px;border-top:1px solid var(--research-border)}
 .news-source-note details summary{cursor:pointer;color:#afc0d7}.news-source-links{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;padding-top:8px}
 .news-source-links a{color:#afc6e7;text-decoration:none}.news-source-links small{display:block;font-size:9px;color:#8599b5}
+.news-date-form{margin-top:10px}.news-date-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:7px}
+.news-date-row label{display:grid;gap:4px;font-size:10px;color:#a6bad3;min-width:0}.news-date-row input{box-sizing:border-box;width:100%!important;min-width:0;color-scheme:dark;background:#0d1726;color:#e5edf9;border:1px solid #364a67;border-radius:5px;padding:7px 5px;font-size:11px}
+.news-date-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:6px}.news-date-actions button{font-size:10px;padding:4px 8px;border:1px solid #3c5373;border-radius:4px;background:#273d5b;color:#d2e5ff}.news-date-actions button[type=button]{background:transparent;color:#a6bad3}
+.news-header,.news-filters,.news-update,.news-source-note,.news-archive-footer{flex-shrink:0}.news-header{padding-top:12px;padding-bottom:9px}.news-header p{font-size:11px;margin-top:4px}.news-heading-row h2{font-size:18px}
+.news-archive-footer{padding:9px 12px;background:#101b2b;border-top:1px solid #30415c}.news-pagination{display:flex;align-items:center;justify-content:space-between;gap:7px;margin-bottom:8px}.news-pagination button{background:#1b2b42;border:1px solid #3b506e;color:#c7d9f1;padding:5px 8px;border-radius:4px;font-size:10px}.news-pagination span{font-size:10px;color:#a7b9d2;white-space:nowrap}
+.news-collect{width:100%;display:flex;align-items:center;justify-content:center;gap:6px;background:#293e5a;border:1px solid #54779e;color:#e4eeff;padding:8px;border-radius:5px;font-size:11px}.news-archive-footer p{margin:7px 0 0;font-size:9px;color:#91a5c2;line-height:1.6}.news-archive-footer button:disabled{opacity:.45;cursor:default}.news-source-note .news-source-error{color:#ecbd90}.news-source-note details[open]{max-height:180px;overflow:auto}.news-empty{white-space:pre-line}
 #chartNewsToggle{display:flex;align-items:center;gap:4px;color:#d4b899;font-size:11px}
 #newsSidebarClose{display:none}
 #chartWorkspace>#signal-sidebar{position:fixed;inset:50px 12px 12px auto;display:flex!important;width:370px;max-width:calc(100vw - 24px);z-index:1100;border:1px solid #536989;border-radius:9px;box-shadow:0 15px 80px #000c;overflow:hidden}
