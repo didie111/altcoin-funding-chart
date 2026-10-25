@@ -68,5 +68,5 @@ body.chart-layout-four #chart-container>:not(#chartWorkspace){display:none!impor
 .symbol-picker-footer{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid #344158;font-size:10px;color:#94a3b8;min-height:38px}
 .symbol-picker-footer>span{overflow:hidden;text-overflow:ellipsis;max-width:100%;line-height:1.5}
 .symbol-picker-footer button{font-size:10px;white-space:nowrap;padding:5px;background:#2563eb;color:white}
-@media(max-width:1100px){body.chart-layout-four #signal-sidebar{display:none} .chart-quad .chart-market-exchange{display:none}}
+@media(max-width:1100px){.chart-quad .chart-market-exchange{display:none}}
 @media(max-width:550px){.chart-market-exchange{display:none}.symbol-picker{width:calc(100vw - 12px)}.symbol-picker-controls{padding:0 10px 8px}.symbol-picker-columns{padding-right:10px}.symbol-picker-row{padding:0 6px}.symbol-picker-select{font-size:10px}.symbol-picker-name strong{font-size:10px}.chart-quad #drawingToolbar{width:32px}.chart-quad #drawingHistoryControls button:not(#chartLayoutToggle):not(#chartCellDate):not(.chart-workspace-control){display:none}.chart-quad #chartSymbolLabel{font-size:10px;max-width:95px}.chart-quad #chartCellDate{display:none}}

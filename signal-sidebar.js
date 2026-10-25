@@ -31,6 +31,7 @@
    if(el){el.textContent=(index+1)+'번 차트 · '+(names[market.ex]||market.ex)+' '+market.symbol+' · '+(frames[market.int]||market.int);el.title='선택한 차트의 신호와 설정입니다.';el.dataset.cell=String(index);}
   }
   function render(){
+   if($('signal-sidebar')?.hidden)return;
    const view=workspace.activeSignals(),market=view?.market||workspace.activeMarket(),index=workspace.activeCell();
    context('strategyChartContext',view,market,index);context('fundingChartContext',view,market,index);
    for(const [id,key]of Object.entries(fieldNames)){const el=$(id);if(!el)continue;el.disabled=!view;if(key==='fundingThreshold'){if(doc.activeElement!==el||!view)el.value=view?.settings[key]??-.5;}else el.checked=view?.settings[key]===true;}
