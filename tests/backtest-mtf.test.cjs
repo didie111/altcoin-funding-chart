@@ -58,6 +58,11 @@ test('comparison and strategy search pass the shared actual minute series to the
 });
 test('minute fills stay at their true time in trades but markers use an existing displayed hourly candle',()=>{
  const d=dataset(),r={...run(d),market:{ex:'BITGET',symbol:'BTCUSDT',int:'1h'}},markers=Overlay.markers(r,d.main);
- assert.ok(markers.some(m=>m.text==='DCA 2'&&m.time===base+3600));assert.ok(markers.every(m=>T.indexAt(d.main,m.time,'1h')>=0&&d.main.some(b=>b.time===m.time)));
+ assert.ok(markers.some(m=>m.text==='BUY 1 · DCA 2'&&m.time===base+3600));assert.ok(markers.every(m=>T.indexAt(d.main,m.time,'1h')>=0&&d.main.some(b=>b.time===m.time)));
  assert.equal(r.signals.find(s=>s.type==='DCA_BUY').time,base+64*60);
+});
+test('multiple minute entries on one displayed candle share one label without hiding the final DCA step or SL',()=>{
+ const d=dataset(),signals=Array.from({length:10},(_,i)=>({time:base+3600+i*60,type:i?'DCA_BUY':'BUY_INITIAL',step:i+1,price:100}));signals.push({time:base+4300,type:'EXIT',reason:'STOP_LOSS',price:97});
+ const markers=Overlay.markers({signals,market:{ex:'BITGET',symbol:'BTCUSDT',int:'1h'}},d.main);
+ assert.equal(markers.length,2);assert.equal(markers[0].text,'BUY 1 · DCA 2–10');assert.equal(markers[0].position,'belowBar');assert.match(markers[1].text,/^SL/);assert.equal(markers[1].position,'aboveBar');assert.equal(signals.length,11);
 });
