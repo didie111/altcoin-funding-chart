@@ -24,6 +24,8 @@ body.chart-layout-four #chart-container>:not(#chartWorkspace){display:none!impor
 .chart-quad #chartTopbar #chartIdentityControls,.chart-embedded #chartTopbar #chartIdentityControls{max-width:none!important}
 .chart-quad #intervalSelect,.chart-embedded #intervalSelect{padding:4px 2px;font-size:10px;max-width:85px}
 .chart-quad #chartSymbolLabel,.chart-embedded #chartSymbolLabel{font-size:11px;max-width:130px}
+.chart-quad .chart-market-exchange{display:none}
+.chart-quad #chartSymbolLabel{min-width:80px;flex-shrink:0}
 .chart-quad #cycle-badge,.chart-embedded #cycle-badge{font-size:9px;max-width:45%;padding:2px 4px}
 #drawingHistoryControls{flex-shrink:0}
 .chart-embedded body{height:100dvh;overflow:hidden}
