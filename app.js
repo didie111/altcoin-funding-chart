@@ -544,7 +544,7 @@ function drawRuler(w,h){if(!rulerStart||!rulerEnd)return;
  for(const [x,y] of [[x1,y1],[x2,y2]]){ctx.beginPath();ctx.fillStyle=color;ctx.arc(x,y,4,0,Math.PI*2);ctx.fill();}ctx.restore();
 
  const details=measureDetails(rulerStart,rulerEnd),sign=change.percent>=0?'+':'';rulerLabel.textContent=`${change.difference>=0?'+':''}${change.difference.toPrecision(6)} (${sign}${change.percent.toFixed(2)}%)\n${details.bars}봉 · ${details.period}\n거래량 ${new Intl.NumberFormat('ko-KR',{notation:'compact',maximumFractionDigits:2}).format(details.volume)}`;
- rulerLabel.style.background=color;rulerLabel.style.borderColor=color;rulerLabel.style.maxWidth=Math.max(40,Math.min(280,plotWidth-16))+'px';rulerLabel.hidden=false;const lw=rulerLabel.offsetWidth,lh=rulerLabel.offsetHeight;rulerLabel.style.left=Math.max(8,Math.min(plotWidth-lw-8,(x1+x2)/2-lw/2))+'px';rulerLabel.style.top=pl.top+Math.max(6,Math.min((ph>=lh+12?ph:h-pl.top)-lh-6,Math.min(y1,y2)-lh-8))+'px';
+ rulerLabel.style.background=color;rulerLabel.style.borderColor=color;rulerLabel.style.maxWidth=Math.max(40,Math.min(280,plotWidth-16))+'px';rulerLabel.hidden=false;const lw=rulerLabel.offsetWidth,lh=rulerLabel.offsetHeight;const labelBox=DrawingRenderer.rulerLabelBox({width:plotWidth,height:ph,labelHeight:h-pl.top,boxWidth:lw,boxHeight:lh,a:{x:x1,y:y1},b:{x:x2,y:y2}});rulerLabel.style.left=labelBox.x+'px';rulerLabel.style.top=pl.top+labelBox.y+'px';
  ctx.save();ctx.translate(0,pl.top);ctx.setLineDash([]);ctx.font='bold 11px sans-serif';ctx.textAlign='left';for(const [price,y] of [[rulerStart.price,y1],[rulerEnd.price,y2]]){if(y<0||y>ph)continue;ctx.fillStyle=color;ctx.fillRect(plotWidth,y-9,w-plotWidth,18);ctx.fillStyle='#fff';ctx.fillText(price.toPrecision(7),plotWidth+4,y+4);}ctx.restore();
 }
 
@@ -697,12 +697,12 @@ function observedCycles(records){const periods=[];const allowed=[1,2,4,8,12,24];
  for(let i=0;i<periods.length;i++){const p=periods[i],before=periods[i-1],after=periods[i+1];if(before&&after&&before.hours===after.hours&&before.hours&&p.hours>before.hours){p.hours=null;p.gap=true;}}
  return periods;}
 function currentCyclePeriod(){const session=fundingSession,entry=session?.entries.get(session.ex);return ChartData.currentCycle(entry?.quote,officialCycle?.hours,rates);}
-function liveCycleValue(c){const p=currentCyclePeriod(),step=duration[loadedMarket?.int??$('intervalSelect').value];return p&&TimeframeEngine.end(c.time,loadedMarket?.int??$('intervalSelect').value)>p.start&&c.time<p.end?{hours:p.hours,current:true,source:p.source}:cycleValues.get(c.time);}
-function rebuildCycles(){cycleHistory=observedCycles(rates);cycleTransitions=[];cycleValues=new Map();let previous=null;
+function liveCycleValue(c){const p=currentCyclePeriod(),step=duration[loadedMarket?.int??$('intervalSelect').value];return p&&TimeframeEngine.end(c.time,loadedMarket?.int??$('intervalSelect').value)>p.start&&c.time<p.end?ChartData.withCurrentCycle(cycleValues.get(c.time),p):cycleValues.get(c.time);}
+function rebuildCycles(){cycleHistory=observedCycles(FundingEngine.merge(rates,historyState.cycleNeighbors||[]));cycleTransitions=[];cycleValues=new Map();let previous=null;
  for(const p of cycleHistory){if(p.hours===null){previous=null;continue;}if(previous!==null&&previous!==p.hours)cycleTransitions.push({time:p.end,from:previous,to:p.hours});previous=p.hours;}
  let i=0;const seconds=duration[$('intervalSelect').value];for(const c of all){while(i<cycleHistory.length&&cycleHistory[i].end<=c.time)i++;let value=null,unknown=false;for(let j=i;j<cycleHistory.length&&cycleHistory[j].start<TimeframeEngine.end(c.time,$('intervalSelect').value);j++){const p=cycleHistory[j];if(p.end<=c.time)continue;if(p.hours===null)unknown=true;else value=value===null?p.hours:Math.min(value,p.hours);}
- if(value!==null)cycleValues.set(c.time,{hours:value,mixed:unknown});}
- const current=currentCyclePeriod();if(current)for(const c of all){if(TimeframeEngine.end(c.time,$('intervalSelect').value)>current.start&&c.time<current.end)cycleValues.set(c.time,{hours:current.hours,current:true,source:current.source});}
+ if(value!==null)cycleValues.set(c.time,{hours:value,observedHours:value,mixed:unknown});}
+ const current=currentCyclePeriod();if(current)for(const c of all){if(TimeframeEngine.end(c.time,$('intervalSelect').value)>current.start&&c.time<current.end)cycleValues.set(c.time,ChartData.withCurrentCycle(cycleValues.get(c.time),current));}
  cycleFast=new Uint8Array(all.length);for(let k=0;k<all.length;k++){const v=cycleValues.get(all[k].time);if(v&&v.hours<8)cycleFast[k]=Math.round(v.hours);}
  const latest=cycleHistory.at(-1);
  const official=(officialCycle?.hours?` · 거래소 공식 현재 주기: ${officialCycle.hours}시간${officialCycle.note}`:'')+(otherCycles.length?` · 거래소별 현재 주기: ${otherCycles.map(o=>o.name+' '+o.hours+'시간').join(' / ')}`:'');
@@ -1012,9 +1012,9 @@ function updateCurrentCycleWindow(){
  if(!all.length)return;
  const part=all.slice(windowStart,windowEnd),period=currentCyclePeriod();if(!period)return;
  for(const c of part){if(TimeframeEngine.end(c.time,loadedMarket.int)<=period.start||c.time>=period.end)continue;
-  cycleValues.set(c.time,{hours:period.hours,current:true,source:period.source});
-  if(period.hours<8)cycleFast[lowerBound(all,c.time)]=Math.round(period.hours);
-  settlementCycle?.update({time:c.time,value:period.hours,color:cycleColor(period.hours)},c.time<part.at(-1).time);
+  const value=ChartData.withCurrentCycle(cycleValues.get(c.time),period);cycleValues.set(c.time,value);
+  cycleFast[lowerBound(all,c.time)]=value.hours<8?Math.round(value.hours):0;
+  settlementCycle?.update({time:c.time,value:value.hours,color:cycleColor(value.hours)},c.time<part.at(-1).time);
  }updateCycleBadge();schedule();
 }
 function refreshFundingChart(session, recentCandles = []) {
@@ -1151,13 +1151,31 @@ async function requestChartHistory(request){
      if(!sameRates(rates,merged)){rates=merged;rebuild();renderFundingStudies();}
    }catch(error){if(error.name!=='AbortError'&&id===run)status('캔들 이동 완료 · 해당 구간 정산 이력 조회 실패: '+fundingError(error),true);}
  }catch(error){if(error.name!=='AbortError'&&id===run){status('과거 구간 조회 실패: '+fundingError(error),true);state.exhausted.add(key);setTimeout(()=>state.exhausted.delete(key),15000);}}
- finally{state.pending.delete(key);if(id===run){$('historyLoading').hidden=!state.pending.size;scheduleVisibleHistory();}}
+ finally{state.pending.delete(key);if(id===run){$('historyLoading').hidden=!state.pending.size&&!state.fundingPending;scheduleVisibleHistory();}}
+}
+async function requestVisibleFunding(absolute){
+ const market=loadedMarket,state=historyState;if(!market||state.id!==run||!all.length)return;
+ const first=all[Math.max(0,Math.min(all.length-1,Math.floor(absolute.from)-1))],last=all[Math.max(0,Math.min(all.length-1,Math.ceil(absolute.to)+1))];
+ const {ex,symbol,int,id}=market,from=first.time,to=TimeframeEngine.end(last.time,int),key=from+':'+to;
+ state.fundingHistory??=FundingHistory.create({page:fundingPage});
+ if(state.fundingHistory.covers(ex,symbol,from,to)||(state.fundingPending&&state.fundingRangeKey===key)||(state.fundingRangeKey===key&&state.fundingRetryAt>Date.now()))return;
+ state.fundingAbort?.abort();state.fundingAbort=new AbortController();state.fundingPending=true;state.fundingRangeKey=key;
+ const signal=AbortSignal.any([state.fundingAbort.signal,navigationController.signal]);let changed=false,lastRender=0;
+ $('historyLoading').hidden=false;$('historyLoading').textContent='보이는 날짜의 정산 이력 불러오는 중…';
+ const flush=()=>{if(!changed||id!==run||signal.aborted)return;changed=false;lastRender=Date.now();rebuild();renderFundingStudies();};
+ try{await state.fundingHistory.load(ex,symbol,{from,to,signal,onPage:rows=>{
+   if(id!==run||signal.aborted)return;const split=FundingHistory.partition(FundingEngine.merge(state.cycleNeighbors||[],rows),all[0].time,TimeframeEngine.end(all.at(-1).time,int));
+   const neighborsChanged=!sameRates(state.cycleNeighbors||[],split.neighbors);state.cycleNeighbors=split.neighbors;const merged=FundingEngine.merge(rates,split.inside);if(neighborsChanged||!sameRates(rates,merged)){rates=merged;changed=true;if(Date.now()-lastRender>=250)flush();}
+  }});flush();
+ }catch(error){flush();if(error.name!=='AbortError'&&id===run){state.fundingRetryAt=Date.now()+15000;status('가격 차트는 표시 중 · 해당 날짜의 정산 이력 조회 실패: '+fundingError(error),true);}}
+ finally{if(state.fundingRangeKey===key){state.fundingPending=false;if(id===run)$('historyLoading').hidden=!state.pending.size;}}
 }
 function scheduleVisibleHistory(){
  clearTimeout(navTimer);navTimer=setTimeout(()=>{
    if(changingWindow||!all.length)return;const range=chart.timeScale().getVisibleLogicalRange();if(!range)return;
    const absolute={from:range.from+windowStart,to:range.to+windowStart},middle=(absolute.from+absolute.to)/2;
    if(((range.from<80&&windowStart>0)||(range.to>windowEnd-windowStart-80&&windowEnd<all.length))&&windowStartFor(middle)!==windowStart){renderWindow(middle,false,240,absolute);return;}
+   void requestVisibleFunding(absolute);
    for(const request of ChartData.historyRequests(all,absolute,duration[loadedMarket.int],Date.now()/1000,{start:t=>TimeframeEngine.start(t,loadedMarket.int),end:t=>TimeframeEngine.end(t,loadedMarket.int),shift:(t,n)=>TimeframeEngine.shift(t,loadedMarket.int,n)}))void requestChartHistory(request);
  },180);
 }

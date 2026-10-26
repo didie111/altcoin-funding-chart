@@ -54,6 +54,11 @@ const ChartData = (() => {
     return {start:Math.max(end-hours*3600,last?.time??-Infinity),end:Math.min(end,now+1),hours,
       source:quote.hours||official?'official':'observed'};
   }
-  return {mergeHistory,mergeLive,historyRequests,countdown,currentCycle};
+  function withCurrentCycle(previous,period){
+    if(!period)return previous;
+    const observed=previous?.observedHours??(!previous?.current?previous?.hours:null);
+    return {hours:observed>0?Math.min(observed,period.hours):period.hours,observedHours:observed??null,current:true,source:period.source,mixed:previous?.mixed===true};
+  }
+  return {mergeHistory,mergeLive,historyRequests,countdown,currentCycle,withCurrentCycle};
 })();
 if(typeof module!=='undefined'&&module.exports)module.exports=ChartData;

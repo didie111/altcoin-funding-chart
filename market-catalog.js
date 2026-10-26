@@ -63,5 +63,9 @@
   return list.sort((a,b)=>sort==='symbol'?direction*a.base.localeCompare(b.base):((a[sort]??(direction===1?Infinity:-Infinity))-(b[sort]??(direction===1?Infinity:-Infinity)))*direction||a.base.localeCompare(b.base));
  }
  function visibleRange(count,scrollTop,height,rowHeight=52,overscan=4){const start=Math.max(0,Math.floor(scrollTop/rowHeight)-overscan);return {start:Math.min(start,count),end:Math.min(count,Math.ceil((scrollTop+height)/rowHeight)+overscan)};}
- return {exchanges,create,normalize,filter,visibleRange,numeric,base};
+ function suggest(rows,query,limit=12){
+  const q=String(query).toUpperCase().replace(/[^A-Z0-9]/g,'');if(!q)return [];
+  return filter(rows,q).sort((a,b)=>Number(b.base.startsWith(q))-Number(a.base.startsWith(q))||(b.volume??-1)-(a.volume??-1)||a.base.localeCompare(b.base)).slice(0,Math.max(0,Math.min(20,limit)));
+ }
+ return {exchanges,create,normalize,filter,visibleRange,numeric,base,suggest};
 });

@@ -49,6 +49,11 @@ test('layout preferences validate all four independent markets and embedded URLs
  assert.equal(Workspace.market({ex:'INVALID',symbol:'<script>',int:'unknown'}).symbol,'BTCUSDT');assert.equal(Workspace.preferences({layout:500,markets:[]}).layout,1);
 });
 
+test('partial backtest symbol searches rank prefixes, ignore case and keep the suggestions bounded',()=>{
+ const rows=['XBTC','BTW','BTC','BTCDOM','ETH'].map((base,i)=>({exchange:'BYBIT',symbol:base+'USDT',base,volume:100-i}));
+ const matches=Catalog.suggest(rows,'bt');assert.deepEqual(matches.map(r=>r.base),['BTW','BTC','BTCDOM','XBTC']);assert.equal(Catalog.suggest(rows,'bTc')[0].base,'BTC');assert.equal(Catalog.suggest(rows,'').length,0);
+ assert.ok(Catalog.suggest(Array.from({length:20000},(_,i)=>({base:'BT'+i,symbol:'BT'+i+'USDT',volume:i})),'bt',1000).length<=20);
+});
 // Exercise the real controller without mounting chart engines or issuing network requests.
 function workspaceHarness({embedded=false,saved={},signalSnapshot=null}={}){
  const ids=new Map(),messages=[],events={},docEvents={},storage=new Map([['funding-chart-layout-v1',JSON.stringify(saved)]]);
@@ -71,6 +76,13 @@ function workspaceHarness({embedded=false,saved={},signalSnapshot=null}={}){
  controller.bind({signalSnapshot:()=>signalSnapshot,signalCommand:value=>calls.signalCommands.push(value),workspace:ids.get('chartWorkspace'),host:ids.get('host'),symbolButton:ids.get('chartSymbolLabel'),getMarket:()=>({ex:'BITGET',symbol:'SAHARAUSDT',int:'1h'}),selectMarket:(m,n)=>{calls.market.push(m);calls.navigation.push(n);},action:a=>calls.action.push(a),backtest:value=>calls.backtest.push(value),onSplit:()=>calls.split++,dispose:()=>calls.dispose++,schedule:()=>calls.schedule++,fullscreen:options=>calls.fullscreen.push(options),syncFullscreen(){},jumpDate(){}});
  return {ids,doc,messages,calls,controller,parent,win,storage,frames:()=>ids.get('chartGrid')?.children.filter(x=>x.tagName==='iframe')||[],message:(source,data,origin=win.location.origin)=>events.message({source,origin,data:{channel:'funding-chart-workspace-v1',...data}}),key:event=>docEvents.keydown({target:{closest:()=>null},preventDefault(){this.defaultPrevented=true;},...event})};
 }
+test('loading a panel coin into a selected remote cell immediately updates backtest subscribers',t=>{
+ const h=workspaceHarness();t.after(()=>h.controller.setLayout(1));h.controller.setLayout(4);const frame=h.frames()[1];h.message(frame.contentWindow,{type:'ready'});h.message(frame.contentWindow,{type:'active'});
+ const changes=[];h.controller.subscribe(()=>changes.push(h.controller.activeMarket()));
+ h.controller.selectActive({ex:'BYBIT',symbol:'SNTUSDT',int:'3m'});
+ assert.deepEqual(changes.at(-1),{ex:'BYBIT',symbol:'SNTUSDT',int:'3m'});assert.equal(h.controller.activeCell(),2);
+ assert.equal(h.calls.market.length,0);assert.equal(h.messages.at(-1).data.type,'select');
+});
 test('each of the four charts maximizes in place and restores the same chart frames',t=>{
  const h=workspaceHarness();t.after(()=>h.controller.setLayout(1));h.controller.setLayout(4);const frames=h.frames(),grid=h.ids.get('chartGrid');
  assert.equal(frames.length,3);assert.equal(h.ids.get('chartCellMaximize').hidden,false);
