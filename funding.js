@@ -131,8 +131,14 @@ const FundingEngine = (() => {
     return periods;
   }
   function cycleTransitions(periods) {
-    const result=[];let previous=null;
-    for(const p of periods){if(p.hours===null){previous=null;continue;}if(previous!==null&&previous!==p.hours)result.push({time:p.end,from:previous,to:p.hours,source:'observed'});previous=p.hours;}
+    const result=[];let previous=null,uncertain=false;
+    for(const p of periods){
+      // An unconfirmed boundary is not a new interval. Compare the supported
+      // observations on either side without filling that boundary's histogram.
+      if(p.hours===null){if(previous!==null)uncertain=true;continue;}
+      if(previous!==null&&previous!==p.hours)result.push({time:p.end,from:previous,to:p.hours,source:'observed',...(uncertain?{uncertain:true}:{})});
+      previous=p.hours;uncertain=false;
+    }
     return result;
   }
   // Keep observations apart from settlement history. Only values actually fetched

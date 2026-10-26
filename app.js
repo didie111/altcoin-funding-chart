@@ -706,10 +706,13 @@ function rebuildCycles(){cycleHistory=observedCycles(FundingEngine.merge(rates,h
  const latest=cycleHistory.at(-1);
  const official=(officialCycle?.hours?` · 거래소 공식 현재 주기: ${officialCycle.hours}시간${officialCycle.note}`:'')+(otherCycles.length?` · 거래소별 현재 주기: ${otherCycles.map(o=>o.name+' '+o.hours+'시간').join(' / ')}`:'');
  const mismatch=officialCycle?.hours&&latest?.hours&&latest.hours!==officialCycle.hours?` · 최근 관측 간격(${latest.hours}시간)과 공식 현재값(${officialCycle.hours}시간)이 다름`:'';
- cycleCaption.textContent=`과거 연속 기록 간격(공식 정책 이력 아님): ${latest?.hours?latest.hours+'시간':'확인 불가'}${official}${mismatch} · 최신 미정산 구간: ${current?current.hours+'시간 ('+(current.source==='official'?'공식 현재 주기':'연속 기록에서 추정')+')':'주기 확인 대기'} · 관측 간격 변화 ${cycleTransitions.length}회 · 단발 간격은 확인 불가 · 8h 파랑 / 4h 주황 / 1h 빨강 · 일봉 등은 봉 내 최소 관측 간격 · 기록 누락 시 실제 정책과 다를 수 있음`;updateCycleBadge();}
+ cycleCaption.textContent=`과거 연속 기록 간격(공식 정책 이력 아님): ${latest?.hours?latest.hours+'시간':'확인 불가'}${official}${mismatch} · 최신 미정산 구간: ${current?current.hours+'시간 ('+(current.source==='official'?'공식 현재 주기':'연속 기록에서 추정')+')':'주기 확인 대기'} · 관측 간격 변화 ${cycleTransitions.length}회 · 단발 간격은 확인 불가 · 공백 전후 변화는 경계 미확인 표시 · 8h 파랑 / 4h 주황 / 1h 빨강 · 일봉 등은 봉 내 최소 관측 간격 · 기록 누락 시 실제 정책과 다를 수 있음`;updateCycleBadge();}
 function cycleColor(h){return h===1?'#ef4444':h===4?'#f59e0b':h===8?'#3b82f6':'#a78bfa';}
 function renderCycles(part){if(!settlementCycle)return;settlementCycle.setData(part.map(c=>{const p=cycleValues.get(c.time);return p?{time:c.time,value:p.hours,color:cycleColor(p.hours)}:{time:c.time};}));
- const map=new Map();for(const t of cycleTransitions){const i=lowerBound(all,t.time);const k=all[i]?.time===t.time?all[i]:all[i-1];if(k&&k.time>=part[0].time&&k.time<=part.at(-1).time)map.set(k.time,{time:k.time,position:'aboveBar',color:cycleColor(t.to),shape:'arrowDown',size:2,text:'관측 '+t.from+'h → '+t.to+'h'});}
+ if(!part.length){cycleMarkers?.setMarkers([]);return;}
+ const map=new Map();for(const t of cycleTransitions){const i=lowerBound(all,t.time);const k=all[i]?.time===t.time?all[i]:all[i-1];if(!k||k.time<part[0].time||k.time>part.at(-1).time||t.time>=TimeframeEngine.end(k.time,$('intervalSelect').value))continue;
+  const text=t.from+'h → '+t.to+'h'+(t.uncertain?' (경계 미확인)':''),old=map.get(k.time);
+  map.set(k.time,{time:k.time,position:'aboveBar',color:cycleColor(t.to),shape:t.to>t.from?'arrowUp':'arrowDown',size:2,text:old?old.text+' / '+text:'관측 '+text});}
  cycleMarkers?.setMarkers(map.size<=150?[...map.values()]:[]);}
 
 function resetScales(){
