@@ -55,9 +55,14 @@ test('cycle display extends through the confirmed unsettled period without filli
  const period=data.currentCycle(quote,null,[{time:stamp-4*3600},{time:stamp}],stamp+660);
  assert.equal(period.start,stamp);assert.equal(period.end,stamp+661);assert.equal(period.hours,4);assert.equal(period.source,'official');
  assert.equal(data.currentCycle({...quote,nextTime:stamp},null,[],stamp+660),null);
- const inferred=data.currentCycle({...quote,hours:null},null,[{time:stamp-4*3600},{time:stamp}],stamp+660);
+ const inferred=data.currentCycle({...quote,hours:null},null,[{time:stamp-8*3600},{time:stamp-4*3600},{time:stamp}],stamp+660);
  assert.equal(inferred.source,'observed');assert.equal(inferred.hours,4);
  assert.equal(data.currentCycle({...quote,hours:null},null,[],stamp+660),null);
+ assert.equal(data.currentCycle({...quote,hours:null},null,[{time:stamp-2*3600},{time:stamp}],stamp+660),null,'one two-hour gap does not establish a current two-hour policy');
+ const two=data.currentCycle({...quote,hours:2,nextTime:stamp+7200},null,[{time:stamp}],stamp+660);
+ assert.equal(two.hours,2);assert.equal(two.source,'official','a genuine official two-hour interval remains supported');
+ const inferredTwo=data.currentCycle({...quote,hours:null,nextTime:stamp+7200},null,[{time:stamp-14400},{time:stamp-7200},{time:stamp}],stamp+660);
+ assert.equal(inferredTwo.hours,2);assert.equal(inferredTwo.source,'observed');
 });
 for(const maType of rsi.maTypes)test(`RSI incremental updates match a complete calculation with ${maType}, across correction and new minute bars`,()=>{
  const bars=Array.from({length:600},(_,i)=>{const price=30+Math.sin(i*.7)*7+Math.cos(i*.15)*4;return {...bar(stamp+i*60,price),open:price-.5,high:price+2,low:price-2,volume:100+i%13};});

@@ -115,6 +115,26 @@ const FundingEngine = (() => {
   function minimum(records) {
     return records.reduce((lowest, row) => !lowest || row.rate < lowest.rate ? row : lowest, null);
   }
+  function observedCycles(records) {
+    const rows=merge(records),allowed=[1,2,4,6,8,12,24],periods=[];
+    for(let i=1;i<rows.length;i++){
+      const seconds=rows[i].time-rows[i-1].time,hours=allowed.find(h=>Math.abs(seconds-h*3600)<=60)??null;
+      periods.push({start:rows[i-1].time,end:rows[i].time,observedHours:hours,hours:null,source:'unconfirmed'});
+    }
+    for(let i=0;i<periods.length;i++){
+      const p=periods[i],hours=p.observedHours;
+      // A single interval may be a missing settlement or a schedule boundary.
+      // Repetition supports an observation, never an official historical policy.
+      if(hours!==null&&(periods[i-1]?.observedHours===hours||periods[i+1]?.observedHours===hours)){p.hours=hours;p.source='observed';}
+      else p.gap=true;
+    }
+    return periods;
+  }
+  function cycleTransitions(periods) {
+    const result=[];let previous=null;
+    for(const p of periods){if(p.hours===null){previous=null;continue;}if(previous!==null&&previous!==p.hours)result.push({time:p.end,from:previous,to:p.hours,source:'observed'});previous=p.hours;}
+    return result;
+  }
   // Keep observations apart from settlement history. Only values actually fetched
   // while the page is open are plotted; unseen historical estimates stay blank.
   function observeCurrent(records, quote, interval, bucket=time=>Math.floor(time/interval)*interval) {
@@ -126,7 +146,7 @@ const FundingEngine = (() => {
     const values = new Map(records.map(row => [row.time, row.rate]));
     return bars.map(bar => values.has(bar.time) ? {time: bar.time, value: values.get(bar.time)} : {time: bar.time});
   }
-  return {exchanges, numeric, percent, seconds, base, contract, currentRequest, normalizeCurrent, historyRequest, normalizeHistory, merge, mapToCandles, minimum, observeCurrent, liveSeriesData};
+  return {exchanges, numeric, percent, seconds, base, contract, currentRequest, normalizeCurrent, historyRequest, normalizeHistory, merge, mapToCandles, minimum, observedCycles, cycleTransitions, observeCurrent, liveSeriesData};
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = FundingEngine;

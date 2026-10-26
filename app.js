@@ -26,17 +26,19 @@ const cycleCaption=document.createElement('div');cycleCaption.style.cssText='pad
 let cycleHistory=[],cycleTransitions=[],cycleValues=new Map(),officialCycle=null,otherCycles=[],cycleFast=new Uint8Array(0);
 // 정산 주기 배지: 코인명·시간봉 옆에 표시해 차트 도구와 겹치지 않게 함
 const cycleBadge=document.createElement('div');cycleBadge.id='cycle-badge';cycleBadge.hidden=true;cycleBadge.setAttribute('role','status');$('chartIdentityControls').after(cycleBadge);
-function updateCycleBadge(){const latest=cycleHistory.at(-1)?.hours??null,official=officialCycle?.hours??null,hours=official||latest;
+function updateCycleBadge(){const current=currentCyclePeriod();
  const sel=$('exchangeSelect').value,selName=$('exchangeSelect').selectedOptions[0].text;
- // 거래소별 현재 주기 (선택 거래소가 목록에 없거나 조회 실패하면 선택 거래소 값만 따로 추가)
- const entries=otherCycles.filter(o=>o.hours).map(o=>({name:o.name,hours:o.hours,sel:o.ex===sel}));
- if(hours&&!entries.some(e=>e.sel))entries.push({name:selName,hours,sel:true});
+ const official=officialCycle?.hours??otherCycles.find(o=>o.ex===sel)?.hours??null;
+ const hours=official??(current?.source==='observed'?current.hours:null);
+ const entries=otherCycles.filter(o=>o.hours&&o.ex!==sel).map(o=>({name:o.name,hours:o.hours,source:'official',sel:false}));
+ if(hours)entries.push({name:selName,hours,source:official?'official':'observed',sel:true});
  if(!entries.length){cycleBadge.hidden=true;return;}
  entries.sort((x,y)=>x.hours-y.hours||x.name.localeCompare(y.name));
  const min=entries[0].hours,fast=min<8;cycleBadge.hidden=false;cycleBadge.classList.toggle('fast',fast);cycleBadge.style.background=cycleColor(min);
- cycleBadge.textContent=(fast?'⚡ ':'')+'정산 '+entries.map(e=>e.name+' '+e.hours+'h').join(' · ');
- const changed=cycleTransitions.length?` · 이 기간 ${selName} 주기 변경 ${cycleTransitions.length}회`:'';
- cycleBadge.title=`거래소별 현재 펀딩 정산 주기: ${entries.map(e=>e.name+' '+e.hours+'시간'+(e.sel?' (현재 보는 거래소)':'')).join(' / ')}${changed}`;}
+ const allOfficial=entries.every(e=>e.source==='official');
+ cycleBadge.textContent=(fast?'⚡ ':'')+(allOfficial?'공식 현재 · ':'현재 정산 · ')+entries.map(e=>e.name+' '+e.hours+'h'+(allOfficial?'':e.source==='observed'?' 추정':' 공식')).join(' · ');
+ const changed=cycleTransitions.length?` · 과거 관측 간격 변화 ${cycleTransitions.length}회 (공식 변경 이력 아님)`:'';
+ cycleBadge.title=entries.map(e=>e.name+' '+e.hours+'시간 · '+(e.source==='official'?'공식 현재 API 조회값':'최근 연속 정산 기록에서 추정')+(e.sel?' (현재 보는 거래소)':'')).join(' / ')+changed;}
 const CYCLE_EXCHANGES=[['BINANCE','Binance'],['BYBIT','Bybit'],['OKX','OKX'],['BITGET','Bitget'],['MEXC','MEXC']];
 // 현재 보는 거래소와 무관하게 주요 거래소의 공식 현재 정산 주기를 모두 조회 (개별 실패는 무시)
 async function fetchAllCycles(s,signal){if(globalThis.ChartWorkspace?.embedded)return [];const out=await Promise.all(CYCLE_EXCHANGES.map(async([ex,name])=>{try{const r=await fetchOfficialCycle(ex,s,signal);return r?{ex,name,hours:r.hours,note:r.note}:null;}catch(e){if(e.name==='AbortError')throw e;return null;}}));return out.filter(Boolean);}
@@ -45,7 +47,7 @@ function drawCycleBands(w,h){if(!all.length||!cycleValues.size||cycleFast.length
  const plotWidth=ts.width(),part=windowEnd-windowStart,i0=Math.max(0,Math.floor(range.from)),i1=Math.min(part-1,Math.ceil(range.to));
  const fundingPane=getPaneLayout().find(p=>p.series===funding);let run=null,lastPill=-1e9;
  const flush=end=>{if(!run)return;const x1=Math.max(0,run.x1),x2=Math.min(plotWidth,end);if(x2>x1){ctx.fillStyle=cycleColor(run.hours)+'22';ctx.fillRect(x1,0,x2-x1,h-28);
-  if(fundingPane&&x2-x1>34){const text=run.hours+'h 정산',px=Math.max(6,Math.min(plotWidth-64,x1+4));if(px-lastPill>70){lastPill=px;ctx.font='bold 12px sans-serif';const tw=ctx.measureText(text).width+14;ctx.fillStyle=cycleColor(run.hours);ctx.beginPath();ctx.roundRect(px,fundingPane.top+32,tw,20,5);ctx.fill();ctx.fillStyle='#111827';ctx.textAlign='left';ctx.fillText(text,px+7,fundingPane.top+46);}}}run=null;};
+  if(fundingPane&&x2-x1>34){const text=run.hours+'h 간격',px=Math.max(6,Math.min(plotWidth-64,x1+4));if(px-lastPill>70){lastPill=px;ctx.font='bold 12px sans-serif';const tw=ctx.measureText(text).width+14;ctx.fillStyle=cycleColor(run.hours);ctx.beginPath();ctx.roundRect(px,fundingPane.top+32,tw,20,5);ctx.fill();ctx.fillStyle='#111827';ctx.textAlign='left';ctx.fillText(text,px+7,fundingPane.top+46);}}}run=null;};
  for(let i=i0;i<=i1;i++){const fh=cycleFast[windowStart+i],fast=fh?fh:null;
   if(fast===null){if(run){flush(ts.logicalToCoordinate(i-.5)??0);}continue;}
   if(run&&run.hours!==fast)flush(ts.logicalToCoordinate(i-.5)??0);
@@ -693,24 +695,21 @@ function rebuild(){const {warn,ext}=thresholds();
  mapped=result.mapped;signals=result.signals;unmappedFunding=result.unmapped;
  rebuildCycles();renderList();renderFundingBoard();}
 
-function observedCycles(records){const periods=[];const allowed=[1,2,4,8,12,24];for(let i=1;i<records.length;i++){const seconds=records[i].time-records[i-1].time;const hours=allowed.find(h=>Math.abs(seconds-h*3600)<=60);periods.push({start:records[i-1].time,end:records[i].time,hours:hours??null});}
- for(let i=0;i<periods.length;i++){const p=periods[i],before=periods[i-1],after=periods[i+1];if(before&&after&&before.hours===after.hours&&before.hours&&p.hours>before.hours){p.hours=null;p.gap=true;}}
- return periods;}
+function observedCycles(records){return FundingEngine.observedCycles(records);}
 function currentCyclePeriod(){const session=fundingSession,entry=session?.entries.get(session.ex);return ChartData.currentCycle(entry?.quote,officialCycle?.hours,rates);}
 function liveCycleValue(c){const p=currentCyclePeriod(),step=duration[loadedMarket?.int??$('intervalSelect').value];return p&&TimeframeEngine.end(c.time,loadedMarket?.int??$('intervalSelect').value)>p.start&&c.time<p.end?ChartData.withCurrentCycle(cycleValues.get(c.time),p):cycleValues.get(c.time);}
-function rebuildCycles(){cycleHistory=observedCycles(FundingEngine.merge(rates,historyState.cycleNeighbors||[]));cycleTransitions=[];cycleValues=new Map();let previous=null;
- for(const p of cycleHistory){if(p.hours===null){previous=null;continue;}if(previous!==null&&previous!==p.hours)cycleTransitions.push({time:p.end,from:previous,to:p.hours});previous=p.hours;}
+function rebuildCycles(){cycleHistory=observedCycles(FundingEngine.merge(rates,historyState.cycleNeighbors||[]));cycleTransitions=FundingEngine.cycleTransitions(cycleHistory);cycleValues=new Map();
  let i=0;const seconds=duration[$('intervalSelect').value];for(const c of all){while(i<cycleHistory.length&&cycleHistory[i].end<=c.time)i++;let value=null,unknown=false;for(let j=i;j<cycleHistory.length&&cycleHistory[j].start<TimeframeEngine.end(c.time,$('intervalSelect').value);j++){const p=cycleHistory[j];if(p.end<=c.time)continue;if(p.hours===null)unknown=true;else value=value===null?p.hours:Math.min(value,p.hours);}
  if(value!==null)cycleValues.set(c.time,{hours:value,observedHours:value,mixed:unknown});}
  const current=currentCyclePeriod();if(current)for(const c of all){if(TimeframeEngine.end(c.time,$('intervalSelect').value)>current.start&&c.time<current.end)cycleValues.set(c.time,ChartData.withCurrentCycle(cycleValues.get(c.time),current));}
  cycleFast=new Uint8Array(all.length);for(let k=0;k<all.length;k++){const v=cycleValues.get(all[k].time);if(v&&v.hours<8)cycleFast[k]=Math.round(v.hours);}
  const latest=cycleHistory.at(-1);
  const official=(officialCycle?.hours?` · 거래소 공식 현재 주기: ${officialCycle.hours}시간${officialCycle.note}`:'')+(otherCycles.length?` · 거래소별 현재 주기: ${otherCycles.map(o=>o.name+' '+o.hours+'시간').join(' / ')}`:'');
- const mismatch=officialCycle?.hours&&latest?.hours&&latest.hours!==officialCycle.hours?` · ⚠ 이력 관측(${latest.hours}시간)과 공식(${officialCycle.hours}시간)이 다름: 최근 주기가 바뀌었거나 거래소 선택을 확인하세요`:'';
- cycleCaption.textContent=`정산 주기(기록 간격 관측): ${latest?.hours?latest.hours+'시간':'확인 불가'}${official}${mismatch} · 최신 미정산 구간: ${current?current.hours+'시간 ('+(current.source==='official'?'공식 현재 주기':'최근 정산 간격 기준')+')':'주기 확인 대기'} · 전환 ${cycleTransitions.length}회 · 8h 파랑 / 4h 주황 / 1h 빨강 · 일봉 등은 봉 내 최소 간격 · 데이터 누락 시 실제 정책과 다를 수 있음`;updateCycleBadge();}
+ const mismatch=officialCycle?.hours&&latest?.hours&&latest.hours!==officialCycle.hours?` · 최근 관측 간격(${latest.hours}시간)과 공식 현재값(${officialCycle.hours}시간)이 다름`:'';
+ cycleCaption.textContent=`과거 연속 기록 간격(공식 정책 이력 아님): ${latest?.hours?latest.hours+'시간':'확인 불가'}${official}${mismatch} · 최신 미정산 구간: ${current?current.hours+'시간 ('+(current.source==='official'?'공식 현재 주기':'연속 기록에서 추정')+')':'주기 확인 대기'} · 관측 간격 변화 ${cycleTransitions.length}회 · 단발 간격은 확인 불가 · 8h 파랑 / 4h 주황 / 1h 빨강 · 일봉 등은 봉 내 최소 관측 간격 · 기록 누락 시 실제 정책과 다를 수 있음`;updateCycleBadge();}
 function cycleColor(h){return h===1?'#ef4444':h===4?'#f59e0b':h===8?'#3b82f6':'#a78bfa';}
 function renderCycles(part){if(!settlementCycle)return;settlementCycle.setData(part.map(c=>{const p=cycleValues.get(c.time);return p?{time:c.time,value:p.hours,color:cycleColor(p.hours)}:{time:c.time};}));
- const map=new Map();for(const t of cycleTransitions){const i=lowerBound(all,t.time);const k=all[i]?.time===t.time?all[i]:all[i-1];if(k&&k.time>=part[0].time&&k.time<=part.at(-1).time)map.set(k.time,{time:k.time,position:'aboveBar',color:cycleColor(t.to),shape:'arrowDown',size:2,text:'⚡ 정산 '+t.from+'h → '+t.to+'h'});}
+ const map=new Map();for(const t of cycleTransitions){const i=lowerBound(all,t.time);const k=all[i]?.time===t.time?all[i]:all[i-1];if(k&&k.time>=part[0].time&&k.time<=part.at(-1).time)map.set(k.time,{time:k.time,position:'aboveBar',color:cycleColor(t.to),shape:'arrowDown',size:2,text:'관측 '+t.from+'h → '+t.to+'h'});}
  cycleMarkers?.setMarkers(map.size<=150?[...map.values()]:[]);}
 
 function resetScales(){
