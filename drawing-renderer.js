@@ -39,8 +39,8 @@ function geometry(item,env){
  const arrow=(a,b,c=color,sw=lineWidth,r=9)=>{line(a,b,c,sw);const angle=Math.atan2(b.y-a.y,b.x-a.x);line(b,{x:b.x-r*Math.cos(angle-.45),y:b.y-r*Math.sin(angle-.45)},c,sw);line(b,{x:b.x-r*Math.cos(angle+.45),y:b.y-r*Math.sin(angle+.45)},c,sw);};
  const [a,b=a,c=b,d=c]=points,ap=item.points[0],bp=item.points[1]||ap;
  switch(item.tool){
- case 'hline':line({x:0,y:a.y},{x:w,y:a.y});text(w-110,a.y-24,ap.price.toPrecision(7));break;
- case 'hray':line(a,{x:w,y:a.y});text(w-110,a.y-24,ap.price.toPrecision(7));break;
+ case 'hline':line({x:0,y:a.y},{x:w,y:a.y});break;
+ case 'hray':line(a,{x:w,y:a.y});break;
  case 'vline':line({x:a.x,y:0},{x:a.x,y:h});break;
  case 'crossline':line({x:0,y:a.y},{x:w,y:a.y});line({x:a.x,y:0},{x:a.x,y:h});break;
  case 'trend':case 'ray':case 'extended':case 'angle':line(a,b,color,lineWidth,item.tool==='ray'?'ray':item.tool==='extended'?'line':'segment');if(item.tool==='angle')text(b.x+6,b.y-25,(-Math.atan2(b.y-a.y,b.x-a.x)*180/Math.PI).toFixed(1)+'°');break;
@@ -82,5 +82,31 @@ function geometry(item,env){
  return {svg:parts.join('')+labels.join(''),shapeSvg:parts.join(''),labelSvg:labels.join(''),segments,boxes,labelBoxes,points};
 }
 function hit(geometry,p,tolerance=6){return geometry.segments.some(([a,b])=>E.segmentDistance(p,a,b)<=tolerance)||geometry.boxes.some(b=>p.x>=b.x&&p.x<=b.x+b.width&&p.y>=b.y&&p.y<=b.y+b.height);}
-return {geometry,hit,esc,n,measure,rulerLabelBox};
+function axisOverlay(entries,{width,totalWidth,height,plotBottom,formatTime,rulerColors}){
+ const vertical=[],prices=[],times=[],timeHeight=Math.min(22,Math.max(0,height-plotBottom)),axisWidth=totalWidth-width;
+ const priceAlways=new Set(['hline','hray','crossline','priceNote','priceLabel','priceRange','range','ruler','long','short']),timeAlways=new Set(['vline','crossline','dateRange','range','ruler','fibTime']);
+ for(const {item,pane,geometry,selected=false,draft=false,ownPane=true,formatPrice}of entries){
+  const color=item.tool==='ruler'?S.colorFor(item.points[0].price,item.points.at(-1).price,rulerColors):item.color||'#60a5fa',priority=selected||draft?2:1;
+  const indices=item.points.length<=6?item.points.map((_,i)=>i):[0,item.points.length-1];
+  if(['vline','crossline'].includes(item.tool)){const x=geometry.points[0]?.x;if(x>=0&&x<=width)vertical.push(`<path data-drawing-vertical="${esc(item.id)}" d="M${n(x)} 0V${n(plotBottom)}" stroke="${esc(color)}" stroke-width="${n(item.width||2)}"${item.dash?' stroke-dasharray="'+(item.dash===1?'2 4':'8 5')+'"':''}${draft?' opacity=".8"':''}/>`);}
+  for(const i of indices){const point=item.points[i],p=geometry.points[i];if(!p)continue;
+   if(ownPane&&(selected||draft||priceAlways.has(item.tool))&&p.y>=0&&p.y<=pane.height&&axisWidth>10){const value=formatPrice(point.price);prices.push({id:item.id,pane:pane.id,value,y:pane.top+p.y,top:pane.top,bottom:pane.bottom,color,priority});}
+   if((selected||draft||timeAlways.has(item.tool))&&p.x>=0&&p.x<=width&&timeHeight>5)times.push({id:item.id,value:formatTime(point.time),x:p.x,color,priority});
+  }
+ }
+ const labels=[],acceptedPrice=[],acceptedTime=[];
+ for(const p of prices.sort((a,b)=>b.priority-a.priority)){
+  const labelHeight=Math.min(19,p.bottom-p.top);if(labelHeight<8)continue;const y=Math.max(p.top,Math.min(p.bottom-labelHeight,p.y-labelHeight/2));
+  if(acceptedPrice.some(q=>q.pane===p.pane&&y<q.bottom&&y+labelHeight>q.top))continue;
+  acceptedPrice.push({pane:p.pane,top:y,bottom:y+labelHeight});
+  labels.push(`<g data-drawing-axis="price" data-drawing-id="${esc(p.id)}"><rect x="${n(width)}" y="${n(y)}" width="${n(axisWidth)}" height="${n(labelHeight)}" fill="${esc(p.color)}"/><text x="${n(width+axisWidth/2)}" y="${n(y+labelHeight/2)}" dominant-baseline="central" text-anchor="middle" fill="#fff" font-size="11" font-family="sans-serif">${esc(p.value)}</text></g>`);
+ }
+ for(const t of times.sort((a,b)=>b.priority-a.priority)){
+  const boxWidth=Math.min(width,Math.max(56,[...t.value].length*6.5+14)),x=Math.max(0,Math.min(width-boxWidth,t.x-boxWidth/2));
+  if(acceptedTime.some(q=>x<q.right&&x+boxWidth>q.left))continue;acceptedTime.push({left:x,right:x+boxWidth});
+  labels.push(`<g data-drawing-axis="time" data-drawing-id="${esc(t.id)}"><rect x="${n(x)}" y="${n(plotBottom)}" width="${n(boxWidth)}" height="${n(timeHeight)}" rx="2" fill="${esc(t.color)}"/><text x="${n(x+boxWidth/2)}" y="${n(plotBottom+timeHeight/2)}" dominant-baseline="central" text-anchor="middle" fill="#fff" font-size="11" font-family="sans-serif">${esc(t.value)}</text></g>`);
+ }
+ return {verticalSvg:vertical.join(''),labelsSvg:labels.join(''),svg:vertical.join('')+labels.join('')};
+}
+return {geometry,hit,esc,n,measure,rulerLabelBox,axisOverlay};
 });

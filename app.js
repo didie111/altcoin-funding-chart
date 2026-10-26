@@ -292,7 +292,7 @@ const date=t=>fullFmt.format(new Date(t*1000));
 const status=(s,error=false)=>{$('status-msg').textContent=s;$('status-msg').classList.toggle('error',error);globalThis.ChartWorkspace?.reportStatus(s,error);};
 function schedule(){if(!frame)frame=requestAnimationFrame(()=>{frame=0;draw();});}
 // [최적화] draw 한 번 안에서 getPaneLayout()이 6번 넘게 불리며 매번 getBoundingClientRect(강제 리플로우)를 했음 -> 1회로 축소
-function draw(){paneLayoutCache=computePaneLayout();updatePaneHover();try{drawInner();}finally{paneLayoutCache=null;}}
+function draw(){paneLayoutCache=computePaneLayout();const hover=updatePaneHover();try{drawInner();placeCursorPrice(hover);}finally{paneLayoutCache=null;}}
 // 변경 없는 스타일은 다시 쓰지 않아 불필요한 스타일 재계산을 막음
 function setStyle(el,k,v){const c=el._st||(el._st={});if(c[k]!==v){c[k]=v;el.style[k]=v;}}
 function drawInner(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clientHeight,dpr=devicePixelRatio||1,plotWidth=chart.timeScale().width();
@@ -340,6 +340,7 @@ for (const type of ['pointerdown', 'dblclick', 'wheel']) {
 }
 const priceClock=document.createElement('div');priceClock.id='barCountdown';priceClock.hidden=true;priceClock.setAttribute('aria-label','현재가 및 봉 마감까지 남은 시간');rulerHost.append(priceClock);
 const wallClock=document.createElement('div');wallClock.id='chartClock';wallClock.setAttribute('aria-label','한국 표준시');rulerHost.append(wallClock);
+const cursorPrice=document.createElement('div');cursorPrice.id='chartCursorPrice';cursorPrice.hidden=true;cursorPrice.setAttribute('aria-label','마우스 위치의 가격');rulerHost.append(cursorPrice);
 const wallTimeFormat=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
 function placeChartClock(){
  const now=Date.now()/1000,latest=all.at(-1),pane=pricePane(),step=duration[loadedMarket?.int],width=chart.timeScale().width();
@@ -351,6 +352,15 @@ function placeChartClock(){
  priceClock.replaceChildren(Object.assign(document.createElement('span'),{textContent:latest.close.toFixed(8)}),Object.assign(document.createElement('span'),{textContent:live?ChartData.countdown(latest.time,step,now,TimeframeEngine.end(latest.time,loadedMarket.int)):'00:00'}));
  priceClock.dataset.live=String(Boolean(live));priceClock.title=live?'현재 '+$('intervalSelect').selectedOptions[0].text+' 봉 마감까지 남은 시간':'다음 실시간 캔들 확인 대기';
  setStyle(priceClock,'left',width+'px');setStyle(priceClock,'width',Math.max(70,rulerHost.clientWidth-width)+'px');setStyle(priceClock,'top',pane.top+Math.max(0,Math.min(pane.height-30,y-13))+'px');setStyle(priceClock,'background',latest.close>=latest.open?'#22c55e':'#ef4444');
+}
+function placeCursorPrice(hit){
+ const pane=hit?.pane,width=chart.timeScale().width();
+ cursorPrice.hidden=!pane?.series||pane.height<20||!hit||hit.blocked||hit.x<0||hit.x>=width||['pointer','dot'].includes(chartDrawings?.tool)||Boolean(chartDrawings?.gesture||chartDrawings?.draft);
+ if(cursorPrice.hidden)return;
+ const price=pane.series.coordinateToPrice(hit.y-pane.top);if(!Number.isFinite(price)){cursorPrice.hidden=true;return;}
+ const text=pane.series.priceFormatter().format(price);if(cursorPrice.textContent!==text)cursorPrice.textContent=text;
+ cursorPrice.dataset.pane=String(pane.index);cursorPrice.dataset.value=String(price);
+ setStyle(cursorPrice,'left',width+'px');setStyle(cursorPrice,'width',Math.max(0,rulerHost.clientWidth-width)+'px');setStyle(cursorPrice,'top',Math.max(pane.top,Math.min(pane.bottom-19,hit.y-9.5))+'px');
 }
 setInterval(()=>{if(!document.hidden)placeChartClock();},1000);
 function placeChartSymbol(){
@@ -396,22 +406,23 @@ function updatePaneHover() {
   const box = rulerHost.getBoundingClientRect();
   const x = hoverPoint.x - box.left, y = hoverPoint.y - box.top;
   if (x < 0 || x >= box.width) return;
-  hoveredPaneIndex = getPaneInfoAtY(y)?.index ?? -1;
+  const pane=getPaneInfoAtY(y);hoveredPaneIndex = pane?.index ?? -1;
   if (x >= chart.timeScale().width()) hoveredPriceAxisPaneIndex = hoveredPaneIndex;
+  return {pane,x,y,blocked:hoverPoint.blocked};
 }
 rulerHost.addEventListener('pointermove', e => {
-  hoverPoint = { x: e.clientX, y: e.clientY };
+  hoverPoint = { x: e.clientX, y: e.clientY, blocked:Boolean(e.target.closest?.('[data-drawing-ui],[data-panel-ui],[data-chart-nav]')) };
   if (hoverRaf) return;
   hoverRaf = requestAnimationFrame(() => {
     hoverRaf = 0;
     if (!hoverPoint) return;
     const previous = hoveredPaneIndex, previousAxis = hoveredPriceAxisPaneIndex;
-    updatePaneHover();
+    const hit=updatePaneHover();placeCursorPrice(hit);
     if (previous !== hoveredPaneIndex || previousAxis !== hoveredPriceAxisPaneIndex) schedule();
   });
 });
 rulerHost.addEventListener('pointerleave', () => {
-  hoverPoint = null;
+  hoverPoint = null;cursorPrice.hidden=true;
   hoveredPaneIndex = hoveredPriceAxisPaneIndex = -1; schedule();
 });
 
@@ -1250,7 +1261,7 @@ chartDrawings=bindChartDrawings({
  host:rulerHost,workspace:chartWorkspace,chart,rulerColors,rulerButton:rulerBtn,
  data:()=>all,market:()=>loadedMarket,windowStart:()=>windowStart,step:()=>duration[loadedMarket?.int]||60,
  layout:()=>getPaneLayout().map(p=>{const panel=studyPanels.panelForPane(chart.panes()[p.index]);return {...p,id:panel?.id,visible:Boolean(panel&&studyPanels.isVisible(panel))};}),
- schedule,status,formatTime:date,interaction:rulerInteraction,cursor:id=>chart.applyOptions({crosshair:{mode:['pointer','dot'].includes(id)?LC.CrosshairMode.Hidden:LC.CrosshairMode.Normal}}),beforeTool:()=>{if(rulerEnabled)toggleRuler(false);else clearRuler();},
+ schedule,status,formatTime:date,formatAxisTime:time=>{const fields=TimeframeEngine.kstFields(time);return fields.date+(duration[loadedMarket?.int]<86400?' '+fields.time:'');},interaction:rulerInteraction,cursor:id=>{hoverPoint=null;cursorPrice.hidden=true;chart.applyOptions({crosshair:{mode:['pointer','dot'].includes(id)?LC.CrosshairMode.Hidden:LC.CrosshairMode.Normal}});},beforeTool:()=>{if(rulerEnabled)toggleRuler(false);else clearRuler();},
  zoom:item=>{const [a,b]=item.points,from=DrawingEngine.timeLogical(all,Math.min(a.time,b.time),duration[loadedMarket.int])-windowStart,to=DrawingEngine.timeLogical(all,Math.max(a.time,b.time),duration[loadedMarket.int])-windowStart;if(to-from<2)return;moveChartRange({from,to});const pane=getPaneLayout().find(p=>studyPanels.panelForPane(chart.panes()[p.index])?.id===item.pane);if(pane&&a.price!==b.price){pane.series.priceScale().setVisibleRange({from:Math.min(a.price,b.price),to:Math.max(a.price,b.price)});}schedule();}
 });
 rulerBtn.onclick=()=>chartDrawings.setTool(chartDrawings.tool==='ruler'?'cross':'ruler');
