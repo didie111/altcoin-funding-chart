@@ -912,7 +912,7 @@
     </style>
     <link rel="stylesheet" href="chart-drawings.css?v=20261024-ruler-date-1">
     <link rel="stylesheet" href="chart-workspace.css?v=20261025-sidebar-fullscreen-2">
-    <link rel="stylesheet" href="dashboard.css?v=20261025-sidebar-fullscreen-1">
+    <link rel="stylesheet" href="dashboard.css?v=20261027-layout-funding-1">
     <link rel="stylesheet" href="backtest.css?v=20261026-context-data-ruler-1">
 </head>
 <body>
@@ -958,6 +958,7 @@
 
     <div id="main-wrapper">
         <div id="chart-container">
+          <details id="chartTopInfo" class="chart-info-panel"><summary>펀딩 데이터·설명<span class="info-expand">펼치기</span><span class="info-collapse">접기</span></summary><div class="chart-info-content">
           <section id="fundingSnapshot" aria-label="현재 펀딩비와 정산 기록 비교">
             <div id="fundingSelected" aria-live="polite">현재 펀딩비 조회 준비 중</div>
             <div class="funding-history-row"><span id="fundingSettled">최근 정산: 조회 중</span><span id="fundingMinimum">수집 구간 최저: 수집 중</span><button id="fundingMinimumBtn" type="button" disabled>최저 기록으로 이동</button></div>
@@ -967,6 +968,7 @@
             <p class="funding-note">하단 막대: 정산 기록 · 노란 점선: 페이지에서 관측한 현재율(미정산). 관측 전 구간은 공백이며 신호 목록은 정산 기록 기준입니다.</p>
           </section>
           <div id="chart-key" style="padding:6px 12px;font-size:12px;min-height:28px">가격 · 거래량 · 정산 펀딩비 · RSI Div · 정산 주기 — 동일 시간축</div>
+          </div></details>
           <div id="chartWorkspace">
             <div id="chartTopbar">
               <div id="chartIdentityControls" data-chart-identity="true" role="group" aria-label="코인 심볼과 타임프레임" hidden>
@@ -994,14 +996,16 @@
               <div id="unified-chart" style="flex:1;min-height:0;position:relative"><div id="historyLoading" hidden role="status"></div></div>
             </div>
           </div>
-          <div style="padding:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px">
+          <div id="chartHistoryControls">
             <button id="oldestBtn">최초 데이터</button><button id="latestBtn">최근 데이터</button>
             <button id="gotoDateBtn" type="button" title="날짜로 이동 (Alt+G)" aria-haspopup="dialog"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v4m8-4v4M3 10h18M3 14V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6"/><path d="M2 19h9m-3-3 3 3-3 3"/></svg>날짜로 이동</button>
-            <input id="historyPosition" type="range" min="0" max="0" value="0" style="flex:1;min-width:100px">
+            <input id="historyPosition" type="range" min="0" max="0" value="0" aria-label="차트 이력 위치">
             <button id="stopBtn">수집 중지</button><span id="historyInfo"></span>
           </div>
+          <details id="chartBottomInfo" class="chart-info-panel"><summary>데이터 범위·표시 기준<span class="info-expand">펼치기</span><span class="info-collapse">접기</span></summary><div class="chart-info-content">
           <div id="coverage" style="padding:4px 12px;font-size:11px;color:#9ca3af"></div>
           <a href="https://www.tradingview.com/" target="_blank" rel="noopener" style="padding:4px 12px;font-size:10px;color:#9ca3af">Charts by TradingView</a>
+          </div></details>
         </div>
 
         <!-- 사이드바 패널 (탭: 급등락 스캐너 / 펀딩비 신호 / 전략 신호) -->
@@ -1263,18 +1267,19 @@
     <script src="chart-drawings.js?v=20261026-context-data-ruler-1"></script>
     <script src="market-catalog.js?v=20261026-context-data-ruler-1"></script>
     <script src="symbol-picker.js?v=20261022-workspace-1"></script>
-    <script src="chart-workspace.js?v=20261026-context-data-ruler-1"></script>
+    <script src="chart-workspace.js?v=20261027-layout-funding-1"></script>
     <script src="scanner.js?v=20261025-backtest-1"></script>
-    <script src="backtest-engine.js?v=20261025-mtf-1"></script>
-    <script src="backtest-data.js?v=20261025-mtf-1"></script>
+    <script src="backtest-engine.js?v=20261027-layout-funding-1"></script>
+    <script src="backtest-data.js?v=20261027-layout-funding-1"></script>
     <script src="backtest-overlay.js?v=20261025-mtf-2"></script>
-    <script src="backtest-ui.js?v=20261026-context-data-ruler-1"></script>
+    <script src="backtest-ui.js?v=20261027-layout-funding-1"></script>
     <script src="dashboard-model.js?v=20261026-context-data-ruler-1"></script>
     <script src="news-ui.js?v=20261025-sidebar-fullscreen-1"></script>
     <script src="dashboard.js?v=20261025-news-archive-1"></script>
     <script src="signal-sidebar.js?v=20261025-sidebar-fullscreen-1"></script>
     <script src="workspace-sidebar.js?v=20261025-sidebar-fullscreen-1"></script>
-    <script src="app.js?v=20261026-cycle-transitions-2"></script>
+    <script src="chart-info.js?v=20261027-layout-funding-1"></script>
+    <script src="app.js?v=20261027-layout-funding-1"></script>
 </body>
 </html>
 

@@ -107,6 +107,13 @@ test('Alt+Enter follows the selected chart while browser fullscreen remains sepa
  h.message(frame.contentWindow,{type:'maximize'},'https://untrusted.test');assert.equal(frame.classList.contains('maximized'),false);
  h.message({postMessage(){}},{type:'maximize'});assert.equal(frame.classList.contains('maximized'),false);
 });
+test('the monitor button remains available in one-chart mode and only toggles workspace fullscreen',()=>{
+ const h=workspaceHarness(),button=h.ids.get('chartWorkspaceFullscreen');assert.equal(button.hidden,false);
+ assert.equal(h.ids.get('chartCellMaximize').hidden,true);button.onclick();assert.deepEqual(h.calls.fullscreen,[{workspace:true}]);
+ h.controller.syncWorkspaceFullscreen(true);assert.equal(button.attrs['aria-pressed'],'true');assert.equal(button.attrs['aria-label'],'작업 영역 전체화면 해제');
+ h.controller.setLayout(4);h.controller.setLayout(1);assert.equal(button.hidden,false);assert.equal(button.attrs['aria-pressed'],'true');
+ h.controller.syncWorkspaceFullscreen(false);assert.equal(button.attrs['aria-label'],'작업 영역 전체화면');assert.equal(h.calls.market.length,0);
+});
 test('embedded chart requests use the parent and reflect maximize and restore labels',()=>{
  const h=workspaceHarness({embedded:true});assert.ok(h.messages.some(x=>x.data.type==='ready'));
  h.controller.requestFullscreen();assert.equal(h.messages.at(-1).data.type,'maximize');assert.equal(h.calls.fullscreen.length,0);
