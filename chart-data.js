@@ -44,9 +44,10 @@ const ChartData = (() => {
   }
   function currentCycle(quote, official, records, now=Date.now()/1000) {
     if(!quote || !Number.isFinite(quote.fetchedAt)) return null;
-    const last=records.at(-1),before=records.at(-2);
-    const observed=last&&before?(last.time-before.time)/3600:null;
-    const hours=quote.hours??official??([1,2,4,8,12,24].includes(observed)?observed:null);
+    const last=records.at(-1),before=records.at(-2),earlier=records.at(-3);
+    const observed=last&&before?(last.time-before.time)/3600:null,prior=before&&earlier?(before.time-earlier.time)/3600:null;
+    const repeated=observed===prior&&[1,2,4,6,8,12,24].includes(observed)?observed:null;
+    const hours=quote.hours??official??repeated;
     if(!(hours>0))return null;
     const end=quote.nextTime??(last?last.time+hours*3600:null);
     if(!end || end<=quote.fetchedAt || end-hours*3600>quote.fetchedAt)return null;
