@@ -22,5 +22,21 @@
   return {start:date(value.start,prior),end:date(value.end,day),capital:number(value.capital,10000,1,1e12),orderSize:number(value.orderSize,10,0.01,100),commission:number(value.commission,0.05,0,10),slippage:number(value.slippage,.03,0,10),height:number(value.height,280,180,900),open:value.open===true};
  }
  function validateSettings(value){const s=settings(value);if(value.start!==s.start||value.end!==s.end||s.start>s.end)throw Error('시작일과 종료일을 확인해 주세요.');for(const key of ['capital','orderSize','commission','slippage'])if(Number(value[key])!==s[key])throw Error('설정값의 허용 범위를 확인해 주세요.');return s;}
- return {exchanges,labels,notice,mergeNotices,filterNotices,settings,validateSettings};
+ function backtestTarget({follow=true,custom}={},active={}){
+  const value=follow?active:custom||active;
+  const symbol=String(value.symbol||'').trim().toUpperCase().replace(/[-_]/g,'').replace(/USDTSWAP$|USDT$/,'')+'USDT';
+  if(!exchanges[value.ex]||!labels[value.int]||!/^[A-Z0-9]{1,28}USDT$/.test(symbol))throw Error('실행할 거래소·코인·타임프레임을 확인하세요.');
+  return {ex:value.ex,symbol,int:value.int};
+ }
+ const sameTarget=(a,b)=>Boolean(a&&b&&a.ex===b.ex&&a.symbol===b.symbol&&a.int===b.int);
+ function backtestPlan(market,mode,config){return {intervals:mode==='compare'?Object.keys(labels):[market.int],requireMinuteData:mode==='optimize'||config.splitTrigger==='rsi_cross_up_1m'};}
+ function backtestProgress(market,mode,state){
+  const prefix=exchanges[market.ex]+' '+market.symbol+' · 기준 '+labels[market.int];
+  const phase=state.phase==='funding'?'정산 기록':state.timeframe==='1m'&&market.int!=='1m'?(mode==='compare'?'1분 비교·보조 데이터':'보조 1분봉 RSI·체결 검증'):labels[state.timeframe]+' 기준 캔들';
+  return prefix+' / '+phase+' '+state.count.toLocaleString()+'건 · '+state.pages+'페이지';
+ }
+ function validateBacktestDataset(data,market,mode='single'){
+  if(data.exchange!==market.ex||data.symbol!==market.symbol||(mode!=='compare'&&!data.timeframeCandles?.[market.int]?.length))throw Error('수집한 종목·거래소·기준 주기가 실행 대상과 일치하지 않습니다. 다시 실행하세요.');
+ }
+ return {exchanges,labels,notice,mergeNotices,filterNotices,settings,validateSettings,backtestTarget,sameTarget,backtestPlan,backtestProgress,validateBacktestDataset};
 });

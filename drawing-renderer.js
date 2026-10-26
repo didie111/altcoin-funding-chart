@@ -12,6 +12,17 @@ function measure(rows,from,to,step=60){
  return {bars:Math.round((last??0)-(first??0)),volume:cached.prefix[hi]-cached.prefix[lo]};
 }
 const n=v=>Number.isFinite(v)?Math.round(Math.max(-1e7,Math.min(1e7,v))*100)/100:0;
+function rulerLabelBox({width,height,labelHeight=height,a,b,boxWidth,boxHeight,pointer=b}){
+ const mx=(a.x+b.x)/2,my=(a.y+b.y)/2,left=Math.min(a.x,b.x),right=Math.max(a.x,b.x),top=Math.min(a.y,b.y),bottom=Math.max(a.y,b.y),gap=14;
+ const above={x:mx-boxWidth/2,y:top-boxHeight-gap},below={x:mx-boxWidth/2,y:bottom+gap};
+ const options=[...(b.y<=a.y?[above,below]:[below,above]),{x:left-boxWidth-gap,y:my-boxHeight/2},{x:right+gap,y:my-boxHeight/2}];
+ const clamp=(p,h)=>({x:Math.max(6,Math.min(width-boxWidth-6,p.x)),y:Math.max(6,Math.min(h-boxHeight-6,p.y)),width:boxWidth,height:boxHeight});
+ const avoids=p=>pointer.x<=p.x-gap||pointer.x>=p.x+p.width+gap||pointer.y<=p.y-gap||pointer.y>=p.y+p.height+gap;
+ const available=height>=boxHeight+12?height:Math.max(height,labelHeight),candidates=options.map(p=>clamp(p,available));
+ let found=candidates.find(avoids);if(found)return found;
+ if(labelHeight>available){found=options.map(p=>clamp(p,labelHeight)).concat([clamp({x:mx-boxWidth/2,y:pointer.y+gap+1},labelHeight),clamp({x:mx-boxWidth/2,y:pointer.y-boxHeight-gap-1},labelHeight)]).find(avoids);if(found)return found;}
+ return candidates.sort((p,q)=>Math.hypot(q.x+q.width/2-pointer.x,q.y+q.height/2-pointer.y)-Math.hypot(p.x+p.width/2-pointer.x,p.y+p.height/2-pointer.y))[0];
+}
 function geometry(item,env){
  const {width:w,height:h,project,rows=[]}=env,points=item.points.map(project);if(points.some(p=>!p||!Number.isFinite(p.x)||!Number.isFinite(p.y)))return null;
  const segments=[],boxes=[],parts=[],labels=[],labelBoxes=[],color=item.tool==='ruler'?S.colorFor(item.points[0].price,item.points.at(-1).price,env.rulerColors):item.color||'#60a5fa',lineWidth=item.width||2,dash=item.dash===1?'2 4':item.dash===2?'8 5':'',fill=item.fill??.12;
@@ -21,7 +32,7 @@ function geometry(item,env){
  const text=(x,y,value,c=color,size=item.fontSize||12,bg=false)=>{let lines=String(value).split('\n').slice(0,12);const ruler=item.tool==='ruler',out=ruler?labels:parts;
   if(ruler){if(w<40)return;const count=Math.max(1,Math.floor((w-24)/(size*.65)));lines=lines.flatMap(s=>{const chunks=[];while(s.length>count){const at=s.lastIndexOf(' ',count);const split=at>count/2?at:count;chunks.push(s.slice(0,split));s=s.slice(split).trimStart();}return [...chunks,s];});}
   const tw=Math.max(...lines.map(t=>[...t].length))*size*.65+12,th=lines.length*(size+4)+8;
-  if(ruler){x=Math.max(6,Math.min(w-tw-6,x));const available=h>=th+12?h:(env.labelHeight||h);y=Math.max(6,Math.min(available-th-6,y));}else if(x+tw<0||x>w||y+th<0||y>h)return;
+  if(ruler){const placed=rulerLabelBox({width:w,height:h,labelHeight:env.labelHeight,boxWidth:tw,boxHeight:th,a:points[0],b:points.at(-1),pointer:env.pointer||points.at(-1)});x=placed.x;y=placed.y;}else if(x+tw<0||x>w||y+th<0||y>h)return;
   if(bg)out.push(`<rect x="${n(x)}" y="${n(y)}" width="${n(tw)}" height="${n(th)}" rx="4" fill="${ruler?esc(c):'#172033'}" fill-opacity=".94" stroke="${esc(c)}"/>`);lines.forEach((s,i)=>out.push(`<text x="${n(x+6)}" y="${n(y+size+4+i*(size+4))}" fill="${bg&&ruler?'#fff':esc(c)}" font-size="${size}" font-family="sans-serif">${esc(s)}</text>`));const box={x,y,width:tw,height:th};boxes.push(box);if(ruler)labelBoxes.push(box);};
  const poly=(ps,closed=false,c=color,opacity=fill)=>{if(ps.length<2)return;const d=ps.map((p,i)=>(i?'L':'M')+n(p.x)+' '+n(p.y)).join('')+(closed?'Z':'');parts.push(`<path d="${d}" ${attrs(c)}${closed?` style="fill:${esc(c)};fill-opacity:${opacity}"`:''}/>`);for(let i=1;i<ps.length;i++)segments.push([ps[i-1],ps[i]]);if(closed)segments.push([ps.at(-1),ps[0]]);};
  const rect=(a,b,c=color,opacity=fill)=>{const x=Math.min(a.x,b.x),y=Math.min(a.y,b.y),width=Math.abs(b.x-a.x),height=Math.abs(b.y-a.y);poly([{x,y},{x:x+width,y},{x:x+width,y:y+height},{x,y:y+height}],true,c,opacity);if(opacity>0)boxes.push({x,y,width,height});};
@@ -71,5 +82,5 @@ function geometry(item,env){
  return {svg:parts.join('')+labels.join(''),shapeSvg:parts.join(''),labelSvg:labels.join(''),segments,boxes,labelBoxes,points};
 }
 function hit(geometry,p,tolerance=6){return geometry.segments.some(([a,b])=>E.segmentDistance(p,a,b)<=tolerance)||geometry.boxes.some(b=>p.x>=b.x&&p.x<=b.x+b.width&&p.y>=b.y&&p.y<=b.y+b.height);}
-return {geometry,hit,esc,n,measure};
+return {geometry,hit,esc,n,measure,rulerLabelBox};
 });

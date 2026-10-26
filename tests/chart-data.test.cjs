@@ -4,6 +4,14 @@ const fs=require('node:fs'),vm=require('node:vm');
 const data=require('../chart-data.js'),timeframes=require('../timeframes.js');
 const stamp=Date.UTC(2026,9,14)/1000;
 const bar=(time,close=10)=>({time,open:10,high:Math.max(11,close),low:9,close,volume:5});
+test('a current funding cycle cannot overwrite a shorter settled interval in a daily, weekly or monthly candle',()=>{
+ for(const int of ['1d','1w','1M']){
+  const period={hours:8,source:'official'},observed={hours:1,observedHours:1};
+  const current=data.withCurrentCycle(observed,period);assert.equal(current.hours,1,int);assert.equal(current.observedHours,1);
+  assert.equal(data.withCurrentCycle(current,{hours:4,source:'official'}).hours,1);
+ }
+ assert.equal(data.withCurrentCycle({hours:1,current:true,observedHours:null},{hours:8,source:'official'}).hours,8,'an unsettled-only candle follows the actual current cycle');
+});
 const rsiContext={TimeframeEngine:timeframes,module:{exports:{}}};vm.createContext(rsiContext);
 vm.runInContext(fs.readFileSync(require.resolve('../indicators.js'),'utf8'),rsiContext);
 const rsi=rsiContext.module.exports;

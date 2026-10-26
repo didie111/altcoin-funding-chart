@@ -2,7 +2,9 @@
 .bt-runbar button,.bt-progress-row button,.bt-report button{background:#23334c;color:#d2e1f7;border:1px solid #405675;border-radius:5px;padding:6px 9px;font-size:11px;cursor:pointer;white-space:nowrap}
 .bt-runbar button:hover,.bt-report button:hover{background:#2f4669}.bt-runbar button:disabled,.bt-report button:disabled,.bt-progress-row button:disabled{opacity:.4;cursor:not-allowed}
 #btStrategySettings{font-size:12px;font-weight:600;background:transparent;border:0;padding-left:0;color:#d6e4f9;display:flex;gap:8px;align-items:center}
-#btRunTarget{font-size:11px;color:#9bafce;white-space:nowrap}.bt-run-actions{display:flex;gap:5px;margin-left:auto}
+#btRunTarget{font-size:11px;color:#b6cdeb;line-height:1.6;overflow-wrap:anywhere}.bt-run-actions{display:flex;gap:5px;margin-left:auto}
+.bt-result-context{margin:0;padding:7px 12px;border-bottom:1px solid #735633;background:#352b1d;color:#f7d6a0;font-size:11px;line-height:1.7;flex-shrink:0}.bt-result-context[hidden]{display:none}
+.bt-symbol-matches{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;max-height:170px;overflow:auto;border:1px solid #47678c;border-radius:5px;padding:5px;background:#101c2e}.bt-symbol-matches[hidden]{display:none}.bt-symbol-matches button{display:flex;align-items:center;gap:5px;border:1px solid transparent;border-radius:4px;padding:7px 6px;background:#1b2d46;color:#dceaff;text-align:left;cursor:pointer}.bt-symbol-matches button:hover,.bt-symbol-matches [aria-selected=true]{background:#304d76;border-color:#6c9edc}.bt-symbol-matches strong{font-size:11px;overflow-wrap:anywhere}.bt-symbol-matches span{font-size:9px;color:#9cb5d6}
 .bt-runbar .bt-primary{background:#346ac0;border-color:#5b8fdb;color:white}
 .bt-progress-row{display:flex;align-items:center;gap:7px;padding:5px 12px;min-height:31px;font-size:10px;color:#a0b4d1;flex-shrink:0;border-bottom:1px solid #28374d}
 .bt-progress-row>span{margin-right:auto;line-height:1.6;overflow:hidden;text-overflow:ellipsis}.bt-progress-row button{background:none;padding:3px 5px;font-size:10px;border-color:#3b4b63}
@@ -23,5 +25,5 @@
 .bt-allocation-preview{font-size:11px;line-height:1.8;color:#aacefc;background:#1e314d;padding:9px 10px;border:1px solid #355373;border-radius:5px;margin:0;overflow-wrap:anywhere}
 .bt-quick-coins{display:flex;align-items:center;gap:6px;font-size:10px;color:#8fa6c6}.bt-quick-coins button{background:#263f62;color:#b6d6ff;border:1px solid #45658f;border-radius:4px;font-size:10px;padding:4px 7px}
 #backtestDock[data-running=true] #backtestToggle:after{content:'진행 중';font-size:9px;font-weight:400;color:#a6c9ff;padding:2px 5px;border:1px solid #436089;border-radius:3px;margin-left:4px}
-@media(max-width:1000px){.bt-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.bt-summary-card strong{font-size:14px}#btRunTarget{display:none}}
+@media(max-width:1000px){.bt-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.bt-summary-card strong{font-size:14px}#btRunTarget{flex-basis:100%}}
 @media(max-width:600px){.bt-settings-dialog .research-dialog-body{grid-template-columns:minmax(0,1fr);padding:12px;gap:12px}.bt-runbar{gap:5px;padding:7px 9px}.bt-run-actions{margin-left:0}.bt-report{padding:10px}.bt-summary-card{padding:9px}.bt-progress-row{padding:5px 9px}.bt-progress-row #btClearChart{display:none}}

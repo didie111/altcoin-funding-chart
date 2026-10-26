@@ -232,3 +232,16 @@ test('a BingX cooldown announced while another request is queued delays it witho
  await broker.reserveBingx(signal,task);const queued=broker.reserveBingx(signal,task);await waiting;broker.defer('open-api.bingx.com',stamp+10000);release();await queued;await broker.reserveBingx(signal,task);
  assert.deepEqual(starts,[stamp,stamp+10000,stamp+11150]);
 });
+test('Bybit 10016 retries the same coin, timeframe and cursor with smaller real-data pages',async()=>{
+ let clock=stamp;const calls=[],waits=[],events=[],client=createClient({now:()=>clock,wait:async ms=>{waits.push(ms);clock+=ms;},onRetry:event=>events.push(event),fetch:async url=>{calls.push(new URL(url));return calls.length<3?response({retCode:10016,retMsg:'svc error: Get kline failed'}):response({retCode:0,result:{list:[[stamp,'2','4','1','3','5']]}});}});
+ const params={category:'linear',symbol:'SNTUSDT',interval:'3',end:stamp,limit:1000},data=await client.json('https://api.bybit.com/v5/market/kline',params);
+ assert.equal(data.result.list.length,1);assert.deepEqual(waits,[1500,3000]);assert.deepEqual(calls.map(u=>u.searchParams.get('limit')),['1000','500','250']);
+ for(const url of calls)for(const field of ['symbol','interval','end','category'])assert.equal(url.searchParams.get(field),String(params[field]));
+ assert.equal(params.limit,1000);assert.ok(events.every(e=>e.kind==='service'));
+});
+test('persistent Bybit server errors stay explicit and canceling a retry never returns prior or empty data',async()=>{
+ let calls=0;const client=createClient({wait:async()=>{},fetch:async()=>{calls++;return response({retCode:10016,retMsg:'Get kline failed'});}});
+ await assert.rejects(client.json('https://api.bybit.com/v5/market/kline'),e=>e.name==='MarketServiceError'&&e.code===10016&&/재시도/.test(e.message));assert.equal(calls,4);
+ const abort=new AbortController(),stopped=createClient({fetch:async()=>response({retCode:10016,retMsg:'Get kline failed'}),wait:async(ms,signal)=>{abort.abort();signal.throwIfAborted();}});
+ await assert.rejects(stopped.json('https://api.bybit.com/v5/market/kline',{},abort.signal),{name:'AbortError'});
+});

@@ -54,3 +54,12 @@ test('repeated ruler moves reuse the volume snapshot and inspect a logarithmic n
  R.measure(rows,6000,12000);reads=0;
  assert.equal(R.measure(rows,12000,18000).volume,101);assert.ok(reads<150,'drag should not rescan the full history');
 });
+test('measurement labels clear the drawing cursor in every direction and near each plot edge',()=>{
+ const inside=(p,b)=>p.x>b.x-12&&p.x<b.x+b.width+12&&p.y>b.y-12&&p.y<b.y+b.height+12;
+ for(const from of [{x:250,y:220},{x:30,y:30},{x:570,y:370}])for(const to of [{x:100,y:30},{x:500,y:30},{x:100,y:370},{x:500,y:370},{x:570,y:6},{x:6,y:200}]){
+  const box=R.rulerLabelBox({width:600,height:400,labelHeight:700,a:from,b:to,boxWidth:180,boxHeight:60});
+  assert.equal(inside(to,box),false,JSON.stringify({from,to,box}));assert.ok(box.x>=6&&box.x+box.width<=594);assert.ok(box.y>=6&&box.y+box.height<=694);
+ }
+ const b=R.rulerLabelBox({width:200,height:80,labelHeight:400,a:{x:80,y:40},b:{x:100,y:20},boxWidth:180,boxHeight:60});
+ assert.equal(inside({x:100,y:20},b),false);assert.ok(b.y+b.height<=400);
+});

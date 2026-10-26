@@ -65,7 +65,7 @@
   function requestWorkspaceFullscreen(){if(embedded)send({type:'workspace-fullscreen'});else void api.fullscreen({workspace:true});}
   function exitWorkspaceFullscreen(){if(!embedded||!workspaceFullscreen)return false;send({type:'exit-workspace-fullscreen'});return true;}
   function current(){return market(api?.getMarket()||{ex:$('exchangeSelect').value,symbol:$('symbolInput').value,int:$('intervalSelect').value});}
-  function choose(value,index=0,navigation){const m=market(value,markets[index]||current());if(index===0){api.selectMarket(m,navigation);return;}const frame=frames.find(f=>Number(f.dataset.chartCell)===index);if(frame){markets[index]=m;signalViews[index]=null;persist();if(active===index)notifySignals();deliver(frame,{type:'select',market:m,navigation});}}
+  function choose(value,index=0,navigation){const m=market(value,markets[index]||current());if(index===0){api.selectMarket(m,navigation);return;}const frame=frames.find(f=>Number(f.dataset.chartCell)===index);if(frame){markets[index]=m;signalViews[index]=null;persist();if(active===index){notify();notifySignals();}deliver(frame,{type:'select',market:m,navigation});}}
   function setBacktest(value,index=active){if(embedded)return;if(mode===1||index===0){api.backtest?.(value);return;}const frame=frames.find(f=>Number(f.dataset.chartCell)===index);if(frame)deliver(frame,{type:'backtest-result',value});}
   function selectActive(value,navigation){if(!hasRemoteTarget())return false;choose(value,active,navigation);return true;}
   function runOnActive(action){if(!hasRemoteTarget()||!actions.has(action))return false;const frame=frames.find(f=>Number(f.dataset.chartCell)===active);if(!frame)return false;deliver(frame,{type:'action',action});return true;}

@@ -20,6 +20,12 @@ const MarketAPI = (() => {
       if(attempt===3||delay>60000)throw limitError(message+' · API 요청 제한입니다. '+Math.ceil(delay/1000)+'초 이상 기다린 뒤 다시 실행해 주세요.',delay);
       const detail={exchange:name,host,delay,attempt:attempt+1};if(onRetry)onRetry(detail);else if(typeof globalThis.dispatchEvent==='function'&&typeof globalThis.CustomEvent==='function')globalThis.dispatchEvent(new CustomEvent('market-api-wait',{detail}));
     }
+    async function serviceWait(host,name,attempt,message,signal){
+      if(attempt===3){const error=Error(message+' · 거래소 서버 오류가 재시도 후에도 계속됩니다.');error.name='MarketServiceError';error.code=10016;throw error;}
+      const delay=1500*2**attempt,detail={exchange:name,host,delay,attempt:attempt+1,kind:'service'};
+      if(onRetry)onRetry(detail);else if(typeof globalThis.dispatchEvent==='function'&&typeof globalThis.CustomEvent==='function')globalThis.dispatchEvent(new CustomEvent('market-api-wait',{detail}));
+      await wait(delay,signal);
+    }
     async function cooldown(host,signal){
       const broker=globalThis.MarketShared?.broker;if(broker?.waitForCooldown)await broker.waitForCooldown(host,signal);
       for(;;){signal.throwIfAborted();const delay=(cooldowns.get(host)||0)-now();if(delay<=0)return;await wait(delay,signal);}
@@ -61,11 +67,12 @@ const MarketAPI = (() => {
       const viaRelay = Boolean(relayUrl) && (bingx || mexc);
       const name = bingx ? 'BingX' : mexc ? 'MEXC' : new URL(base).hostname;
       const fallback = bingx ? base.replace('https://open-api.bingx.com/', 'https://open-api.bingx.pro/') : null;
+      let klineLimit=params.limit;
       for (let attempt = 0; attempt < 4; attempt++) {
         signal.throwIfAborted();
         await cooldown(host,signal);
         const request = (endpoint = base) => {
-          const query = bingx ? {...params, timestamp: now()} : params;
+          const query = bingx ? {...params, timestamp: now()} : host==='api.bybit.com'&&new URL(base).pathname==='/v5/market/kline'?{...params,limit:klineLimit}:params;
           const routed = viaRelay ? {...query, exchange: bingx ? 'BINGX' : 'MEXC', path: new URL(base).pathname} : query;
           const url = (viaRelay ? relayUrl : endpoint) + '?' + new URLSearchParams(Object.entries(routed).filter(([, v]) => v !== undefined));
           return bingx || viaRelay ? fetchTimed(url, signal, viaRelay ? Math.max(requestTimeout, 15000) : requestTimeout) : fetcher(url, {signal, cache: 'no-store', credentials: 'omit'});
@@ -115,6 +122,10 @@ const MarketAPI = (() => {
           const message = name + ' API ' + code + ': ' + (result.retMsg || result.msg || result.message || '요청 실패');
           const limited=(bingx&&String(code)==='100410')||(mexc&&String(code)==='510')||(host==='api.bybit.com'&&String(code)==='10006')||(host==='www.okx.com'&&String(code)==='50011')||(host==='api.bitget.com'&&String(code)==='429');
           if(limited){await rateWait(host,name,response,attempt,message);continue;}
+          if(host==='api.bybit.com'&&String(code)==='10016'){
+            if(new URL(base).pathname==='/v5/market/kline'&&Number(klineLimit)>200)klineLimit=Math.max(200,Math.floor(Number(klineLimit)/2));
+            await serviceWait(host,name,attempt,message,signal);continue;
+          }
           if (bingx && ['100500', '109500'].includes(String(code)) && attempt < 3) {
             await wait(1500 * 2 ** attempt, signal);
             continue;
