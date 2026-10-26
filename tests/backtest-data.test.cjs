@@ -30,3 +30,17 @@ test('missing required 1m data and exhausted rate limits abort comparison instea
  const limited=Object.assign(Error('API 요청 제한'),{name:'RateLimitError'}),api=Data.create({fundingPage:async(ex,s,cursor,page)=>page===1?funding:[],candlePage:async()=>{throw limited;}});
  await assert.rejects(api.loadBacktestDataset('BTCUSDT',{exchange:'BITGET',intervals:['1h'],allowMissing:true,startTime:start,endTime:start+7200}),error=>error===limited);
 });
+test('only explicit retrospective interval comparison collects settlements beyond the test end',async()=>{
+ const end=start+3600,rows=[...funding,{time:end+3600,rate:.01},{time:end+7200,rate:.01}],edges=[];
+ const api=Data.create({fundingPage:async(ex,s,cursor,page)=>{edges.push(cursor/1000);return page===1?rows:[];},candlePage:async(ex,s,tf,end)=>start*1000<=end?[bar(start)]:[]});
+ const known=await api.loadBacktestDataset('BTCUSDT',{exchange:'BITGET',intervals:['1m'],startTime:start,endTime:end});
+ assert.ok(known.fundingRecords.every(r=>r.time<end));assert.ok(edges[0]<end);
+ edges.length=0;const chart=await api.loadBacktestDataset('BTCUSDT',{exchange:'BITGET',intervals:['1m'],startTime:start,endTime:end,fundingIntervalBasis:'chart'});
+ assert.ok(chart.fundingRecords.some(r=>r.time>end));assert.ok(edges[0]>end);assert.ok(chart.timeframeCandles['1m'].every(b=>b.time+60<=end));
+});
+test('a configured long funding window loads its full pre-test lookback instead of stopping at 48 hours',async()=>{
+ const old={time:start-6*86400,rate:-1},cursors=[];
+ const api=Data.create({fundingPage:async(ex,s,cursor)=>{cursors.push(cursor/1000);return cursor<=start*1000?[old,{time:start,rate:.01}]:[];},candlePage:async(ex,s,tf,end)=>start*1000<=end?[bar(start)]:[]});
+ const d=await api.loadBacktestDataset('BTCUSDT',{exchange:'BINANCE',intervals:['1m'],startTime:start,endTime:start+60,fundingWindowSeconds:7*86400});
+ assert.equal(cursors[0],start-7*86400);assert.ok(d.fundingRecords.some(r=>r.time===old.time));
+});

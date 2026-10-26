@@ -21,13 +21,13 @@
    if(options.requireMinuteData){intervals.splice(intervals.indexOf('1m'),1);intervals.unshift('1m');}
    if(!Number.isFinite(start)||!Number.isFinite(end)||start>=end||start<0)throw Error('테스트 기간을 확인하세요.');symbol=String(symbol).trim().toUpperCase().replace(/[-_]/g,'').replace(/USDT$/,'')+'USDT';if(!/^[A-Z0-9]{1,28}USDT$/.test(symbol))throw Error('코인 심볼을 확인하세요.');
    for(const tf of intervals)T.plan(ex,tf);signal.throwIfAborted();
-   const timeframeCandles={},coverage={},allFunding=new Map(),fundingStart=Math.max(0,start-48*3600);let totalCount=0,pages=0,cursor=ex==='BINANCE'?fundingStart*1000:Math.floor(end*1000)-1,page=1;
+   const timeframeCandles={},coverage={},allFunding=new Map(),fundingStart=Math.max(0,start-Math.max(48*3600,Math.min(864000,Number(options.fundingWindowSeconds)||0))),fundingEnd=Math.min(Date.now()/1000,end+(options.fundingIntervalBasis==='chart'?48*3600:0));let totalCount=0,pages=0,cursor=ex==='BINANCE'?fundingStart*1000:Math.floor(fundingEnd*1000)-1,page=1;
    for(;;){
     signal.throwIfAborted();const rows=F.merge(await funding(ex,symbol,cursor,page,signal));signal.throwIfAborted();pages++;
-    for(const r of rows)if(r.time>=fundingStart&&r.time<end)allFunding.set(r.time,r);
+    for(const r of rows)if(r.time>=fundingStart&&r.time<fundingEnd)allFunding.set(r.time,r);
     onProgress({phase:'funding',pages,count:allFunding.size,exchange:ex});
     if(!rows.length){if(ex==='BINGX'&&cursor/1000-90*86400>fundingStart){cursor-=90*86400000;continue;}break;}
-    if(ex==='BINANCE'){const next=rows.at(-1).time*1000+1;if(next<=cursor)throw Error('펀딩비 API의 과거 페이지가 진행되지 않습니다.');if(next>=end*1000)break;cursor=next;}
+    if(ex==='BINANCE'){const next=rows.at(-1).time*1000+1;if(next<=cursor)throw Error('펀딩비 API의 과거 페이지가 진행되지 않습니다.');if(next>=fundingEnd*1000)break;cursor=next;}
     else{if(rows[0].time<=fundingStart)break;const next=rows[0].time*1000-1;if(next>=cursor&&!['BITGET','MEXC'].includes(ex))throw Error('펀딩비 API의 과거 페이지가 진행되지 않습니다.');if(['BITGET','MEXC'].includes(ex)&&page>1&&rows.every(r=>r.time>=cursor/1000))throw Error('펀딩비 API가 같은 페이지를 반복했습니다.');cursor=next;page++;}
    }
    if(!allFunding.size)throw Error('선택 기간의 공식 정산 기록이 없어 진입 조건을 검증할 수 없습니다.');

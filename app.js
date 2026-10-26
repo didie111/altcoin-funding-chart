@@ -1,5 +1,6 @@
 'use strict';
 const $ = id => document.getElementById(id);
+globalThis.ChartInfo?.bind(globalThis);
 const LC = LightweightCharts;
 // [최적화] toLocaleString(locale, options)는 호출할 때마다 Intl 포매터를 새로 생성해서 줌/스크롤 시 매 프레임 느립니다.
 // 포매터를 한 번만 만들어 재사용하고, 눈금 라벨은 캐시합니다. (출력 문자열은 기존과 동일)
