@@ -274,6 +274,8 @@ function drawSurgeHighlight(w, h, plotWidth) {
 
 const WINDOW=10000, duration=TimeframeEngine.seconds;
 let dateNavigation=null, navigationController=null, loadedMarket=null, chartDateFocus=null, chartBacktestResult=null;
+const backtestLines=globalThis.BacktestOverlay?.create(()=>({result:chartBacktestResult,market:loadedMarket,bars:all}));
+if(backtestLines)candles.attachPrimitive(backtestLines);
 let historyState={id:0,buffer:[],pending:new Set(),exhausted:new Set()};
 let paneScaleSeries=[candles,volume,funding,settlementCycle];
 let studyPanels=null,lastFundingSignalVisibility;
@@ -297,7 +299,7 @@ function draw(){paneLayoutCache=computePaneLayout();const hover=updatePaneHover(
 function setStyle(el,k,v){const c=el._st||(el._st={});if(c[k]!==v){c[k]=v;el.style[k]=v;}}
 function drawInner(){const w=$('unified-chart').clientWidth,h=$('unified-chart').clientHeight,dpr=devicePixelRatio||1,plotWidth=chart.timeScale().width();
  if(overlay.width!==Math.round(w*dpr)||overlay.height!==Math.round(h*dpr)){overlay.width=Math.round(w*dpr);overlay.height=Math.round(h*dpr);overlay.style.width=w+'px';overlay.style.height=h+'px';}
- ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawCycleBands(w,h);drawRuler(w,h);drawSurgeHighlight(w,h,plotWidth);if(globalThis.BacktestOverlay?.matches(chartBacktestResult,loadedMarket))globalThis.BacktestOverlay.draw(ctx,chartBacktestResult,{chart,series:candles,bars:all,windowStart,pane:pricePane(),width:plotWidth});placeChartSymbol();placeChartNavigation();placeChartClock();placeLegendToggle();studyPanels?.position();syncFundingSignalVisibility();chartDrawings?.render();globalThis.ChartWorkspace?.controlsChanged({ruler:chartDrawings?.tool==='ruler',lines:showLines});
+ ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);guideCountdown.hidden=true;drawCycleBands(w,h);drawRuler(w,h);drawSurgeHighlight(w,h,plotWidth);placeChartSymbol();placeChartNavigation();placeChartClock();placeLegendToggle();studyPanels?.position();syncFundingSignalVisibility();chartDrawings?.render();globalThis.ChartWorkspace?.controlsChanged({ruler:chartDrawings?.tool==='ruler',lines:showLines});
  if(selectedGuideVisible&&selectedGuideTime!==null&&(selectedGuideKind==='date'||selectedSignal?.rate===undefined||fundingSignalsVisible())){const x=chart.timeScale().timeToCoordinate(selectedGuideTime);if(x!==null&&x>=0&&x<=plotWidth){guideCountdown.hidden=false;guideCountdown.style.left=Math.max(65,Math.min(plotWidth-65,x))+'px';ctx.strokeStyle=selectedGuideKind==='date'?'#60a5fa':'#fbbf24';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h-28);ctx.stroke();ctx.lineWidth=1;}}
  if(!showLines||!fundingSignalsVisible())return;
  const range=chart.timeScale().getVisibleRange();if(!range)return;
@@ -798,7 +800,7 @@ function syncFundingSignalVisibility(){
  const visible=fundingSignalsVisible();if(visible===lastFundingSignalVisibility)return;
  lastFundingSignalVisibility=visible;renderSignalMarkers(all.slice(windowStart,windowEnd));
 }
-function setChartBacktest(value){chartBacktestResult=value?.market&&Array.isArray(value.signals)&&Array.isArray(value.trades)?value:null;renderSignalMarkers(all.slice(windowStart,windowEnd));schedule();}
+function setChartBacktest(value){chartBacktestResult=value?.market&&Array.isArray(value.signals)&&Array.isArray(value.trades)?value:null;backtestLines?.invalidate();renderSignalMarkers(all.slice(windowStart,windowEnd));schedule();}
 function renderSignalMarkers(part){if(!part.length){markers.setMarkers([]);return;}
  const visible=fundingSignalsVisible()?signals.slice(lowerBound(signals,part[0].time),lowerBound(signals,part.at(-1).time+1)):[];
  const unique=new Map();for(const s of visible){const old=unique.get(s.time);if(!old||s.rate<old.rate)unique.set(s.time,s);}

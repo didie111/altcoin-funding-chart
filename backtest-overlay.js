@@ -10,19 +10,87 @@
   }
   const stride=Math.max(1,Math.ceil(groups.length/180));return groups.filter((_,i)=>i%stride===0).map(g=>{if(g.steps?.length){const first=Math.min(...g.steps),last=Math.max(...g.steps);g.marker.text=(g.initial?'BUY 1 · ':'')+'DCA '+first+(last>first?'–'+last:'');g.marker.color='#22d3ee';}return g.marker;});
  }
- function draw(ctx,result,{chart,series,bars,windowStart,pane,width}){
-  if(!result?.trades?.length||!bars.length||!pane)return;const range=chart.timeScale().getVisibleRange();if(!range)return;const from=Number(range.from),to=Number(range.to),trades=result.trades;
-  let index=lower(trades,from,'exitTime');ctx.save();ctx.translate(0,pane.top);ctx.beginPath();ctx.rect(0,0,width,pane.height);ctx.clip();ctx.font='11px sans-serif';ctx.lineWidth=1.2;
-  const x=time=>{let i=lower(bars,time);if(i>=bars.length)i=bars.length-1;else if(bars[i].time>time&&i>0)i--;const fraction=Math.max(0,Math.min(1,(time-bars[i].time)/(T.end(bars[i].time,result.market.int)-bars[i].time)));return chart.timeScale().logicalToCoordinate(i-windowStart+fraction);};
-  for(let n=0;index<trades.length&&trades[index].entryTime<=to&&n<80;index++,n++){
-   const trade=trades[index];for(let j=0;j<trade.entries.length;j++){
-    const entry=trade.entries[j],until=trade.entries[j+1]?.time??trade.exitTime;if(until<from||entry.time>to)continue;const a=x(entry.time),b=x(until);if(a===null||b===null)continue;
-    for(const [value,label,color]of [[entry.avgPrice,'평단','#8ab8ff'],[entry.takeProfit,'TP','#34d399'],[entry.stopLoss,'SL','#fb7185']]){
-     if(!(value>0))continue;const y=series.priceToCoordinate(value);if(y===null||y<0||y>pane.height)continue;ctx.setLineDash([5,4]);ctx.strokeStyle=color;ctx.beginPath();ctx.moveTo(Math.max(0,a),y);ctx.lineTo(Math.min(width,Math.max(a+8,b)),y);ctx.stroke();if(Math.abs(b-a)>45){ctx.setLineDash([]);ctx.fillStyle=color;ctx.fillText(label+' '+Number(value.toPrecision(7)),Math.max(2,Math.min(width-125,b-120)),Math.max(12,y-4));}
+ const levels=[['avgPrice','평단','#8ab8ff'],['takeProfit','TP 익절','#34d399'],['stopLoss','SL 손절','#fb7185']];
+ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+ function geometry(result,{chart,series,bars,width,height}){
+  const scene={segments:[],exits:[],groups:[]};if(!result?.trades?.length||!bars.length||width<=0||height<=0)return scene;
+  const scale=chart.timeScale(),range=scale.getVisibleRange();if(!range)return scene;
+  const interval=result.market.int,from=Number(range.from),to=T.end(Number(range.to),interval),spacing=scale.options().barSpacing;
+  if(!Number.isFinite(from)||!Number.isFinite(to)||!(spacing>0))return scene;
+  // Use the chart's real time coordinates, including when older price pages
+  // are prepended or the rendered data window changes. Never snap a gap to a bar.
+  const x=time=>{let i=lower(bars,time);if(i>=bars.length||bars[i].time>time)i--;if(i<0)return null;
+   let bar=bars[i],anchor=scale.timeToCoordinate(bar.time);
+   // The right edge is the end of the final visible candle. The next candle
+   // may exist in history but not in the chart's current render window yet.
+   if(!Number.isFinite(anchor)&&time===bar.time&&i>0&&T.end(bars[i-1].time,interval)===time){bar=bars[i-1];anchor=scale.timeToCoordinate(bar.time);}
+   const end=T.end(bar.time,interval);if(time>end)return null;
+   return Number.isFinite(anchor)?anchor+(time-bar.time)/(end-bar.time)*spacing:null;
+  };
+  const trades=result.trades,last=lower(trades,to,'entryTime');let index=Math.max(lower(trades,from,'exitTime'),last-80);
+  for(;index<last;index++){
+   const trade=trades[index];let group=null;
+   for(let j=0;j<trade.entries.length;j++){
+    const entry=trade.entries[j],next=trade.entries[j+1],until=next?.time??trade.exitTime;
+    if(until<from||entry.time>=to)continue;
+    // Clip the dates before projection: a spanning position can start outside
+    // the loaded chart window, but its visible part still has exact coordinates.
+    const a=x(Math.max(from,entry.time)),b=x(Math.min(to,until));if(!Number.isFinite(a)||!Number.isFinite(b))continue;
+    const x1=Math.max(0,a),x2=Math.min(width,b+(next?0:spacing*.45));if(x2<=x1)continue;
+    group={tradeId:trade.id??index+1,step:entry.step??j+1,lines:[]};
+    for(const [key,label,color]of levels){
+     const value=entry[key];if(!Number.isFinite(value)||value<=0)continue;const y=series.priceToCoordinate(value);if(!Number.isFinite(y)||y<0||y>height)continue;
+     const line={x1,x2,y,value,label,color,tradeId:group.tradeId,step:group.step,key};scene.segments.push(line);group.lines.push(line);
     }
    }
-   if(trade.exitTime>=from&&trade.exitTime<=to){const px=x(trade.exitTime),py=series.priceToCoordinate(trade.exitPrice);if(px!==null&&py!==null&&py>=0&&py<=pane.height){ctx.setLineDash([]);ctx.fillStyle=trade.exitReason==='STOP_LOSS'?'#fb7185':trade.exitReason==='TAKE_PROFIT'?'#34d399':'#c4b5fd';ctx.beginPath();ctx.arc(px,py,3.5,0,2*Math.PI);ctx.fill();}}
-  }ctx.restore();
+   // All DCA phases retain their true lines. Only the last visible phase of a
+   // trade needs value labels, instead of three overlapping labels at every fill.
+   if(group?.lines.length)scene.groups.push(group);
+   if(trade.exitTime>=from&&trade.exitTime<to){const px=x(trade.exitTime),py=series.priceToCoordinate(trade.exitPrice);
+    if(Number.isFinite(px)&&Number.isFinite(py)&&px>=0&&px<=width&&py>=0&&py<=height)scene.exits.push({x:px,y:py,color:trade.exitReason==='STOP_LOSS'?'#fb7185':trade.exitReason==='TAKE_PROFIT'?'#34d399':'#c4b5fd'});
+   }
+  }return scene;
  }
- return {matches,markers,draw};
+ function labelLayout(groups,{width,height,measure,format}){
+  const labels=[],padding=4,lineHeight=18,top=24;if(width<60||height<top+lineHeight+padding)return labels;
+  const overlaps=(a,b)=>a.x<b.x+b.width+3&&a.x+a.width+3>b.x&&a.y<b.y+b.height+3&&a.y+a.height+3>b.y;
+  // Recent visible trades get first choice when the chart is very dense. Bounds
+  // and text measurement come from this pane, so split/fullscreen sizes agree.
+  for(const group of [...groups].reverse())for(const line of [...group.lines].sort((a,b)=>a.y-b.y)){
+   if(labels.length>=48)return labels;const text='#'+group.tradeId+' · '+line.label+' '+format(line.value),w=Math.ceil(measure(text))+10;
+   if(w>width-2*padding)continue;const anchorX=clamp(line.x2,padding,width-padding),anchorY=line.y;
+   const positions=[anchorX+8,line.x2-w-4,line.x1-w-8,clamp(anchorX-w/2,padding,width-padding-w)];let placed=null;
+   for(const left of positions){if(left<padding||left+w>width-padding)continue;
+    for(const offset of [0,-21,21,-42,42,-63,63]){const box={x:left,y:clamp(anchorY-lineHeight/2+offset,top,height-padding-lineHeight),width:w,height:lineHeight};
+     if(!labels.some(other=>overlaps(box,other))){placed={...box,text,color:line.color,anchorX,anchorY,tradeId:group.tradeId,key:line.key};break;}
+    }if(placed)break;
+   }if(placed)labels.push(placed);
+  }return labels;
+ }
+ function draw(ctx,result,options){
+  const {width,height,series}=options,scene=geometry(result,options);if(!scene.segments.length&&!scene.exits.length)return;
+  ctx.save();try{
+   ctx.beginPath();ctx.rect(0,0,width,height);ctx.clip();ctx.font='11px sans-serif';ctx.lineWidth=1.2;ctx.setLineDash([5,4]);
+   for(const s of scene.segments){ctx.strokeStyle=s.color;ctx.beginPath();ctx.moveTo(s.x1,s.y);ctx.lineTo(s.x2,s.y);ctx.stroke();}
+   ctx.setLineDash([]);for(const p of scene.exits){ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,3.5,0,2*Math.PI);ctx.fill();}
+   const formatter=series.priceFormatter(),labels=labelLayout(scene.groups,{width,height,measure:text=>ctx.measureText(text).width,format:value=>formatter.format(value)});
+   ctx.textAlign='left';ctx.textBaseline='middle';ctx.lineWidth=1;
+   for(const label of labels){
+    const edgeX=clamp(label.anchorX,label.x,label.x+label.width),edgeY=clamp(label.anchorY,label.y,label.y+label.height);
+    ctx.strokeStyle=label.color;ctx.beginPath();ctx.moveTo(label.anchorX,label.anchorY);ctx.lineTo(edgeX,edgeY);ctx.stroke();
+    ctx.fillStyle='#111827ed';ctx.fillRect(label.x,label.y,label.width,label.height);ctx.fillStyle=label.color;ctx.fillRect(label.x,label.y,2,label.height);ctx.fillText(label.text,label.x+5,label.y+label.height/2);
+   }
+  }finally{ctx.restore();}
+ }
+ function create(getState){
+  let attached=null;
+  // The native series renderer runs after the chart has resolved its current
+  // scales. An independent requestAnimationFrame canvas can read the old scale
+  // during data replacement, vertical zoom, resizing or a historical date jump.
+  const renderer={draw:target=>{if(!attached)return;const {result,market,bars}=getState();if(!matches(result,market))return;
+   target.useMediaCoordinateSpace(({context,mediaSize})=>draw(context,result,{chart:attached.chart,series:attached.series,bars,width:mediaSize.width,height:mediaSize.height}));
+  }},views=[{zOrder:()=> 'top',renderer:()=>renderer}];
+  return {attached:parameters=>{attached=parameters;parameters.requestUpdate();},detached:()=>{attached=null;},paneViews:()=>views,updateAllViews(){},invalidate:()=>attached?.requestUpdate()};
+ }
+ return {matches,markers,geometry,labelLayout,draw,create};
 });
