@@ -25,13 +25,25 @@
  }
  function create({json=(...args)=>MarketAPI.json(...args),now=Date.now}={}){
   const cache=new Map(),pending=new Map();
-  async function load(exchange,signal=new AbortController().signal,{refresh=false}={}){
+  async function load(exchange,signal=new AbortController().signal,{refresh=false,onUpdate}={}){
+   if(exchange==='ALL')return loadAll(signal,{refresh,onUpdate});
    if(!exchanges.some(([id])=>id===exchange))throw Error('지원하지 않는 거래소입니다.');
    signal.throwIfAborted();const saved=cache.get(exchange);if(!refresh&&saved&&now()-saved.fetchedAt<30000)return {...saved,stale:false};
    // A caller's cancellation does not abort another chart's shared catalog request.
    let task=pending.get(exchange);
    if(!task){task=fetchCatalog(exchange).then(rows=>{if(!rows.length)throw Error('거래 가능한 USDT 무기한 종목을 받지 못했습니다.');const result={rows,fetchedAt:now(),stale:false};cache.set(exchange,result);return result;}).finally(()=>pending.delete(exchange));pending.set(exchange,task);}
    try{const result=await task;signal.throwIfAborted();return result;}catch(error){signal.throwIfAborted();if(saved)return {...saved,stale:true,error:error.message};throw error;}
+  }
+  async function loadAll(signal,{refresh,onUpdate}){
+   signal.throwIfAborted();
+   const results=new Map(),states=new Map(exchanges.map(([exchange])=>[exchange,{exchange,status:'pending'}]));
+   const snapshot=()=>{const values=[...results.values()];return {rows:values.flatMap(value=>value.rows),fetchedAt:values.length?Math.min(...values.map(value=>value.fetchedAt)):null,stale:values.some(value=>value.stale),exchangeStates:exchanges.map(([exchange])=>({...states.get(exchange)}))};};
+   await Promise.all(exchanges.map(async([exchange])=>{
+    try{const result=await load(exchange,signal,{refresh});results.set(exchange,result);states.set(exchange,{exchange,status:result.stale?'stale':'ok',...(result.error?{error:result.error}:{})});}
+    catch(error){if(signal.aborted)return;states.set(exchange,{exchange,status:'error',error:error.message});}
+    if(!signal.aborted)onUpdate?.(snapshot());
+   }));
+   signal.throwIfAborted();const result=snapshot();if(!result.rows.length)throw Error('모든 거래소의 종목 목록을 조회하지 못했습니다. 새로고침하거나 거래소를 선택해 다시 시도하세요.');return result;
   }
   async function fetchCatalog(ex){
    const signal=AbortSignal.timeout(20000),get=(url,params={})=>json(url,params,signal);
