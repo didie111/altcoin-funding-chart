@@ -3,17 +3,20 @@
  function bind({doc,$,workspace,selectMarket,icon}){
   const M=root.DashboardModel,tab=$('tabBtnDelistings'),panel=$('tab-delistings'),sidebar=$('signal-sidebar');if(!M||!tab||!panel)return;
   const sources={BINANCE:'https://www.binance.com/en/support/announcement/list/161',BYBIT:'https://announcements.bybit.com/en/?category=delistings',BINGX:'https://bingx.com/en/support/categories/360002065274',BITGET:'https://www.bitget.com/support/sections/12508313443290',MEXC:'https://www.mexc.com/announcements/delistings',OKX:'https://www.okx.com/help/section/announcements-delistings'};
-  panel.innerHTML='<div class="news-header"><div class="news-eyebrow"><i class="news-dot"></i>EXCHANGE NOTICE</div><div class="news-heading-row"><h2>상장폐지 소식</h2><button id="newsExpand" type="button" title="소식 넓게 보기" aria-label="소식 넓게 보기" aria-pressed="false">'+icon('expand')+'</button><button id="newsSidebarClose" type="button" aria-label="소식 닫기">'+icon('close')+'</button></div><p>공식 공지를 보관하고, 과거 소식까지 찾아보세요.</p></div><div class="news-filters"><label class="news-search">'+icon('search')+'<input type="search" id="newsSearch" maxlength="80" placeholder="보관 공지에서 코인·제목 검색" aria-label="상장폐지 코인·공지 검색"></label><div id="newsExchanges" class="news-exchanges" role="group" aria-label="거래소 필터"></div><div class="news-scopes" role="group" aria-label="시장 필터"><button type="button" data-scope="all" aria-pressed="true">전체</button><button type="button" data-scope="futures" aria-pressed="false">선물</button><button type="button" data-scope="spot" aria-pressed="false">현물</button><span class="news-count" id="newsCount"></span></div><form id="newsDateForm" class="news-date-form"><div class="news-date-row"><label>게시 시작일 · KST<input type="date" id="newsStart" aria-label="공지 게시 시작일"></label><label>게시 종료일 · KST<input type="date" id="newsEnd" aria-label="공지 게시 종료일"></label></div><div class="news-date-actions"><button type="button" id="newsDateReset">전체 기간</button><button type="submit">기간 적용</button></div></form></div><div class="news-update"><span id="newsUpdate" role="status" aria-live="polite">공식 공지 보관함을 불러오는 중</span><button type="button" id="newsRefresh">'+icon('refresh',12)+' 새로고침</button></div><div class="news-list" id="newsList" aria-label="공식 상장폐지 공지"></div><div class="news-archive-footer"><div class="news-pagination"><button type="button" id="newsPrevious">이전 목록</button><span id="newsPageLabel"></span><button type="button" id="newsNext">다음 목록</button></div><button type="button" id="newsCollectOlder" class="news-collect">'+icon('calendar',13)+' 과거 공지 더 가져오기</button><p id="newsArchiveRange"></p></div><div class="news-source-note">자동 확인 약 15분 · 게시일 기준 정렬<details><summary>공식 출처·거래소별 보관 범위</summary><div class="news-source-links" id="newsSources"></div><p>기간·검색은 보관된 공지에 적용됩니다. 원하는 과거가 없으면 위 버튼으로 공식 이전 페이지를 추가로 수집하세요. 수집 오류·같은 페이지 반복은 전체 수집 완료로 처리하지 않습니다.</p></details></div>';
+  panel.innerHTML='<div class="news-header"><div class="news-heading-row"><h2>상장폐지 소식</h2><button id="newsExpand" type="button" title="소식 넓게 보기" aria-label="소식 넓게 보기" aria-pressed="false">'+icon('expand')+'</button><button id="newsSidebarClose" type="button" aria-label="소식 닫기">'+icon('close')+'</button></div></div><div class="news-filters"><label class="news-search">'+icon('search')+'<input type="search" id="newsSearch" maxlength="80" placeholder="보관 공지에서 코인·제목 검색" aria-label="상장폐지 코인·공지 검색"></label><details id="newsFilterDetails" class="news-filter-details"><summary>거래소·기간 필터<span id="newsFilterSummary">전체 거래소 · 전체 시장 · 전체 기간</span></summary><div class="news-filter-options"><div id="newsExchanges" class="news-exchanges" role="group" aria-label="거래소 필터"></div><div class="news-scopes" role="group" aria-label="시장 필터"><button type="button" data-scope="all" aria-pressed="true">전체</button><button type="button" data-scope="futures" aria-pressed="false">선물</button><button type="button" data-scope="spot" aria-pressed="false">현물</button><span class="news-count" id="newsCount"></span></div><form id="newsDateForm" class="news-date-form"><div class="news-date-row"><label>게시 시작일 · KST<input type="date" id="newsStart" aria-label="공지 게시 시작일"></label><label>게시 종료일 · KST<input type="date" id="newsEnd" aria-label="공지 게시 종료일"></label></div><div class="news-date-actions"><button type="button" id="newsDateReset">전체 기간</button><button type="submit">기간 적용</button></div></form></div></details></div><div class="news-update"><span id="newsUpdate" role="status" aria-live="polite">공식 공지 보관함을 불러오는 중</span><button type="button" id="newsRefresh">'+icon('refresh',12)+' 새로고침</button></div><div class="news-list" id="newsList" aria-label="공식 상장폐지 공지"></div><div class="news-archive-footer"><div class="news-pagination"><button type="button" id="newsPrevious">이전 목록</button><span id="newsPageLabel"></span><button type="button" id="newsNext">다음 목록</button></div><button type="button" id="newsCollectOlder" class="news-collect">'+icon('calendar',13)+' 과거 공지 더 가져오기</button><p id="newsArchiveRange"></p></div><div class="news-source-note">자동 확인 약 15분 · 게시일 기준 정렬<details><summary>공식 출처·거래소별 보관 범위</summary><div class="news-source-links" id="newsSources"></div><p>기간·검색은 보관된 공지에 적용됩니다. 원하는 과거가 없으면 위 버튼으로 공식 이전 페이지를 추가로 수집하세요. 수집 오류·같은 페이지 반복은 전체 수집 완료로 처리하지 않습니다.</p></details></div>';
   const toggle=doc.createElement('button');toggle.id='chartNewsToggle';toggle.type='button';toggle.title='상장폐지 소식 열기';toggle.setAttribute('aria-label','상장폐지 소식 열기');toggle.innerHTML=icon('news',15)+'<span>소식</span>';$('backtestDock').querySelector('.backtest-bar').insertBefore(toggle,$('backtestDock').querySelector('.backtest-actions'));
   function openNews(){if(root.ChartSidebar)root.ChartSidebar.open('tab-delistings');else tab.click();if(Date.now()-lastLatest>=900000)void load('latest');}
   toggle.onclick=()=>root.ChartSidebar?.isOpen()&&panel.classList.contains('active')?root.ChartSidebar.close():openNews();
   $('newsSidebarClose').onclick=()=>root.ChartSidebar?.close();
   $('newsExpand').onclick=()=>{const wide=doc.body.classList.toggle('news-wide');$('newsExpand').setAttribute('aria-pressed',String(wide));$('newsExpand').innerHTML=icon(wide?'restore':'expand');$('newsExpand').title=wide?'소식 너비 줄이기':'소식 넓게 보기';$('newsExpand').setAttribute('aria-label',$('newsExpand').title);};
   let filter={exchange:'ALL',scope:'all',query:'',start:'',end:''},items=[],states={},history={},coverage=[],archiveTotal=0,pagination={total:0,hasMore:false},cursor=null,previous=[],busy=false,serial=0,controller,lastLatest=0,debounce,serverReady=false;
+  panel.tabIndex=0;
   const dateFmt=new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}),timeFmt=new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'});
   const date=v=>v?dateFmt.format(v):'게시일 미제공';
   const selected=()=>filter.exchange==='ALL'?Object.keys(sources):[filter.exchange];
-  function refreshFilter(){void load('archive',{resetScroll:true,targetCursor:null,targetPrevious:[]});}
+  function updateFilterSummary(){const period=filter.start||filter.end?(filter.start||'처음')+' ~ '+(filter.end||'최근'):'전체 기간';$('newsFilterSummary').textContent=(M.exchanges[filter.exchange]||'전체 거래소')+' · '+({all:'전체 시장',futures:'선물',spot:'현물'})[filter.scope]+' · '+period;$('newsFilterDetails').classList.toggle('has-filter',filter.exchange!=='ALL'||filter.scope!=='all'||Boolean(filter.start||filter.end));}
+  function refreshFilter(){updateFilterSummary();void load('archive',{resetScroll:true,targetCursor:null,targetPrevious:[]});}
+  updateFilterSummary();
   for(const [id,label]of [['ALL','전체'],...Object.entries(M.exchanges)]){
    const button=doc.createElement('button');button.type='button';button.textContent=label;button.dataset.exchange=id;button.setAttribute('aria-pressed',String(id==='ALL'));button.onclick=()=>{filter.exchange=id;for(const b of $('newsExchanges').children)b.setAttribute('aria-pressed',String(b===button));refreshFilter();};$('newsExchanges').append(button);
   }
@@ -22,7 +25,7 @@
   $('newsDateForm').onsubmit=event=>{event.preventDefault();const start=$('newsStart').value,end=$('newsEnd').value;if(start&&end&&start>end){$('newsUpdate').textContent='시작일이 종료일보다 늦습니다.';return;}filter.start=start;filter.end=end;refreshFilter();};
   $('newsDateReset').onclick=()=>{$('newsStart').value='';$('newsEnd').value='';filter.start='';filter.end='';refreshFilter();};
   function render(){
-   const scroll=$('newsList').scrollTop,frag=doc.createDocumentFragment();
+   const scroll=panel.scrollTop,frag=doc.createDocumentFragment();
    $('newsCount').textContent=(serverReady?'보관 ':'수집본 ')+pagination.total+'건';
    for(const n of items){
     const card=doc.createElement('article');card.className='news-card';card.dataset.exchange=n.exchange;card.dataset.noticeId=n.id;
@@ -36,7 +39,7 @@
     card.append(bottom);frag.append(card);
    }
    if(!items.length){const empty=doc.createElement('p');empty.className='news-empty';empty.textContent=busy?'공식 공지를 확인하고 있습니다.':'조건에 맞는 보관 공지가 없습니다.\n과거 공지를 추가로 가져오거나 조건을 바꿔 보세요.';frag.append(empty);}
-   $('newsList').replaceChildren(frag);$('newsList').scrollTop=scroll;
+   $('newsList').replaceChildren(frag);
    const sf=doc.createDocumentFragment();for(const [id,url]of Object.entries(sources)){
     const a=doc.createElement('a');a.href=url;a.target='_blank';a.rel='noopener noreferrer';a.textContent=M.exchanges[id]+' ↗';const small=doc.createElement('small'),s=states[id],h=history[id],c=coverage.find(c=>c.exchange===id);
     small.textContent=(s?.status==='ok'?'최신 확인 '+date(s.checkedAt):s?.status==='error'?'최신 갱신 지연':'최신 확인 대기')+(c?' · '+c.count+'건':'');
@@ -45,7 +48,7 @@
    }$('newsSources').replaceChildren(sf);
    const ranges=coverage.filter(c=>selected().includes(c.exchange)&&c.oldest_at),oldest=ranges.length?Math.min(...ranges.map(c=>c.oldest_at)):null;
    $('newsArchiveRange').textContent=serverReady?'서버 보관 '+archiveTotal+'건'+(oldest?' · 선택 출처 '+date(oldest)+'부터':'')+' · 전체 과거 수집을 뜻하지 않습니다.':'서버 연결 전에는 기본 수집본만 표시합니다.';
-   $('newsPageLabel').textContent=(previous.length+1)+'페이지 · '+items.length+'건';updateButtons();
+   $('newsPageLabel').textContent=(previous.length+1)+'페이지 · '+items.length+'건';updateButtons();panel.scrollTop=scroll;
   }
   function updateButtons(){
    $('newsRefresh').disabled=busy;$('newsPrevious').disabled=busy||!previous.length;$('newsNext').disabled=busy||!pagination.hasMore;
@@ -69,7 +72,7 @@
     const failed=selected().filter(ex=>states[ex]?.status==='error').length;
     const historyFailed=selected().filter(ex=>['error','blocked'].includes(history[ex]?.status)).length;
     $('newsUpdate').textContent=(mode==='older'?(historyFailed?'일부 과거 수집 지연 · 보관 목록 표시':archiveTotal>before?'과거 공지 추가 보관 완료':'이전 목록 확인 · 추가 수집 가능'):(failed?'일부 최신 갱신 지연 · 보관 목록 표시':mode==='latest'?'공식 공지 확인 완료':'보관 공지 검색 완료'))+' · '+timeFmt.format(Date.now())+' KST';
-    render();if(resetScroll)$('newsList').scrollTop=0;
+    render();if(resetScroll)panel.scrollTop=0;
    }catch(error){
     if(requestId!==serial||controller.signal.aborted)return;
     if(!serverReady){
