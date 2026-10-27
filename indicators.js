@@ -1514,7 +1514,7 @@ class StudyPanelManager {
     title.className = 'panel-title';
     title.type = 'button';
     title.textContent = p.title;
-    title.title = p.id === 'rsi' ? 'RSI 설정' : p.id === 'funding' ? '막대: 해당 봉 안의 확정 정산율 중 최저값 · 노란선: 조회한 현재 미정산율 · 더블클릭: 패널 설정' : p.id === 'cycle' ? '과거 봉: 연속 정산 기록의 관측 간격이며 공식 정책 이력이 아닙니다. 단발 간격은 표시하지 않습니다. 최신 미정산 구간은 공식 현재 주기를 우선합니다. 기록 누락 시 확인 불가입니다.' : '패널 설정';
+    title.title = p.id === 'rsi' ? 'RSI 설정' : p.id === 'funding' ? '막대: 해당 봉 안의 확정 정산율 중 최저값 · 노란선: 조회한 현재 미정산율 · 더블클릭: 패널 설정' : p.id === 'cycle' ? '과거 봉: 거래소가 제공한 정산 주기가 있으면 우선하고, 없으면 연속 정산 기록의 간격을 관측합니다. 확인되지 않은 단발 간격은 표시하지 않습니다. 최신 미정산 구간은 공식 현재 주기를 우선합니다. 기록 누락 시 확인 불가입니다.' : '패널 설정';
     title.ondblclick = () => this.openSettings(p.id);
     left.append(title);
 

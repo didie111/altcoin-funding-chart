@@ -179,6 +179,7 @@ function harness(options = {}) {
       if (options.fetchedAt) payload.__marketFetchedAt = options.fetchedAt;
       return payload;
     },
+    fetchOfficialCycle:async(ex,symbol,signal)=>options.cycleFetch?options.cycleFetch(ex,symbol,signal):options.cycle??null,
     fundingPage: async () => {if (options.historyGate) await options.historyGate; return options.history ?? [{time: settle / 1000, rate: -.2}];},
     candlePage: async () => {if (options.candleGate) await options.candleGate; return (options.candles ?? [{time: now / 1000}]).map(fixture);},
     uniqueSorted: rows => engine.merge(rows),
@@ -342,4 +343,13 @@ test('a live candle outside a historical render window does not redraw that wind
  assert.equal(h.renders.length,0);assert.equal(h.rangeUpdates.length,0);assert.equal(h.context.windowEnd,1);
  assert.equal(h.context.chartDateFocus.time,settle/1000);assert.equal(h.context.all.at(-1).close,11);
  assert.equal(h.cacheUpdates.length,1);assert.equal(h.context.cycleValues.get(now/1000+3600).hours,8);
+});
+
+test('selected current interval metadata is available before blocked historical collection completes',async()=>{
+ let release;const gate=new Promise(resolve=>release=resolve),h=harness({historyGate:gate,cycle:{hours:8,note:''}});h.api.startFundingUpdates('BINANCE','KAIA','1h',1);await flush();
+ assert.equal(h.context.officialCycle.hours,8);assert.equal(h.api.getSession().pending,true);assert.equal(h.api.getSession().historyChecked,false);release();await flush();h.api.stopFundingUpdates();
+});
+test('late interval metadata from a previous coin cannot overwrite the newly selected market',async()=>{
+ let release;const gate=new Promise(resolve=>release=resolve),h=harness({cycleFetch:async ex=>{if(ex==='BINANCE'){await gate;return {hours:8,note:''};}return null;}});h.api.startFundingUpdates('BINANCE','KAIA','1h',1);await flush();
+ h.context.run=2;h.api.startFundingUpdates('BITGET','BTC','1h',2);await flush();assert.equal(h.context.officialCycle.hours,4);release();await flush();assert.equal(h.context.officialCycle.hours,4);h.api.stopFundingUpdates();
 });

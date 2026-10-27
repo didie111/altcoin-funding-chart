@@ -8,7 +8,7 @@
   async function load(ex,symbol,{from,to,signal=new AbortController().signal,onPage=()=>{}}){
    if(!(Number.isFinite(from)&&Number.isFinite(to)&&from<to))throw Error('정산 이력의 조회 구간이 올바르지 않습니다.');
    signal.throwIfAborted();if(covers(ex,symbol,from,to))return {cached:true,pages:0};
-   const lower=Math.max(0,from-86400),upper=Math.min(now()/1000,to+86400),seen=new Set();let cursor=ex==='BINANCE'?Math.floor(lower*1000):Math.floor(upper*1000),number=1,pages=0;
+   const lower=Math.max(0,from-2*86400),upper=Math.min(now()/1000,to+2*86400),seen=new Set();let cursor=ex==='BINANCE'?Math.floor(lower*1000):Math.floor(upper*1000),number=1,pages=0;
    for(;;){
     signal.throwIfAborted();const rows=F.merge(await page(ex,symbol,cursor,number,signal));signal.throwIfAborted();pages++;
     if(rows.length){const signature=rows[0].time+':'+rows.at(-1).time+':'+rows.length;if(seen.has(signature))throw Error('정산 이력 API가 같은 페이지를 반복했습니다.');seen.add(signature);await onPage(rows,pages);signal.throwIfAborted();}
@@ -23,9 +23,9 @@
   return {load,covers};
  }
  function partition(records,from,to){
-  const inside=[],neighbors=[];let before=null,after=null;
-  for(const row of F.merge(records)){if(row.time<from)before=row;else if(row.time>=to){after??=row;}else inside.push(row);}
-  if(before)neighbors.push(before);if(after)neighbors.push(after);return {inside,neighbors};
+  const inside=[],before=[],after=[];
+  for(const row of F.merge(records)){if(row.time<from){before.push(row);if(before.length>2)before.shift();}else if(row.time>=to){if(after.length<2)after.push(row);}else inside.push(row);}
+  return {inside,neighbors:[...before,...after]};
  }
  return {create,partition};
 });
