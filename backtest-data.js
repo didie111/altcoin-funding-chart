@@ -27,8 +27,8 @@
     for(const r of rows)if(r.time>=fundingStart&&r.time<fundingEnd)allFunding.set(r.time,r);
     onProgress({phase:'funding',pages,count:allFunding.size,exchange:ex});
     if(!rows.length){if(ex==='BINGX'&&cursor/1000-90*86400>fundingStart){cursor-=90*86400000;continue;}break;}
-    if(ex==='BINANCE'){const next=rows.at(-1).time*1000+1;if(next<=cursor)throw Error('펀딩비 API의 과거 페이지가 진행되지 않습니다.');if(next>=fundingEnd*1000)break;cursor=next;}
-    else{if(rows[0].time<=fundingStart)break;const next=rows[0].time*1000-1;if(next>=cursor&&!['BITGET','MEXC'].includes(ex))throw Error('펀딩비 API의 과거 페이지가 진행되지 않습니다.');if(['BITGET','MEXC'].includes(ex)&&page>1&&rows.every(r=>r.time>=cursor/1000))throw Error('펀딩비 API가 같은 페이지를 반복했습니다.');cursor=next;page++;}
+    if(ex==='BINANCE'){const next=F.nextHistoryCursor(ex,rows);if(next<=cursor)throw Error('펀딩비 API의 과거 페이지가 진행되지 않습니다.');if(next>=fundingEnd*1000)break;cursor=next;}
+    else{if(rows[0].time<=fundingStart)break;const next=F.nextHistoryCursor(ex,rows);if(next>=cursor&&!['BITGET','MEXC'].includes(ex))throw Error('펀딩비 API의 과거 페이지가 진행되지 않습니다.');if(['BITGET','MEXC'].includes(ex)&&page>1&&rows.every(r=>r.time>=cursor/1000))throw Error('펀딩비 API가 같은 페이지를 반복했습니다.');cursor=next;page++;}
    }
    if(!allFunding.size)throw Error('선택 기간의 공식 정산 기록이 없어 진입 조건을 검증할 수 없습니다.');
    for(const tf of intervals){try{

@@ -81,6 +81,15 @@ const FundingEngine = (() => {
     for (const group of groups) for (const row of group) rows.set(row.time, row);
     return [...rows.values()].sort((a, b) => a.time - b.time);
   }
+  function nextHistoryCursor(ex, rows) {
+    const row = ex === 'BINANCE' ? rows.at(-1) : rows[0];
+    if (!row) return null;
+    if (ex !== 'BINANCE') return row.time * 1000 - 1;
+    // Binance startTime is inclusive. Chart seconds discard the original
+    // milliseconds, so adding 1ms to those seconds can fetch the same record.
+    // Older/cached records without that precision must clear the entire second.
+    return Number.isSafeInteger(row.timeMs) && Math.floor(row.timeMs / 1000) === row.time ? row.timeMs + 1 : (row.time + 1) * 1000;
+  }
   function normalizeHistory(ex, response, symbol, now = Date.now()) {
     if (ex === 'BINGX' && String(response.code) === '0' && response.data === null) return [];
     const rows = ex === 'BINANCE' ? response : ex === 'BYBIT' ? response.result?.list : ex === 'MEXC' ? response.data?.resultList : response.data;
@@ -94,7 +103,7 @@ const FundingEngine = (() => {
       const actual = ex === 'OKX' && hasActual ? row.realizedRate : row.fundingRate;
       const rate = percent(actual);
       if (time === null || rate === null) throw Error('펀딩비 이력에 비어 있거나 잘못된 값이 있습니다.');
-      if (time <= Math.floor(now / 1000)) {const markPrice=numeric(row.markPrice),cycle=ex==='MEXC'?numeric(row.collectCycle):null;result.push({time, rate,...(markPrice>0?{markPrice}:{}),...(cycle>0&&cycle<=24?{intervalHours:cycle,intervalSource:'official-history'}:{})});}
+      if (time <= Math.floor(now / 1000)) {const markPrice=numeric(row.markPrice),cycle=ex==='MEXC'?numeric(row.collectCycle):null,timeMs=ex==='BINANCE'?numeric(row.fundingTime):null;result.push({time, rate,...(Number.isSafeInteger(timeMs)&&timeMs>=1e11?{timeMs}:{}),...(markPrice>0?{markPrice}:{}),...(cycle>0&&cycle<=24?{intervalHours:cycle,intervalSource:'official-history'}:{})});}
     }
     return merge(result);
   }
@@ -160,7 +169,7 @@ const FundingEngine = (() => {
     const values = new Map(records.map(row => [row.time, row.rate]));
     return bars.map(bar => values.has(bar.time) ? {time: bar.time, value: values.get(bar.time)} : {time: bar.time});
   }
-  return {exchanges, numeric, percent, seconds, base, contract, currentRequest, normalizeCurrent, historyRequest, normalizeHistory, merge, mapToCandles, minimum, observedCycles, cycleTransitions, observeCurrent, liveSeriesData};
+  return {exchanges, numeric, percent, seconds, base, contract, currentRequest, normalizeCurrent, historyRequest, normalizeHistory, nextHistoryCursor, merge, mapToCandles, minimum, observedCycles, cycleTransitions, observeCurrent, liveSeriesData};
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = FundingEngine;

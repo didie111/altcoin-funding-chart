@@ -13,8 +13,8 @@
     signal.throwIfAborted();const rows=F.merge(await page(ex,symbol,cursor,number,signal));signal.throwIfAborted();pages++;
     if(rows.length){const signature=rows[0].time+':'+rows.at(-1).time+':'+rows.length;if(seen.has(signature))throw Error('정산 이력 API가 같은 페이지를 반복했습니다.');seen.add(signature);await onPage(rows,pages);signal.throwIfAborted();}
     if(!rows.length){if(ex==='BINGX'&&cursor/1000-90*86400>lower){cursor-=90*86400000;}else break;}
-    else if(ex==='BINANCE'){const next=rows.at(-1).time*1000+1;if(next<=cursor)throw Error('정산 이력 API의 과거 커서가 진행되지 않습니다.');if(rows.at(-1).time>=upper)break;cursor=next;}
-    else{if(rows[0].time<=lower)break;const next=rows[0].time*1000-1;if(next>=cursor&&!['BITGET','MEXC'].includes(ex))throw Error('정산 이력 API의 과거 커서가 진행되지 않습니다.');cursor=next;number++;}
+    else if(ex==='BINANCE'){const next=F.nextHistoryCursor(ex,rows);if(next<=cursor)throw Error('정산 이력 API의 과거 커서가 진행되지 않습니다.');if(rows.at(-1).time>=upper)break;cursor=next;}
+    else{if(rows[0].time<=lower)break;const next=F.nextHistoryCursor(ex,rows);if(next>=cursor&&!['BITGET','MEXC'].includes(ex))throw Error('정산 이력 API의 과거 커서가 진행되지 않습니다.');cursor=next;number++;}
     await pause(ex==='BINGX'?1150:200,signal);
    }
    signal.throwIfAborted();covered=covered.filter(r=>r.until>now());covered.push({ex,symbol,from,to,until:to>=now()/1000-86400?now()+60000:Infinity});covered=covered.slice(-24);
