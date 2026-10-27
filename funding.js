@@ -94,7 +94,7 @@ const FundingEngine = (() => {
       const actual = ex === 'OKX' && hasActual ? row.realizedRate : row.fundingRate;
       const rate = percent(actual);
       if (time === null || rate === null) throw Error('펀딩비 이력에 비어 있거나 잘못된 값이 있습니다.');
-      if (time <= Math.floor(now / 1000)) {const markPrice=numeric(row.markPrice);result.push({time, rate,...(markPrice>0?{markPrice}:{})});}
+      if (time <= Math.floor(now / 1000)) {const markPrice=numeric(row.markPrice),cycle=ex==='MEXC'?numeric(row.collectCycle):null;result.push({time, rate,...(markPrice>0?{markPrice}:{}),...(cycle>0&&cycle<=24?{intervalHours:cycle,intervalSource:'official-history'}:{})});}
     }
     return merge(result);
   }
@@ -117,7 +117,14 @@ const FundingEngine = (() => {
   }
   function observedCycles(records) {
     const rows=merge(records),allowed=[1,2,4,6,8,12,24],periods=[];
-    for(let i=1;i<rows.length;i++){
+    for(let i=0;i<rows.length;i++){
+      const official=rows[i].intervalSource==='official-history'?numeric(rows[i].intervalHours):null;
+      if(official>0&&official<=24){
+        const end=rows[i].time,start=Math.max(end-official*3600,rows[i-1]?.time??-Infinity);
+        if(i&&rows[i-1].time<start)periods.push({start:rows[i-1].time,end:start,observedHours:null,hours:null,source:'unconfirmed',gap:true});
+        periods.push({start,end,observedHours:official,hours:official,source:'official-history'});continue;
+      }
+      if(!i)continue;
       const seconds=rows[i].time-rows[i-1].time,hours=allowed.find(h=>Math.abs(seconds-h*3600)<=60)??null;
       periods.push({start:rows[i-1].time,end:rows[i].time,observedHours:hours,hours:null,source:'unconfirmed'});
     }
@@ -125,6 +132,7 @@ const FundingEngine = (() => {
       const p=periods[i],hours=p.observedHours;
       // A single interval may be a missing settlement or a schedule boundary.
       // Repetition supports an observation, never an official historical policy.
+      if(p.source==='official-history')continue;
       if(hours!==null&&(periods[i-1]?.observedHours===hours||periods[i+1]?.observedHours===hours)){p.hours=hours;p.source='observed';}
       else p.gap=true;
     }

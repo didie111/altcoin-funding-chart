@@ -708,9 +708,9 @@ function rebuild(){const {warn,ext}=thresholds();
  rebuildCycles();renderList();renderFundingBoard();}
 
 function observedCycles(records){return FundingEngine.observedCycles(records);}
-function currentCyclePeriod(){const session=fundingSession,entry=session?.entries.get(session.ex);return ChartData.currentCycle(entry?.quote,officialCycle?.hours,rates);}
+function currentCyclePeriod(){const session=fundingSession,entry=session?.entries.get(session.ex),recent=FundingEngine.merge(rates.slice(-3),(historyState.cycleNeighbors||[]).slice(-3),(session?.latestRows||[]).slice(-3));return ChartData.currentCycle(entry?.quote,officialCycle?.hours,recent);}
 function liveCycleValue(c){const p=currentCyclePeriod(),step=duration[loadedMarket?.int??$('intervalSelect').value];return p&&TimeframeEngine.end(c.time,loadedMarket?.int??$('intervalSelect').value)>p.start&&c.time<p.end?ChartData.withCurrentCycle(cycleValues.get(c.time),p):cycleValues.get(c.time);}
-function rebuildCycles(){cycleHistory=observedCycles(FundingEngine.merge(rates,historyState.cycleNeighbors||[]));cycleTransitions=FundingEngine.cycleTransitions(cycleHistory);cycleValues=new Map();
+function rebuildCycles(){cycleHistory=observedCycles(FundingEngine.merge(rates,historyState.cycleNeighbors||[],fundingSession?.latestRows||[]));cycleTransitions=FundingEngine.cycleTransitions(cycleHistory);cycleValues=new Map();
  let i=0;const seconds=duration[$('intervalSelect').value];for(const c of all){while(i<cycleHistory.length&&cycleHistory[i].end<=c.time)i++;let value=null,unknown=false;for(let j=i;j<cycleHistory.length&&cycleHistory[j].start<TimeframeEngine.end(c.time,$('intervalSelect').value);j++){const p=cycleHistory[j];if(p.end<=c.time)continue;if(p.hours===null)unknown=true;else value=value===null?p.hours:Math.min(value,p.hours);}
  if(value!==null)cycleValues.set(c.time,{hours:value,observedHours:value,mixed:unknown});}
  const current=currentCyclePeriod();if(current)for(const c of all){if(TimeframeEngine.end(c.time,$('intervalSelect').value)>current.start&&c.time<current.end)cycleValues.set(c.time,ChartData.withCurrentCycle(cycleValues.get(c.time),current));}
@@ -718,7 +718,7 @@ function rebuildCycles(){cycleHistory=observedCycles(FundingEngine.merge(rates,h
  const latest=cycleHistory.at(-1);
  const official=(officialCycle?.hours?` · 거래소 공식 현재 주기: ${officialCycle.hours}시간${officialCycle.note}`:'')+(otherCycles.length?` · 거래소별 현재 주기: ${otherCycles.map(o=>o.name+' '+o.hours+'시간').join(' / ')}`:'');
  const mismatch=officialCycle?.hours&&latest?.hours&&latest.hours!==officialCycle.hours?` · 최근 관측 간격(${latest.hours}시간)과 공식 현재값(${officialCycle.hours}시간)이 다름`:'';
- cycleCaption.textContent=`과거 연속 기록 간격(공식 정책 이력 아님): ${latest?.hours?latest.hours+'시간':'확인 불가'}${official}${mismatch} · 최신 미정산 구간: ${current?current.hours+'시간 ('+(current.source==='official'?'공식 현재 주기':'연속 기록에서 추정')+')':'주기 확인 대기'} · 관측 간격 변화 ${cycleTransitions.length}회 · 단발 간격은 확인 불가 · 공백 전후 변화는 경계 미확인 표시 · 8h 파랑 / 4h 주황 / 1h 빨강 · 일봉 등은 봉 내 최소 관측 간격 · 기록 누락 시 실제 정책과 다를 수 있음`;updateCycleBadge();}
+ cycleCaption.textContent=`과거 연속 기록 간격(공식 정책 이력 아님): ${latest?.hours?latest.hours+'시간':'확인 불가'}${official}${mismatch} · 최신 미정산 구간: ${current?current.hours+'시간 ('+(current.source==='official'?'공식 현재 주기':'연속 기록에서 추정')+')':'주기 확인 대기'} · 관측 간격 변화 ${cycleTransitions.length}회 · 거래소 제공 과거 주기는 우선 반영 · 그 외 단발 간격은 확인 불가 · 공백 전후 변화는 경계 미확인 표시 · 8h 파랑 / 4h 주황 / 1h 빨강 · 일봉 등은 봉 내 최소 관측 간격 · 기록 누락 시 실제 정책과 다를 수 있음`;updateCycleBadge();}
 function cycleColor(h){return h===1?'#ef4444':h===4?'#f59e0b':h===8?'#3b82f6':'#a78bfa';}
 function renderCycles(part){if(!settlementCycle)return;settlementCycle.setData(part.map(c=>{const p=cycleValues.get(c.time);return p?{time:c.time,value:p.hours,color:cycleColor(p.hours)}:{time:c.time};}));
  if(!part.length){cycleMarkers?.setMarkers([]);return;}
@@ -974,6 +974,7 @@ function startFundingUpdates(ex, symbol, interval, id) {
   const session = {ex, symbol, interval, id, abort: new AbortController(), entries: new Map(), quotePending: new Set(), liveRows: [], recentCandles: [], latestRows: [], historyChecked: false, historyError: null, candleError: null, pending: false, candlesPending: false};
   fundingSession = session;
   renderLiveFunding(); renderFundingBoard();
+  void refreshOfficialCycle(session);
   void refreshFundingSession(session);
   session.quoteTimer = setInterval(() => {
     if (!document.hidden) void refreshFundingQuotes(session);
@@ -985,6 +986,13 @@ function startFundingUpdates(ex, symbol, interval, id) {
 }
 function fundingRequestSignal(session) {
   return AbortSignal.any([session.abort.signal, AbortSignal.timeout(15000)]);
+}
+async function refreshOfficialCycle(session) {
+ if(!fundingSessionActive(session)||session.cyclePending||(session.cycleCheckedAt&&Date.now()-session.cycleCheckedAt<60000))return;
+ session.cyclePending=true;session.cycleCheckedAt=Date.now();
+ try{const value=await fetchOfficialCycle(session.ex,session.symbol,fundingRequestSignal(session));if(!fundingSessionActive(session)||!value)return;if(!session.entries.get(session.ex)?.quote?.hours)officialCycle=value;updateCurrentCycleWindow();}
+ catch(error){if(fundingSessionActive(session))session.cycleError=fundingError(error);}
+ finally{session.cyclePending=false;}
 }
 async function refreshFundingQuotes(session) {
   if (!fundingSessionActive(session)) return;
@@ -1002,6 +1010,7 @@ async function refreshFundingQuotes(session) {
       if (ex === session.ex) {
         session.liveRows = FundingEngine.observeCurrent(session.liveRows, quote, duration[session.interval],time=>TimeframeEngine.start(time,session.interval));
         if (quote.hours) officialCycle = {hours: quote.hours, note: ''};
+        else void refreshOfficialCycle(session);
         renderLiveFunding(false);
         updateCurrentCycleWindow();
         if (all.length && all.at(-1).time < session.liveRows.at(-1).time) void refreshFundingCandles(session);
@@ -1016,7 +1025,7 @@ async function refreshFundingQuotes(session) {
     }
   }));
 }
-function sameRates(a,b){return a.length===b.length&&a.every((row,i)=>row.time===b[i].time&&row.rate===b[i].rate);}
+function sameRates(a,b){return a.length===b.length&&a.every((row,i)=>row.time===b[i].time&&row.rate===b[i].rate&&(row.intervalHours??null)===(b[i].intervalHours??null)&&(row.intervalSource??null)===(b[i].intervalSource??null));}
 function renderFundingStudies(){
  const part=all.slice(windowStart,windowEnd);if(!part.length)return;const {warn,ext}=thresholds();
  funding?.setData(part.map(c=>{const f=mapped.get(c.time);return f?{time:c.time,value:f.rate,color:f.rate<=ext?'#a855f7':f.rate<=warn?'#ef4444':'#3b82f6'}:{time:c.time};}));
@@ -1038,8 +1047,8 @@ function refreshFundingChart(session, recentCandles = []) {
  const merged=ChartData.mergeLive(all,recentCandles,duration[session.interval],Date.now()/1000,time=>TimeframeEngine.end(time,session.interval));all=merged.bars;
  if(!merged.changed.length&&studyPanels?.cacheBars===previous)studyPanels.cacheBars=all;
  const nextRates=FundingEngine.merge(rates,session.latestRows.filter(row=>row.time>=all[0].time));
- const rateChanged=!sameRates(rates,nextRates);rates=nextRates;
- if(rateChanged)rebuild();
+ const rateChanged=!sameRates(rates,nextRates),cycleContextChanged=session.cycleContextChanged===true;rates=nextRates;session.cycleContextChanged=false;
+ if(rateChanged||cycleContextChanged)rebuild();
  if(cycleFast.length!==all.length){const next=new Uint8Array(all.length);next.set(cycleFast.subarray(0,all.length));cycleFast=next;}
  // Keep the study cache current even while the user is looking at the past.
  // Returning to the latest bars can then render immediately, without waiting for another quote.
@@ -1070,7 +1079,7 @@ function refreshFundingChart(session, recentCandles = []) {
    if(appended&&view?.followLatest){const scale=chart.timeScale(),range=scale.getVisibleLogicalRange();if(range)scale.setVisibleLogicalRange({from:range.from+appended,to:range.to+appended});}
    $('historyPosition').max=all.length-1;$('historyInfo').textContent=`${all.length.toLocaleString()}봉 · 화면 구간 ${date(all[windowStart].time)} ~ ${date(all.at(-1).time)}`;
  }else if(merged.changed.length&&visibleChanged){rebuild();restoreChartView(view,false);}
- if(rateChanged)renderFundingStudies();
+ if(rateChanged||cycleContextChanged)renderFundingStudies();
  schedule();
 }
 async function refreshFundingCandles(session) {
@@ -1100,7 +1109,7 @@ async function refreshFundingSession(session) {
       try {
         const rows = await fundingPage(session.ex, session.symbol, undefined, 1, fundingRequestSignal(session));
         if (!fundingSessionActive(session)) return;
-        session.latestRows = rows; session.historyChecked = true; session.historyError = null;
+        session.cycleContextChanged=!sameRates(session.latestRows,rows);session.latestRows = rows; session.historyChecked = true; session.historyError = null;
         refreshFundingChart(session);
         session.chartError = null;
       } catch (error) {
