@@ -41,7 +41,7 @@ body.chart-layout-four #chart-container>:not(#chartWorkspace){display:none!impor
 .symbol-picker button:hover{background:#2b3a52}
 .symbol-picker-close{font-size:22px;padding:1px 7px!important;line-height:1.3}
 .symbol-picker-controls{display:flex;gap:7px;padding:0 16px 10px}
-.symbol-picker-controls select{max-width:105px;background:#111827;border-color:#3c4d66;font-size:12px;padding:7px 6px}
+.symbol-picker-controls select{max-width:130px;background:#111827;border-color:#3c4d66;font-size:12px;padding:7px 6px}
 .symbol-picker-controls input{flex:1;min-width:0;width:100%!important;background:#111827;border-color:#3c4d66;text-transform:none!important;font-size:13px;padding:8px}
 .symbol-picker-tabs{display:flex;gap:5px;padding:0 16px 9px;border-bottom:1px solid #344158}
 .symbol-picker-tabs button{font-size:12px;padding:6px 9px}
@@ -63,12 +63,13 @@ body.chart-layout-four #chart-container>:not(#chartWorkspace){display:none!impor
 .symbol-picker-name{text-align:left;display:flex;flex-direction:column;min-width:0}
 .symbol-picker-name strong{overflow:hidden;text-overflow:ellipsis;font-size:12px}
 .symbol-picker-name small{font-size:9px;color:#8da0bc}
+.symbol-picker-name .symbol-picker-market{font-size:10px;color:#b6c8e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .symbol-picker-volume{font-size:10px;color:#94a3b8}
 .symbol-picker .positive{color:#34d399}.symbol-picker .negative{color:#fb7185}
 .symbol-picker-empty{position:absolute;left:12px;right:12px;top:20px;padding:12px;line-height:1.7;text-align:center;color:#94a3b8;font-size:12px}
 .symbol-picker-empty[hidden]{display:none}
 .symbol-picker-footer{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid #344158;font-size:10px;color:#94a3b8;min-height:38px}
-.symbol-picker-footer>span{overflow:hidden;text-overflow:ellipsis;max-width:100%;line-height:1.5}
+.symbol-picker-footer>span{max-width:100%;line-height:1.6;overflow-wrap:anywhere}
 .symbol-picker-footer button{font-size:10px;white-space:nowrap;padding:5px;background:#2563eb;color:white}
 @media(max-width:1100px){.chart-quad .chart-market-exchange{display:none}}
 @media(max-width:550px){.chart-market-exchange{display:none}.symbol-picker{width:calc(100vw - 12px)}.symbol-picker-controls{padding:0 10px 8px}.symbol-picker-columns{padding-right:10px}.symbol-picker-row{padding:0 6px}.symbol-picker-select{font-size:10px}.symbol-picker-name strong{font-size:10px}.chart-quad #drawingToolbar{width:32px}.chart-quad #drawingHistoryControls button:not(#chartLayoutToggle):not(#chartCellDate):not(.chart-workspace-control){display:none}.chart-quad #chartSymbolLabel{font-size:10px;max-width:95px}.chart-quad #chartCellDate{display:none}}
