@@ -40,7 +40,7 @@ for (const [ex] of engine.exchanges) {
     assert.equal(quote.rate, -1.5);
     assert.equal(quote.nextTime, next / 1000);
     assert.equal(quote.timestamp, now / 1000);
-    assert.deepEqual(engine.normalizeHistory(ex, history(ex), 'KAIA', now), [{time: settle / 1000, rate: -1.5}]);
+    assert.deepEqual(engine.normalizeHistory(ex, history(ex), 'KAIA', now), [{time: settle / 1000, rate: -1.5,...(ex==='BINANCE'?{timeMs:settle}:{})}]);
     assert.equal(engine.normalizeCurrent(ex, current(ex, '-0.03'), 'KAIA', now).rate, -3);
     assert.equal(engine.normalizeCurrent(ex, current(ex, '0'), 'KAIA', now).rate, 0);
   });
@@ -67,7 +67,7 @@ test('history is sorted, deduplicated and excludes future unsettled records', ()
     {fundingTime: settle, fundingRate: '-0.015'}
   ];
   assert.deepEqual(engine.normalizeHistory('BINANCE', rows, 'KAIA', now), [
-    {time: settle / 1000 - 3600, rate: .01}, {time: settle / 1000, rate: -1.5}
+    {time: settle / 1000 - 3600, rate: .01, timeMs: settle - 3600000}, {time: settle / 1000, rate: -1.5, timeMs: settle}
   ]);
 });
 test('negative extremes survive 15m/1h/4h/day mapping and signal thresholds', () => {
