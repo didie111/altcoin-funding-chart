@@ -134,7 +134,7 @@ async function main() {
     console.log(`📡 거래소 API로부터 [${options.symbol}] 펀딩비 및 캔들 데이터를 수집하는 중...`);
     try {
       dataset = await BacktestData.loadBacktestDataset(options.symbol, {
-        exchange:options.exchange,startTime:options.startTime,endTime:options.endTime,allowMissing:options.allTimeframes,requireMinuteData:options.optimize||options.splitTrigger==='rsi_cross_up_1m',
+        packed:true,exchange:options.exchange,startTime:options.startTime,endTime:options.endTime,allowMissing:options.allTimeframes,requireMinuteData:options.optimize||options.splitTrigger==='rsi_cross_up_1m',
         intervals: options.allTimeframes ? BacktestData.ALL_TIMEFRAMES : [options.timeframe]
       });
       console.log(`✓ 펀딩비 레코드 수집: ${dataset.fundingRecords.length}개`);
@@ -230,7 +230,7 @@ async function main() {
 
   } else if (options.allTimeframes) {
     console.log('\n📊 [전체 타임프레임(1분봉~월봉) 일괄 백테스트 실행]');
-    const multiResult = BacktestEngine.runAllTimeframes(dataset.timeframeCandles, dataset.fundingRecords, strategyConfig);
+    const multiResult = BacktestEngine.runAllTimeframes(dataset.timeframeCandles, dataset.fundingRecords, strategyConfig,{equityMaxPoints:5000});
     outputPayload.allTimeframes = multiResult;
 
     const headers = ['타임프레임', '거래수', '승률(%)', '손익비', '총수익률(%)', 'MDD(%)', '평균보유봉', '펀딩수취($)'];
@@ -263,7 +263,7 @@ async function main() {
       process.exit(1);
     }
 
-    const result = BacktestEngine.runBacktest(candles, dataset.fundingRecords, strategyConfig,{minuteCandles:dataset.timeframeCandles['1m']});
+    const result = BacktestEngine.runBacktest(candles, dataset.fundingRecords, strategyConfig,{minuteCandles:dataset.timeframeCandles['1m'],equityMaxPoints:5000});
     outputPayload.single = result;
     const s = result.summary;
 
