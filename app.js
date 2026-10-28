@@ -721,7 +721,7 @@ function rebuildCycles(){cycleHistory=observedCycles(FundingEngine.merge(rates,h
  const official=(officialCycle?.hours?` · 거래소 공식 현재 주기: ${officialCycle.hours}시간${officialCycle.note}`:'')+(otherCycles.length?` · 거래소별 현재 주기: ${otherCycles.map(o=>o.name+' '+o.hours+'시간').join(' / ')}`:'');
  const mismatch=officialCycle?.hours&&latest?.hours&&latest.hours!==officialCycle.hours?` · 최근 관측 간격(${latest.hours}시간)과 공식 현재값(${officialCycle.hours}시간)이 다름`:'';
  cycleCaption.textContent=`과거 연속 기록 간격(공식 정책 이력 아님): ${latest?.hours?latest.hours+'시간':'확인 불가'}${official}${mismatch} · 최신 미정산 구간: ${current?current.hours+'시간 ('+(current.source==='official'?'공식 현재 주기':'연속 기록에서 추정')+')':'주기 확인 대기'} · 관측 간격 변화 ${cycleTransitions.length}회 · 거래소 제공 과거 주기는 우선 반영 · 그 외 단발 간격은 확인 불가 · 공백 전후 변화는 경계 미확인 표시 · 8h 파랑 / 4h 주황 / 1h 빨강 · 일봉 등은 봉 내 최소 관측 간격 · 기록 누락 시 실제 정책과 다를 수 있음`;updateCycleBadge();}
-function cycleColor(h){return h===1?'#ef4444':h===4?'#f59e0b':h===8?'#3b82f6':'#a78bfa';}
+function cycleColor(h){return FundingEngine.cycleColor(h);}
 function renderCycles(part){if(!settlementCycle)return;settlementCycle.setData(part.map(c=>{const p=cycleValues.get(c.time);return p?{time:c.time,value:p.hours,color:cycleColor(p.hours)}:{time:c.time};}));
  if(!part.length){cycleMarkers?.setMarkers([]);return;}
  const map=new Map();for(const t of cycleTransitions){const i=lowerBound(all,t.time);const k=all[i]?.time===t.time?all[i]:all[i-1];if(!k||k.time<part[0].time||k.time>part.at(-1).time||t.time>=TimeframeEngine.end(k.time,$('intervalSelect').value))continue;
@@ -1272,6 +1272,7 @@ chartDrawings=bindChartDrawings({
  host:rulerHost,workspace:chartWorkspace,chart,rulerColors,rulerButton:rulerBtn,
  data:()=>all,market:()=>loadedMarket,windowStart:()=>windowStart,step:()=>duration[loadedMarket?.int]||60,
  layout:()=>getPaneLayout().map(p=>{const panel=studyPanels.panelForPane(chart.panes()[p.index]);return {...p,id:panel?.id,visible:Boolean(panel&&studyPanels.isVisible(panel))};}),
+ jumpDrawing:item=>{const points=item.points,time=(points[0].time+points.at(-1).time)/2;void jumpToChartDate(time,new AbortController().signal,loadedMarket.int).catch(error=>{if(error.name!=='AbortError')status('그리기 날짜 이동 실패 · '+error.message,true);});},
  schedule,status,formatTime:date,formatAxisTime:time=>{const fields=TimeframeEngine.kstFields(time);return fields.date+(duration[loadedMarket?.int]<86400?' '+fields.time:'');},interaction:rulerInteraction,cursor:id=>{hoverPoint=null;cursorPrice.hidden=true;chart.applyOptions({crosshair:{mode:['pointer','dot'].includes(id)?LC.CrosshairMode.Hidden:LC.CrosshairMode.Normal}});},beforeTool:()=>{if(rulerEnabled)toggleRuler(false);else clearRuler();},
  zoom:item=>{const [a,b]=item.points,from=DrawingEngine.timeLogical(all,Math.min(a.time,b.time),duration[loadedMarket.int])-windowStart,to=DrawingEngine.timeLogical(all,Math.max(a.time,b.time),duration[loadedMarket.int])-windowStart;if(to-from<2)return;moveChartRange({from,to});const pane=getPaneLayout().find(p=>studyPanels.panelForPane(chart.panes()[p.index])?.id===item.pane);if(pane&&a.price!==b.price){pane.series.priceScale().setVisibleRange({from:Math.min(a.price,b.price),to:Math.max(a.price,b.price)});}schedule();}
 });
@@ -1570,6 +1571,7 @@ function setupSidebarTabs() {
       startFundingRankScan();
     }
 
+    if(targetId==='tab-funding-rank'&&fundingRankList.length)scheduleFundingCycleLookup();else if(targetId!=='tab-funding-rank'){fundingCycleController?.abort();clearTimeout(fundingCycleTimer);}
     signalSidebar?.render?.();
   }
 
@@ -1725,225 +1727,69 @@ function renderScannerResults() {
   }
 }
 
-// [거래소별 실시간 펀딩비 순위 랭킹 제어]
-let fundingRankController = null;
-let fundingRankList = [];
-let fundingRankSort = 'negative'; // 'negative' (음수순), 'positive' (양수순), 'magnitude' (극단순)
-let fundingRankExchange = 'ALL';
-let fundingRankThreshFilter = 'all';
-let fundingRankSearchQuery = '';
-
-function setupFundingRank() {
-  const refreshBtn = $('fundingRankRefreshBtn');
-  const exSelect = $('fundingRankExchangeSelect');
-  const searchInput = $('fundingRankSearchInput');
-
-  if (exSelect) {
-    exSelect.onchange = () => {
-      fundingRankExchange = exSelect.value;
-      renderFundingRankList();
-    };
-  }
-
-  const sortBtns = document.querySelectorAll('.btn-funding-sort');
-  sortBtns.forEach(btn => {
-    btn.onclick = () => {
-      sortBtns.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      fundingRankSort = btn.dataset.sort;
-      renderFundingRankList();
-    };
-  });
-
-  const threshBtns = document.querySelectorAll('.btn-funding-thresh');
-  threshBtns.forEach(btn => {
-    btn.onclick = () => {
-      threshBtns.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      fundingRankThreshFilter = btn.dataset.thresh;
-      renderFundingRankList();
-    };
-  });
-
-  if (searchInput) {
-    searchInput.oninput = () => {
-      fundingRankSearchQuery = searchInput.value.trim().toUpperCase();
-      renderFundingRankList();
-    };
-  }
-
-  if (refreshBtn) {
-    refreshBtn.onclick = () => startFundingRankScan();
-  }
-
-  // 페이지 시작 시 2초 뒤 1회 백그라운드 펀딩비 수집
-  setTimeout(() => {
-    if (!globalThis.ChartWorkspace?.isMulti() && !fundingRankList.length && !fundingRankController) {
-      startFundingRankScan();
-    }
-  }, 2000);
+// [거래소별 현재 펀딩률·정산 주기 순위]
+let fundingRankController = null, fundingCycleController = null, fundingCycleTimer = null;
+let fundingRankList = [], fundingRankSort = 'negative', fundingRankExchange = 'ALL', fundingRankSearchQuery = '';
+let fundingRankSettings = FundingRank.settings();
+const fundingRankPreferencesKey='funding-chart-rank-filters-v1';
+function fundingRankOptions(){return {...fundingRankSettings,exchange:fundingRankExchange,query:fundingRankSearchQuery,sort:fundingRankSort};}
+function syncFundingRankFilters(){
+ const state=fundingRankSettings,rate=state.mode!=='cycle',cycle=state.mode!=='rate';
+ $('fundingRankRateCondition').hidden=!rate;$('fundingRankCycleCondition').hidden=!cycle;
+ for(const button of document.querySelectorAll('.btn-funding-mode')){const active=button.dataset.mode===state.mode;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));}
+ $('fundingRankRateOperator').value=state.operator;
+ if(document.activeElement!==$('fundingRankRateValue'))$('fundingRankRateValue').value=state.rate??'';
+ const presets=[1,2,4,6,8,12,24];$('fundingRankHoursSelect').value=presets.includes(state.hours)?String(state.hours):'custom';$('fundingRankCustomHours').hidden=presets.includes(state.hours);
+ if(document.activeElement!==$('fundingRankCustomHours'))$('fundingRankCustomHours').value=String(state.hours);
+ $('fundingRankHoursSelect').style.setProperty('--cycle-color',FundingEngine.cycleColor(state.hours));
+ for(const button of document.querySelectorAll('.btn-funding-thresh')){const active=button.dataset.thresh==='all'?state.rate===null:button.dataset.thresh==='neg_01'?state.rate===-.1&&state.operator==='lte':button.dataset.thresh==='neg_05'?state.rate===-.5&&state.operator==='lte':state.rate===.05&&state.operator==='gte';button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));}
 }
-
-async function startFundingRankScan() {
-  fundingRankController?.abort();
-  fundingRankController = new AbortController();
-  const signal = fundingRankController.signal;
-
-  const refreshBtn = $('fundingRankRefreshBtn');
-  const statusText = $('fundingRankStatusText');
-  const progressBar = $('fundingRankProgressBar');
-  const progressFill = $('fundingRankProgressFill');
-  const container = $('fundingRankListContainer');
-
-  if (refreshBtn) {
-    refreshBtn.classList.add('scanning');
-    refreshBtn.textContent = '⏹️ 수집 중...';
-  }
-  if (progressBar) progressBar.style.display = 'block';
-  if (progressFill) progressFill.style.width = '0%';
-  if (statusText) statusText.textContent = '거래소별 실시간 펀딩비 데이터를 조회하는 중...';
-  if (!fundingRankList.length && container) {
-    container.innerHTML = '<div class="scanner-empty-msg">바이낸스, 바이비트, 비트겟, 빙엑스, MEXC 등 실시간 펀딩비를 수집 중입니다...</div>';
-  }
-
-  try {
-    const results = await ScannerEngine.scanAllFundingRates({
-      signal,
-      onProgress: ({ completedExchanges, totalExchanges, count, exchange }) => {
-        const pct = Math.round((completedExchanges / totalExchanges) * 100);
-        if (progressFill) progressFill.style.width = pct + '%';
-        if (statusText) statusText.textContent = `${exchange} 완료 · 총 ${count.toLocaleString()}개 계약 수집 (${completedExchanges}/${totalExchanges})`;
-      }
-    });
-
-    fundingRankList = results;
-    renderFundingRankList();
-    if (statusText) {
-      statusText.textContent = `실시간 분석 완료: 총 ${fundingRankList.length.toLocaleString()}개 계약 펀딩비 순위 산출`;
-    }
-  } catch (err) {
-    if (err.name === 'AbortError') {
-      if (statusText) statusText.textContent = '펀딩비 수집이 중지되었습니다.';
-    } else {
-      if (statusText) statusText.textContent = '수집 오류: ' + err.message;
-    }
-  } finally {
-    if (refreshBtn) {
-      refreshBtn.classList.remove('scanning');
-      refreshBtn.textContent = '🔄 갱신';
-    }
-    setTimeout(() => { if (progressBar) progressBar.style.display = 'none'; }, 2000);
-  }
+function fundingRankFiltersChanged(){
+ try{localStorage.setItem(fundingRankPreferencesKey,JSON.stringify(fundingRankSettings));}catch{}
+ syncFundingRankFilters();renderFundingRankList();scheduleFundingCycleLookup();
 }
-
-function renderFundingRankList() {
-  const container = $('fundingRankListContainer');
-  if (!container) return;
-
-  // 1. 거래소 필터
-  let filtered = [...fundingRankList];
-  if (fundingRankExchange !== 'ALL') {
-    filtered = filtered.filter(item => item.exchange === fundingRankExchange);
-  }
-
-  // 2. 임계값 조건 필터
-  if (fundingRankThreshFilter === 'neg_01') filtered = filtered.filter(c => c.rate <= -0.1);
-  else if (fundingRankThreshFilter === 'neg_05') filtered = filtered.filter(c => c.rate <= -0.5);
-  else if (fundingRankThreshFilter === 'pos_005') filtered = filtered.filter(c => c.rate >= 0.05);
-
-  // 3. 심볼 검색 필터
-  if (fundingRankSearchQuery) {
-    filtered = filtered.filter(c => c.symbol.toUpperCase().includes(fundingRankSearchQuery) || c.baseSymbol.toUpperCase().includes(fundingRankSearchQuery));
-  }
-
-  // 4. 순위 정렬
-  if (fundingRankSort === 'negative') {
-    filtered.sort((a, b) => a.rate - b.rate);
-  } else if (fundingRankSort === 'positive') {
-    filtered.sort((a, b) => b.rate - a.rate);
-  } else if (fundingRankSort === 'magnitude') {
-    filtered.sort((a, b) => Math.abs(b.rate) - Math.abs(a.rate));
-  }
-
-  if (!filtered.length) {
-    container.innerHTML = '<div class="scanner-empty-msg">선택한 조건에 부합하는 펀딩비 코인이 없습니다.</div>';
-    return;
-  }
-
-  container.innerHTML = '';
-  const nowSec = Math.floor(Date.now() / 1000);
-  const displayLimit = Math.min(filtered.length, 150);
-
-  for (let i = 0; i < displayLimit; i++) {
-    const item = filtered[i];
-    const card = document.createElement('div');
-    card.className = 'funding-rank-card';
-    if ($('symbolInput')?.value === item.baseSymbol && $('exchangeSelect')?.value === item.exchange) {
-      card.classList.add('selected');
-    }
-
-    const rank = i + 1;
-    let rankBadgeClass = '';
-    if (rank === 1) rankBadgeClass = 'gold';
-    else if (rank === 2) rankBadgeClass = 'silver';
-    else if (rank === 3) rankBadgeClass = 'bronze';
-
-    const isNeg = item.rate < 0;
-    const isExtremeNeg = item.rate <= -0.5;
-    const isPos = item.rate > 0;
-    const rateSign = isPos ? '+' : '';
-    const rateClass = isExtremeNeg ? 'extreme-neg' : (isNeg ? 'neg' : (isPos ? 'pos' : ''));
-
-    const clampedRate = Math.max(-2, Math.min(2, item.rate));
-    const meterPct = Math.min(50, Math.round((Math.abs(clampedRate) / 2) * 50));
-
-    let timeLabel = '';
-    if (item.nextTime) {
-      const diff = item.nextTime - nowSec;
-      if (diff > 0) {
-        const h = Math.floor(diff / 3600);
-        const m = Math.floor((diff % 3600) / 60);
-        timeLabel = `⏱️ 정산까지 ${h > 0 ? h + '시간 ' : ''}${m}분`;
-      } else {
-        timeLabel = '⏱️ 정산 진행 중';
-      }
-    } else {
-      timeLabel = `⏱️ ${item.intervalHours || 8}시간 주기`;
-    }
-
-    const priceFormatted = (typeof ScannerEngine !== 'undefined') ? ScannerEngine.formatPrice(item.markPrice) : item.markPrice.toFixed(4);
-
-    card.innerHTML = `
-      <div class="funding-rank-card-header">
-        <div class="funding-rank-left">
-          <span class="rank-num-badge ${rankBadgeClass}">#${rank}</span>
-          <span class="ex-tag ${item.exchange}">${item.exchange}</span>
-          <span class="funding-rank-symbol">${item.baseSymbol}<span style="color:#9ca3af;font-size:10px;">/USDT</span></span>
-        </div>
-        <div class="funding-rank-rate-box">
-          <span class="funding-rank-rate-val ${rateClass}">${rateSign}${item.rate.toFixed(4)}%</span>
-        </div>
-      </div>
-      <div class="funding-meter-wrap" title="펀딩비 규모 시각화 (-2.0% ~ +2.0%)">
-        <div class="funding-meter-fill ${isNeg ? 'neg' : 'pos'}" style="width: ${meterPct}%;"></div>
-      </div>
-      <div class="funding-rank-footer">
-        <span>현재가: <strong>$${priceFormatted}</strong></span>
-        <span>${timeLabel}</span>
-        <button type="button" class="btn-move" style="padding:2px 8px; font-size:10px; margin-left:4px;">차트 로드</button>
-      </div>
-    `;
-
-    card.onclick = () => {
-      document.querySelectorAll('.funding-rank-card').forEach(c => c.classList.remove('selected'));
-      card.classList.add('selected');
-
-      loadDetectedMarket({ex:item.exchange,symbol:item.symbol});
-      status(`[${item.exchange} ${item.symbol}] 실시간 펀딩비 ${rateSign}${item.rate.toFixed(4)}% 차트 로드 완료`);
-    };
-
-    container.appendChild(card);
-  }
+function setupFundingRank(){
+ try{fundingRankSettings=FundingRank.settings(JSON.parse(localStorage.getItem(fundingRankPreferencesKey)||'{}'));}catch{}
+ $('fundingRankExchangeSelect').onchange=event=>{fundingRankExchange=event.target.value;renderFundingRankList();scheduleFundingCycleLookup();};
+ for(const button of document.querySelectorAll('.btn-funding-sort'))button.onclick=()=>{for(const b of document.querySelectorAll('.btn-funding-sort'))b.classList.toggle('active',b===button);fundingRankSort=button.dataset.sort;renderFundingRankList();scheduleFundingCycleLookup();};
+ for(const button of document.querySelectorAll('.btn-funding-mode'))button.onclick=()=>{fundingRankSettings=FundingRank.settings({...fundingRankSettings,mode:button.dataset.mode});fundingRankFiltersChanged();};
+ for(const button of document.querySelectorAll('.btn-funding-thresh'))button.onclick=()=>{const values={all:{rate:null},neg_01:{rate:-.1,operator:'lte'},neg_05:{rate:-.5,operator:'lte'},pos_005:{rate:.05,operator:'gte'}};fundingRankSettings=FundingRank.settings({...fundingRankSettings,...values[button.dataset.thresh]});fundingRankFiltersChanged();};
+ $('fundingRankRateOperator').onchange=event=>{fundingRankSettings.operator=event.target.value;fundingRankFiltersChanged();};
+ $('fundingRankRateValue').oninput=event=>{if(!event.target.validity.valid)return;fundingRankSettings.rate=FundingEngine.numeric(event.target.value);fundingRankFiltersChanged();};
+ $('fundingRankHoursSelect').onchange=event=>{if(event.target.value==='custom'){$('fundingRankCustomHours').hidden=false;$('fundingRankCustomHours').focus();return;}fundingRankSettings.hours=Number(event.target.value);fundingRankFiltersChanged();};
+ $('fundingRankCustomHours').oninput=event=>{if(!event.target.validity.valid||!event.target.value)return;fundingRankSettings.hours=Number(event.target.value);try{localStorage.setItem(fundingRankPreferencesKey,JSON.stringify(fundingRankSettings));}catch{}$('fundingRankHoursSelect').style.setProperty('--cycle-color',FundingEngine.cycleColor(fundingRankSettings.hours));renderFundingRankList();scheduleFundingCycleLookup();};
+ let searchTimer;$('fundingRankSearchInput').oninput=event=>{fundingRankSearchQuery=event.target.value.trim().toUpperCase();clearTimeout(searchTimer);searchTimer=setTimeout(()=>{renderFundingRankList();scheduleFundingCycleLookup();},100);};
+ $('fundingRankRefreshBtn').onclick=()=>{if(fundingRankController||fundingCycleController){fundingRankController?.abort();fundingCycleController?.abort();clearTimeout(fundingCycleTimer);$('fundingRankCycleStatus').textContent='조회 중지 · 확보한 주기는 유지합니다.';}else void startFundingRankScan();};
+ syncFundingRankFilters();setTimeout(()=>{if(!globalThis.ChartWorkspace?.isMulti()&&!fundingRankList.length&&!fundingRankController)void startFundingRankScan();},2000);
+ window.addEventListener('pagehide',()=>{fundingRankController?.abort();fundingCycleController?.abort();clearTimeout(fundingCycleTimer);},{once:true});
+}
+function scheduleFundingCycleLookup(){clearTimeout(fundingCycleTimer);fundingCycleController?.abort();fundingCycleTimer=setTimeout(()=>{if($('tab-funding-rank').classList.contains('active'))void updateFundingRankCycles();},180);}
+async function updateFundingRankCycles(){
+ if(fundingRankController||!fundingRankList.length)return;
+ const options=fundingRankOptions(),candidates=FundingRank.filter(fundingRankList,{...options,mode:'rate',rate:options.mode==='cycle'?null:options.rate}),selected=options.mode==='rate'?candidates.slice(0,150):candidates;
+ if(!selected.some(r=>r.intervalHours===null&&['MEXC','BINGX'].includes(r.exchange)&&!r.cycleChecked))return;
+ const controller=new AbortController();fundingCycleController=controller;const label=$('fundingRankCycleStatus'),button=$('fundingRankRefreshBtn');button.textContent='⏹ 중지';let renderAt=0;
+ try{await FundingRank.enrich(selected.filter(r=>!r.cycleChecked),{signal:controller.signal,onUpdate:p=>{if(fundingCycleController!==controller)return;label.textContent=p.error?'일부 주기 조회 지연 · 확인된 종목부터 표시합니다.':'정산 주기 확인 '+p.completed.toLocaleString()+' / '+p.total.toLocaleString()+' · 확인된 종목부터 표시';if(Date.now()-renderAt>750){renderAt=Date.now();renderFundingRankList();}}});
+  if(!controller.signal.aborted){const unknown=fundingRankList.filter(r=>!r.intervalHours).length;label.textContent=unknown?'주기 미확인 '+unknown.toLocaleString()+'개 · 주기 검색은 확인된 종목 기준':'현재 정산 주기 확인 완료';}
+ }catch(error){if(error.name!=='AbortError')label.textContent='일부 주기 조회 지연 · '+error.message;}
+ finally{if(fundingCycleController===controller){fundingCycleController=null;button.textContent='🔄 갱신';renderFundingRankList();}}
+}
+async function startFundingRankScan(){
+ fundingRankController?.abort();fundingCycleController?.abort();clearTimeout(fundingCycleTimer);
+ const controller=new AbortController();fundingRankController=controller;const button=$('fundingRankRefreshBtn'),text=$('fundingRankStatusText'),bar=$('fundingRankProgressBar'),fill=$('fundingRankProgressFill');
+ button.classList.add('scanning');button.textContent='⏹ 중지';bar.style.display='block';fill.style.width='0%';text.textContent='거래소별 현재 펀딩률·정산 주기 조회 중…';$('fundingRankCycleStatus').textContent='';
+ if(!fundingRankList.length)$('fundingRankListContainer').innerHTML='<div class="scanner-empty-msg">공식 거래소 시세를 조회하고 있습니다.</div>';
+ try{const results=await ScannerEngine.scanAllFundingRates({signal:controller.signal,onProgress:p=>{if(fundingRankController!==controller)return;fill.style.width=Math.round(p.completedExchanges/p.totalExchanges*100)+'%';text.textContent=p.exchange+' 완료 · '+p.count.toLocaleString()+'개 계약 ('+p.completedExchanges+'/'+p.totalExchanges+')';}});
+  if(fundingRankController!==controller)return;fundingRankList=results;renderFundingRankList();text.textContent='조회 '+new Date().toLocaleTimeString('ko-KR',{hour12:false,timeZone:'Asia/Seoul'})+' KST · '+results.length.toLocaleString()+'개 계약'+(results.failures?.length?' · 지연 '+results.failures.length+'곳':'');text.title=results.failures?.length?'조회 지연: '+results.failures.map(r=>r.exchange).join(', '):'현재 펀딩률 조회 완료';
+ }catch(error){if(fundingRankController===controller)text.textContent=error.name==='AbortError'?'펀딩비 조회를 중지했습니다.':'수집 오류: '+error.message;}
+ finally{if(fundingRankController===controller){fundingRankController=null;button.classList.remove('scanning');button.textContent='🔄 갱신';bar.style.display='none';if(!controller.signal.aborted)scheduleFundingCycleLookup();}}
+}
+function renderFundingRankList(){
+ const container=$('fundingRankListContainer');if(!container)return;const filtered=FundingRank.filter(fundingRankList,fundingRankOptions()),count=$('fundingRankFilterCount');
+ if(count)count.textContent='조건 일치 '+filtered.length.toLocaleString()+' / 전체 '+fundingRankList.length.toLocaleString()+'개'+(filtered.length>150?' · 상위 150개 표시':'');
+ if(!filtered.length){container.innerHTML='<div class="scanner-empty-msg">선택한 조건에 맞는 코인이 없습니다.<br>주기가 미확인인 종목은 주기 조건에서 제외됩니다.</div>';return;}
+ container.innerHTML='';const now=Math.floor(Date.now()/1000),market=globalThis.ChartWorkspace?.activeMarket?.()||loadedMarket;
+ for(let i=0;i<Math.min(150,filtered.length);i++){const item=filtered[i],card=document.createElement('div');card.className='funding-rank-card';card.style.setProperty('--cycle-color',FundingEngine.cycleColor(item.intervalHours));if(market?.ex===item.exchange&&FundingEngine.base(market.symbol)===item.baseSymbol)card.classList.add('selected');card.innerHTML=FundingRank.card(item,i+1,now,ScannerEngine.formatPrice);card.onclick=()=>{document.querySelectorAll('.funding-rank-card').forEach(c=>c.classList.remove('selected'));card.classList.add('selected');loadDetectedMarket({ex:item.exchange,symbol:item.symbol});status('['+item.exchange+' '+item.symbol+'] 현재 펀딩률 '+item.rate.toFixed(4)+'% 차트 로드');};container.appendChild(card);}
 }
 
 function loadDetectedMarket(value,navigation){
@@ -1977,7 +1823,7 @@ globalThis.ChartWorkspace?.bind({
  signalSnapshot:localSignalSnapshot,signalCommand:applySignalCommand,
  backtest:setChartBacktest,getMarket:()=>loadedMarket||{ex:$('exchangeSelect').value,symbol:$('symbolInput').value,int:$('intervalSelect').value},
  selectMarket:selectWorkspaceMarket,action:action=>chartViewActions[action]?.(),
- onSplit:()=>{if(all.length)controller?.abort();scannerController?.abort();fundingRankController?.abort();},
+ onSplit:()=>{if(all.length)controller?.abort();scannerController?.abort();fundingRankController?.abort();fundingCycleController?.abort();clearTimeout(fundingCycleTimer);},
  dispose:()=>{signalSidebar?.dispose();controller?.abort();navigationController?.abort();stopFundingUpdates();clearLocationGuide();clearTimeout(surgeHighlight.timer);clearInterval(surgeHighlight.countdownInterval);},
  schedule,syncFullscreen:syncChartFullscreen,fullscreen:toggleChartFullscreen,jumpDate:()=>$('gotoDateBtn').click()
 });

@@ -42,6 +42,9 @@ test('the actual drawing manager renders the global line and lets a lower-pane c
 test('a vertical line survives hiding its original pane without drawing an unrelated price level',()=>{
  const {m,panes}=manager();panes.shift();m.render();assert.match(m.scene.innerHTML,/M150 0V600/);assert.match(m.axisScene.innerHTML,/date 150/);assert.doesNotMatch(m.axisScene.innerHTML,/data-drawing-axis="price"/);
 });
+test('saved Fibonacci time lines remain visible when their original indicator pane is unavailable',()=>{
+ const {m,panes}=manager();m.store.update('line',{tool:'fibTime',points:[{time:150,price:70},{time:200,price:75}]});panes.shift();m.render();assert.match(m.scene.innerHTML,/data-drawing-type="fibTime"/);assert.match(m.scene.innerHTML,/M150 0L150 398/);assert.match(m.axisScene.innerHTML,/date 150/);assert.doesNotMatch(m.scene.innerHTML,/NaN|Infinity/);
+});
 test('new vertical and cross lines snap to an actual candle timestamp while ordinary drawings keep continuous coordinates',()=>{
  const {m,panes}=manager();m.api.data=()=>[{time:100},{time:160},{time:220}];m.api.chart.timeScale=()=>({width:()=>900,coordinateToLogical:()=>1.4});panes[0].series.coordinateToPrice=y=>y;
  for(const tool of ['vline','crossline']){m.tool=tool;assert.equal(m.point({clientX:151,clientY:70}).anchor.time,160);}

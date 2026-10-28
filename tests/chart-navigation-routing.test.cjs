@@ -22,14 +22,14 @@ for(const cached of [true,false])test((cached?'cached':'newly fetched')+' date m
  await context.jumpToChartDate(time+30,new AbortController().signal,'1m');assert.deepEqual(guides,[[time,'date']]);assert.equal(renders[0][0],0);assert.equal(context.chartDateFocus.time,time+30);
 });
 function scannerHarness(){
- const nodes=new Map(),routed=[];const make=()=>({children:[],style:{},classList:{add(){},remove(){}},appendChild(node){this.children.push(node);}});
+ const nodes=new Map(),routed=[];const make=()=>({children:[],style:{setProperty(){}},classList:{add(){},remove(){}},appendChild(node){this.children.push(node);}});
  const node=id=>{if(!nodes.has(id))nodes.set(id,make());return nodes.get(id);};node('symbolInput').value='BTCUSDT';node('exchangeSelect').value='BITGET';node('scannerThreshold').value='40';
  const context={$:node,document:{createElement:make,querySelectorAll:()=>[]},loadedMarket:{ex:'BITGET',symbol:'BTCUSDT',int:'1h'},
-  ChartWorkspace:{selectActive:(...args)=>{routed.push(args);return true;}},ScannerEngine:{formatPrice:String,formatMoney:String},
+  ChartWorkspace:{selectActive:(...args)=>{routed.push(args);return true;}},ScannerEngine:{formatPrice:String,formatMoney:String},FundingRank:require('../funding-rank.js'),FundingEngine:require('../funding.js'),fundingRankOptions:()=>({mode:'rate',rate:null,exchange:'ALL',sort:'negative'}),
   scannedCoins:[{baseSymbol:'NIL',symbol:'NILUSDT',changePct:50,startPrice:1,currentPrice:2,minLow:.5,maxHigh:3,maxGain:500,quoteVolume:1000000}],currentFilterDir:'all',surgeHighlight:{active:false},
   fundingRankList:[{exchange:'BINGX',baseSymbol:'NIL',symbol:'NIL-USDT',rate:-1,markPrice:1,nextTime:1234,intervalHours:1}],fundingRankExchange:'ALL',fundingRankThreshFilter:'all',fundingRankSearchQuery:'',fundingRankSort:'negative',status(){}};
  vm.createContext(context);
- const scanner=source.slice(source.indexOf('function renderScannerResults()'),source.indexOf('// [거래소별 실시간 펀딩비 순위'));
+ const scanner=source.slice(source.indexOf('function renderScannerResults()'),source.indexOf('// [거래소별 현재 펀딩률·정산 주기 순위]'));
  const ranking=source.slice(source.indexOf('function renderFundingRankList()'),source.indexOf('const chartViewActions='));
  vm.runInContext(scanner+ranking,context);return {context,node,routed};
 }
