@@ -42,6 +42,13 @@ test('intentional inspection on another timeframe is labelled as viewing the ori
  vm.createContext(ctx);vm.runInContext(source.slice(source.indexOf('function updateResultContext()'),source.indexOf('  function updateTarget()')),ctx);ctx.updateResultContext();assert.equal(ctx.resultContext.hidden,false);assert.match(ctx.resultContext.textContent,/3분 백테스트 결과를 1분 차트에서 확인 중/);assert.doesNotMatch(ctx.resultContext.textContent,/이전 결과/);
  ctx.chartWorkspace.activeCell=()=>1;ctx.updateResultContext();assert.match(ctx.resultContext.textContent,/이전 결과/);
 });
+test('opening a record on the already loaded timeframe refreshes its inspection notice without a market-change event',async()=>{
+ const h=tradeUI(),source=fs.readFileSync(require.resolve('../backtest-ui.js'),'utf8'),viewMarket={...h.market,int:'1m'};
+ Object.assign(h.ctx,{target:()=>viewMarket,follow:true,lastFailure:false,busy:false,resultContext:{},modeNotice:{},dataNotice:{},tradeJumpTimeframe:'1m'});
+ Object.assign(h.ctx.single.meta,{config:{},coverage:{},fundingCoverage:{},cell:0});h.ctx.chartWorkspace.activeCell=()=>0;h.ctx.single.inspection={market:viewMarket,cell:1};
+ vm.runInContext(source.slice(source.indexOf('function updateResultContext()'),source.indexOf('  function updateTarget()')),h.ctx);h.ctx.updateResultContext();assert.match(h.ctx.resultContext.textContent,/이전 결과/);
+ await h.report.onclick({target:{closest:()=>({dataset:{jump:'0',point:'entry'}})}});assert.match(h.ctx.resultContext.textContent,/3분 백테스트 결과를 1분 차트에서 확인 중/);assert.equal(h.ctx.resultContext.hidden,false);
+});
 test('a chosen viewing frame maps original fills to actual calendar bars and keeps other coins isolated',()=>{
  const time=T.parseKst('2026-10-20','09:03'),result={market:{ex:'BYBIT',symbol:'PUFFERUSDT',int:'3m'},displayMarket:{ex:'BYBIT',symbol:'PUFFERUSDT',int:'1M'},signals:[{type:'BUY_INITIAL',time}],trades:[]},bar={time:T.start(time,'1M')};
  assert.equal(Overlay.matches(result,{ex:'BYBIT',symbol:'PUFFERUSDT',int:'1M'}),true);assert.equal(Overlay.matches(result,{ex:'BYBIT',symbol:'BTCUSDT',int:'1M'}),false);assert.equal(Overlay.markers(result,[bar])[0].time,bar.time);
