@@ -1,6 +1,6 @@
 (function(root,factory){
- 'use strict';if(typeof module==='object'&&module.exports){const tf=require('./timeframes.js');globalThis.TimeframeEngine??=tf;module.exports=factory(require('./indicators.js'),tf,require('./funding.js'));}else root.BacktestEngine=factory(RsiEngine,TimeframeEngine,FundingEngine);
-})(typeof globalThis!=='undefined'?globalThis:this,function(RSI,T,F){
+ 'use strict';if(typeof module==='object'&&module.exports){const tf=require('./timeframes.js');globalThis.TimeframeEngine??=tf;module.exports=factory(require('./indicators.js'),tf,require('./funding.js'),require('./backtest-bars.js'));}else root.BacktestEngine=factory(RsiEngine,TimeframeEngine,FundingEngine,root.BacktestBars);
+})(typeof globalThis!=='undefined'?globalThis:this,function(RSI,T,F,B){
  'use strict';
  const defaultStrategyConfig=Object.freeze({timeframe:'5m',fundingIntervalHours:1,fundingIntervalBasis:'known',minFundingRate:-.5,maxFundingRate:null,fundingWindowSeconds:3600,rsiPeriod:14,rsiOversold:30,rsiSource:'close',entryTrigger:'rsi_cross_up',splitCount:5,splitTrigger:'rsi_cross_up',splitStepPct:1,dcaMethod:'equal',stopLossMode:'immediate',exitType:'tp_sl',takeProfitPct:2,stopLossPct:3,rsiExitLevel:50,maxHoldBars:300,feePct:.05,slippagePct:.03,includeFundingPayment:true,initialCapital:10000,allocationPerTradePct:100,positionSizing:'budget',firstEntryAmount:10});
  const reasons=Object.freeze({TAKE_PROFIT:'TP · 익절',STOP_LOSS:'SL · 손절',RSI_REBOUND:'RSI 청산',SETTLE_EXIT:'정산 후 청산',TIMEOUT:'보유 기간 종료',END_OF_TEST:'테스트 기간 종료',DATA_GAP:'데이터 공백 전 종료'});
@@ -50,37 +50,46 @@
  }
  function fundingSessionAt(sessions,time){let lo=0,hi=sessions.length;while(lo<hi){const mid=(lo+hi)>>>1;if(sessions[mid].startTime<=time)lo=mid+1;else hi=mid;}const s=sessions[lo-1];return s&&time<s.endTime?s:null;}
  function computeRSI(candles,period=14,source='close',timeframe){
-  const result=new Float64Array(candles.length).fill(NaN);let begin=0;
-  for(let i=1;i<=candles.length;i++)if(i===candles.length||(timeframe&&T.end(candles[i-1].time,timeframe)<candles[i].time)){
-   const values=RSI.calculate(candles.slice(begin,i),{length:period,source,divergence:false,maType:'None',showMa:false,showBands:false}).rsi;for(let j=0;j<values.length;j++)result[begin+j]=values[j];begin=i;
-  }
-  return result;
+  if(!Number.isSafeInteger(period)||period<1||!['close','open','high','low','hl2','hlc3','ohlc4','hlcc4'].includes(source))throw Error('RSI 설정을 확인하세요.');
+  // The same Wilder RMA as the chart indicator, without allocating nine full
+  // arrays of intermediate values for millions of historical candles.
+  const result=new Float64Array(candles.length).fill(NaN),scratch={};let lastTime=null,lastSource=null,count=0,gainSum=0,lossSum=0,up=NaN,down=NaN;
+  for(let i=0;i<candles.length;i++){
+   const bar=B.get(candles,i,scratch),value=source==='hl2'?(bar.high+bar.low)/2:source==='hlc3'?(bar.high+bar.low+bar.close)/3:source==='ohlc4'?(bar.open+bar.high+bar.low+bar.close)/4:source==='hlcc4'?(bar.high+bar.low+bar.close*2)/4:bar[source];
+   if(lastTime!==null&&timeframe&&T.end(lastTime,timeframe)<bar.time){lastSource=null;count=0;gainSum=0;lossSum=0;up=NaN;down=NaN;}
+   if(lastSource!==null){const change=value-lastSource,gain=Math.max(change,0),loss=-Math.min(change,0);
+    if(count<period){gainSum+=gain;lossSum+=loss;if(++count===period){up=gainSum/period;down=lossSum/period;}}
+    else{up=gain/period+(1-1/period)*up;down=loss/period+(1-1/period)*down;}
+    if(Number.isFinite(up)&&Number.isFinite(down))result[i]=down===0?100:up===0?0:100-100/(1+up/down);
+   }
+   lastTime=bar.time;lastSource=value;
+  }return result;
  }
  function knownFunding(records,time){let lo=0,hi=records.length;while(lo<hi){const mid=(lo+hi)>>>1;if(records[mid].time<=time)lo=mid+1;else hi=mid;}return records[lo-1];}
  function prepareExecution(candles,c,context){
   const mtf=c.splitTrigger==='rsi_cross_up_1m'&&c.timeframe!=='1m',key=[c.timeframe,c.rsiPeriod,c.rsiSource,mtf,c.startTime,c.endTime].join('|'),saved=context.prepared?.get(key);if(saved)return saved;
-  const check=rows=>{if(rows.some(b=>b.open<=0||b.close<=0||b.low<=0||b.low>Math.min(b.open,b.close)||b.high<Math.max(b.open,b.close)))throw Error('OHLC 캔들 범위가 올바르지 않습니다.');return rows;};
-  const signalBars=check(T.sorted(candles||[])),rsi=computeRSI(signalBars,c.rsiPeriod,c.rsiSource,c.timeframe);
-  let bars=signalBars,minuteRsi=rsi,mainAtClose=null,rangeStart=c.startTime??signalBars[0]?.time??0,rangeEnd=c.endTime??Infinity;
+  const check=input=>{const rows=B.isPacked(input)?input:T.sorted(input||[]),scratch={};let previous=-Infinity;
+   for(let i=0;i<rows.length;i++){const b=B.get(rows,i,scratch);if(!b||!Number.isFinite(b.time)||!Number.isFinite(b.open)||!Number.isFinite(b.high)||!Number.isFinite(b.low)||!Number.isFinite(b.close)||!Number.isFinite(b.volume)||b.time<=previous||b.open<=0||b.close<=0||b.low<=0||b.low>Math.min(b.open,b.close)||b.high<Math.max(b.open,b.close))throw Error('OHLC 캔들 범위가 올바르지 않습니다.');previous=b.time;}return rows;};
+  const signalBars=check(candles),rsi=computeRSI(signalBars,c.rsiPeriod,c.rsiSource,c.timeframe);
+  let bars=signalBars,minuteRsi=rsi,rangeStart=c.startTime??B.time(signalBars,0)??0,rangeEnd=c.endTime??Infinity;
   if(mtf){
    if(!context.minuteCandles?.length)throw Error('1분봉 RSI 분할에는 동일 거래소·종목의 실제 1분봉 데이터가 필요합니다.');
-   bars=check(T.sorted(context.minuteCandles));
-   const selected=signalBars.filter(b=>b.time>=rangeStart&&T.end(b.time,c.timeframe)<=rangeEnd);if(!selected.length)throw Error('선택 기간에 완성된 기준 주기 캔들이 없습니다.');
-   rangeStart=selected[0].time;rangeEnd=T.end(selected.at(-1).time,c.timeframe);
-   const minuteStart=bars.findIndex(b=>b.time>=rangeStart);let last=minuteStart;
-   if(minuteStart<0||bars[minuteStart].time!==rangeStart||minuteStart<c.rsiPeriod)throw Error('1분봉 기록 또는 RSI 준비 구간이 부족합니다. 기간을 줄이거나 제공 범위를 확인하세요.');
-   for(let j=1;j<=c.rsiPeriod;j++)if(bars[minuteStart-j].time!==rangeStart-j*60)throw Error('1분봉 RSI 준비 구간에 공백이 있습니다. 일부만 계산하지 않고 중단했습니다.');
-   for(let i=1;i<selected.length;i++)if(T.end(selected[i-1].time,c.timeframe)!==selected[i].time)throw Error('기준 주기 데이터에 공백이 있어 1분봉 분할을 정확히 검증할 수 없습니다.');
-   while(last+1<bars.length&&bars[last+1].time<rangeEnd){if(bars[last+1].time!==bars[last].time+60)throw Error('1분봉 기록에 공백이 있어 분할 신호를 정확히 검증할 수 없습니다.');last++;}
-   if(bars[last].time+60!==rangeEnd)throw Error('테스트 종료까지의 1분봉 기록이 부족합니다. 일부만 계산하지 않고 중단했습니다.');
-   minuteRsi=computeRSI(bars,c.rsiPeriod,c.rsiSource,'1m');mainAtClose=new Int32Array(bars.length).fill(-1);
-   const ends=signalBars.map(b=>T.end(b.time,c.timeframe));let j=0;
-   for(let i=0;i<bars.length;i++){const end=bars[i].time+60;while(j<ends.length&&ends[j]<end)j++;if(ends[j]===end)mainAtClose[i]=j;}
+   const cache=context.minutePrepared;if(cache?.input===context.minuteCandles&&cache.period===c.rsiPeriod&&cache.source===c.rsiSource){bars=cache.bars;minuteRsi=cache.rsi;}
+   else{bars=check(context.minuteCandles);minuteRsi=computeRSI(bars,c.rsiPeriod,c.rsiSource,'1m');context.minutePrepared={input:context.minuteCandles,period:c.rsiPeriod,source:c.rsiSource,bars,rsi:minuteRsi};}
+   let first=-1,lastMain=-1,previous=null;for(let i=0;i<signalBars.length;i++){const time=B.time(signalBars,i);if(time<rangeStart||T.end(time,c.timeframe)>rangeEnd)continue;
+    if(previous!==null&&T.end(previous,c.timeframe)!==time)throw Error('기준 주기 데이터에 공백이 있어 1분봉 분할을 정확히 검증할 수 없습니다.');if(first<0)first=i;lastMain=i;previous=time;
+   }
+   if(first<0)throw Error('선택 기간에 완성된 기준 주기 캔들이 없습니다.');rangeStart=B.time(signalBars,first);rangeEnd=T.end(B.time(signalBars,lastMain),c.timeframe);
+   let lo=0,hi=bars.length;while(lo<hi){const mid=(lo+hi)>>>1;if(B.time(bars,mid)<rangeStart)lo=mid+1;else hi=mid;}const minuteStart=lo;let last=minuteStart;
+   if(minuteStart>=bars.length||B.time(bars,minuteStart)!==rangeStart||minuteStart<c.rsiPeriod)throw Error('1분봉 기록 또는 RSI 준비 구간이 부족합니다. 기간을 줄이거나 제공 범위를 확인하세요.');
+   for(let j=1;j<=c.rsiPeriod;j++)if(B.time(bars,minuteStart-j)!==rangeStart-j*60)throw Error('1분봉 RSI 준비 구간에 공백이 있습니다. 일부만 계산하지 않고 중단했습니다.');
+   while(last+1<bars.length&&B.time(bars,last+1)<rangeEnd){if(B.time(bars,last+1)!==B.time(bars,last)+60)throw Error('1분봉 기록에 공백이 있어 분할 신호를 정확히 검증할 수 없습니다.');last++;}
+   if(B.time(bars,last)+60!==rangeEnd)throw Error('테스트 종료까지의 1분봉 기록이 부족합니다. 일부만 계산하지 않고 중단했습니다.');
   }
-  const data={bars,signalBars,rsi,minuteRsi,mainAtClose,mtf,rangeStart,rangeEnd,executionTimeframe:mtf?'1m':c.timeframe};context.prepared?.set(key,data);return data;
+  const data={bars,signalBars,rsi,minuteRsi,mtf,rangeStart,rangeEnd,executionTimeframe:mtf?'1m':c.timeframe};context.prepared?.set(key,data);return data;
  }
  function runBacktest(candles,fundingRecords,options={},context={}){
-  const c=normalizeConfig(options),data=prepareExecution(candles,c,context),{bars,signalBars,rsi,minuteRsi,mainAtClose,mtf,executionTimeframe}=data;
+  const c=normalizeConfig(options),data=prepareExecution(candles,c,context),{bars,signalBars,rsi,minuteRsi,mtf,executionTimeframe}=data;
   const records=normalizeFunding(fundingRecords),weights=getStepWeights(c.splitCount,c.dcaMethod),weightSum=weights.reduce((a,b)=>a+b,0),splitCount=weights.length;
   const trades=[],signals=[],equityCurve=[],warnings={ambiguousBars:0,fundingPriceEstimates:0,fundingTimingAmbiguities:0,dataGaps:0,skippedInsufficientCapital:0};
   const from=data.rangeStart,to=data.rangeEnd,fee=c.feePct/100,slip=c.slippagePct/100;
@@ -88,8 +97,10 @@
   const intervals=intervalObservations(records,c.fundingIntervalBasis);
   const negativeRecords=records.filter(r=>rateQualifies(r,c)),eligible=fundingSessions.filter(s=>s.endTime>from&&s.startTime<to);
   const diagnostics={fundingRecords:records.filter(r=>r.time>=from&&r.time<to).length,rateQualifiedRecords:negativeRecords.filter(r=>r.time<to&&r.time+(c.fundingWindowSeconds||r.intervalHours*3600||0)>from).length,eligibleFundingWindows:eligible.length,rsiSignals:0,entrySignals:0,rejected:{funding_window:0,funding_cycle:0,position:0,capital:0},samples:[]};
-  let capital=c.initialCapital,pos=null,pending=null,fundingIndex=0,peak=c.initialCapital,mdd=0,lastIndex=-1;
-  function equity(value,time){peak=Math.max(peak,value);if(peak>0)mdd=Math.max(mdd,(peak-value)/peak*100);if(!context.summaryOnly)equityCurve.push({time,value});}
+  let capital=c.initialCapital,pos=null,pending=null,fundingIndex=0,peak=c.initialCapital,mdd=0,lastIndex=-1,equityCount=0,equityStride=1,equityLastTime=null,equityLastValue=null,equitySampled=false;
+  const equityLimit=Number.isSafeInteger(context.equityMaxPoints)?Math.max(2,context.equityMaxPoints):Infinity;
+  function compactEquity(){let j=0;for(let i=0;i<equityCurve.length;i+=2)equityCurve[j++]=equityCurve[i];equityCurve.length=j;equityStride*=2;equitySampled=true;}
+  function equity(value,time){peak=Math.max(peak,value);if(peak>0)mdd=Math.max(mdd,(peak-value)/peak*100);if(!context.summaryOnly){equityLastTime=time;equityLastValue=value;if(equityCount++%equityStride===0){equityCurve.push({time,value});if(equityCurve.length>equityLimit)compactEquity();}}}
   function settle(until,bar,inclusive=true){
    while(fundingIndex<records.length&&(inclusive?records[fundingIndex].time<=until:records[fundingIndex].time<until)){
     const f=records[fundingIndex++];if(!pos||!c.includeFundingPayment||f.time<=pos.startTime)continue;
@@ -113,11 +124,14 @@
    capital+=net;const trade={id:trades.length+1,entryTime:pos.startTime,exitTime:bar.time,holdBars:pos.holdBars,dcaSteps:pos.entries.length,splitTarget:splitCount,avgEntryPrice:pos.avgPrice,exitPrice:fillPrice,triggerPrice:price,totalCost:pos.totalCost,entryFees:pos.entryFees,exitFee,grossRevenue,pricePnl,fundingEarned:pos.fundingEarned,fundingEvents:pos.fundingEvents,fundingEventsCount:pos.fundingEvents.length,netPnl:net,returnPct:net/pos.totalCost*100,isWin:net>1e-9,exitReason:reason,capitalAfter:capital,entries:pos.entries,fundingCondition:pos.fundingCondition,...details};
    trades.push(trade);if(!context.summaryOnly)signals.push({time:bar.time,type:'EXIT',price:fillPrice,reason,returnPct:trade.returnPct,tradeId:trade.id});pos=null;pending=null;equity(capital,bar.time);
   }
+  let mainCursor=0;const currentBar={},previousBar={},currentSignal={};
   for(let i=0;i<bars.length;i++){
-   const bar=bars[i],end=T.end(bar.time,executionTimeframe);if(bar.time<from||end>to)continue;lastIndex=i;
-   const checkpoint=mtf?mainAtClose[i]:i,signalBar=signalBars[checkpoint];
-   const gap=i>0&&T.end(bars[i-1].time,executionTimeframe)<bar.time;
-   if(gap){warnings.dataGaps++;if(pos)close(bars[i-1],bars[i-1].close,'DATA_GAP');pending=null;}
+   if(context.onProgress&&i%250000===0)context.onProgress({phase:'compute',timeframe:c.timeframe,executionTimeframe,count:i,total:bars.length});
+   const bar=B.get(bars,i,currentBar),end=T.end(bar.time,executionTimeframe);if(bar.time<from||end>to)continue;lastIndex=i;
+   if(mtf)while(mainCursor<signalBars.length&&T.end(B.time(signalBars,mainCursor),c.timeframe)<end)mainCursor++;
+   const checkpoint=mtf?(mainCursor<signalBars.length&&T.end(B.time(signalBars,mainCursor),c.timeframe)===end?mainCursor:-1):i,signalBar=mtf?B.get(signalBars,checkpoint,currentSignal):bar;
+   const gap=i>0&&T.end(B.time(bars,i-1),executionTimeframe)<bar.time;
+   if(gap){warnings.dataGaps++;if(pos){const prev=B.get(bars,i-1,previousBar);close(prev,prev.close,'DATA_GAP');}pending=null;}
    settle(bar.time,bar); // Settlement at the opening instant precedes new entries.
    if(pos){const tp=['tp_sl','composite'].includes(c.exitType)&&c.takeProfitPct>0?pos.avgPrice*(1+c.takeProfitPct/100):null,sl=c.stopLossPct>0&&(c.stopLossMode==='immediate'||pos.entries.length===splitCount)?pos.avgPrice*(1-c.stopLossPct/100):null;if(sl!==null&&bar.open<=sl)close(bar,bar.open,'STOP_LOSS');else if(tp!==null&&bar.open>=tp)close(bar,bar.open,'TAKE_PROFIT');}
    if(pending?.kind==='exit'&&pos)close(bar,bar.open,pending.reason);
@@ -156,19 +170,21 @@
     if(entrySession)pending={kind:'entry',fundingCondition:{signalTime:end,settleTime:entrySession.settleTime,rate:entrySession.rate,intervalHours:entrySession.intervalHours,intervalSource:entrySession.intervalSource,validUntil:entrySession.validUntil}};
    }
   }
-  if(pos&&lastIndex>=0)close(bars[lastIndex],bars[lastIndex].close,'END_OF_TEST');
+  if(pos&&lastIndex>=0){const last=B.get(bars,lastIndex,previousBar);close(last,last.close,'END_OF_TEST');}
+  if(equityLastTime!==null&&Number.isFinite(equityLimit)){const point={time:equityLastTime,value:equityLastValue},last=equityCurve.at(-1);if(last?.time===point.time)equityCurve[equityCurve.length-1]=point;else{if(equityCurve.length>=equityLimit)compactEquity();equityCurve.push(point);}}
   const summary=compileStatistics(trades,c,mdd,new Set(eligible.map(s=>s.settleTime)).size);
-  return {success:signalBars.length>c.rsiPeriod,reason:signalBars.length>c.rsiPeriod?'':'RSI 계산을 위한 캔들 데이터가 부족합니다.',summary,config:c,trades,signals,equityCurve,warnings,diagnostics,model:{execution:'closed-signal-next-open',executionTimeframe,dcaTimeframe:c.splitTrigger==='rsi_cross_up_1m'?'1m':c.timeframe,sameBar:'stop-loss-first',funding:'settled-records-only; supplied mark price or candle-open estimate',fundingCondition:'unexpired-negative-settlement',fundingIntervalBasis:c.fundingIntervalBasis,futureIntervalObservations:c.fundingIntervalBasis==='chart',periodEnd:'close-position-at-last-closed-candle'}};
+  return {success:signalBars.length>c.rsiPeriod,reason:signalBars.length>c.rsiPeriod?'':'RSI 계산을 위한 캔들 데이터가 부족합니다.',summary,config:c,trades,signals,equityCurve,warnings,diagnostics,model:{execution:'closed-signal-next-open',executionTimeframe,dcaTimeframe:c.splitTrigger==='rsi_cross_up_1m'?'1m':c.timeframe,sameBar:'stop-loss-first',funding:'settled-records-only; supplied mark price or candle-open estimate',fundingCondition:'unexpired-negative-settlement',fundingIntervalBasis:c.fundingIntervalBasis,futureIntervalObservations:c.fundingIntervalBasis==='chart',periodEnd:'close-position-at-last-closed-candle',...(equitySampled?{equityCurveSampled:true,equityPointLimit:equityLimit}:{})}};
  }
  function compileStatistics(trades,c,mdd=0,eligibleSessionsCount=0){
   const wins=trades.filter(t=>t.netPnl>1e-9),losses=trades.filter(t=>t.netPnl< -1e-9),grossProfit=wins.reduce((s,t)=>s+t.netPnl,0),grossLoss=-losses.reduce((s,t)=>s+t.netPnl,0),netPnl=trades.reduce((s,t)=>s+t.netPnl,0),avg=rows=>rows.length?rows.reduce((s,t)=>s+t.returnPct,0)/rows.length:0;
   return {totalTrades:trades.length,winTrades:wins.length,lossTrades:losses.length,breakevenTrades:trades.length-wins.length-losses.length,winRatePct:trades.length?wins.length/trades.length*100:0,initialCapital:c.initialCapital,finalCapital:c.initialCapital+netPnl,netPnl,grossProfit,grossLoss,totalReturnPct:netPnl/c.initialCapital*100,profitFactor:grossLoss?grossProfit/grossLoss:grossProfit?null:0,profitFactorInfinite:!grossLoss&&grossProfit>0,maxDrawdownPct:mdd,avgTradeReturnPct:avg(trades),avgWinReturnPct:avg(wins),avgLossReturnPct:Math.abs(avg(losses)),riskRewardRatio:losses.length?avg(wins)/Math.abs(avg(losses)):null,avgDcaSteps:trades.length?trades.reduce((s,t)=>s+t.dcaSteps,0)/trades.length:0,avgHoldBars:trades.length?trades.reduce((s,t)=>s+t.holdBars,0)/trades.length:0,totalFundingEarned:trades.reduce((s,t)=>s+t.fundingEarned,0),totalFees:trades.reduce((s,t)=>s+t.entryFees+t.exitFee,0),eligibleSessionsCount};
  }
- function runAllTimeframes(map,records,options={}){const results={},comparison=[],context={minuteCandles:map['1m'],prepared:new Map()};for(const tf of Object.keys(T.seconds)){if(!map[tf]?.length)continue;const res=runBacktest(map[tf],records,{...options,timeframe:tf},context);results[tf]=res;comparison.push({timeframe:tf,...res.summary,trades:res.summary.totalTrades,fundingEarned:res.summary.totalFundingEarned});}const valid=comparison.filter(r=>r.totalTrades>0),best=key=>[...valid].sort((a,b)=>(b[key]??Infinity)-(a[key]??Infinity))[0]||null;return {results,comparison,bestByWinRate:best('winRatePct'),bestByProfitFactor:best('profitFactor'),bestByTotalReturn:best('totalReturnPct')};}
+ function runAllTimeframes(map,records,options={},controls={}){const results={},comparison=[],context={minuteCandles:map['1m'],prepared:new Map(),equityMaxPoints:controls.equityMaxPoints,onProgress:controls.onProgress},frames=Object.keys(T.seconds).filter(tf=>map[tf]?.length);for(const [index,tf]of frames.entries()){controls.onProgress?.({phase:'compare',timeframe:tf,count:index+1,total:frames.length});const res=runBacktest(map[tf],records,{...options,timeframe:tf},context);results[tf]=res;comparison.push({timeframe:tf,...res.summary,trades:res.summary.totalTrades,fundingEarned:res.summary.totalFundingEarned});}const valid=comparison.filter(r=>r.totalTrades>0),best=key=>[...valid].sort((a,b)=>(b[key]??Infinity)-(a[key]??Infinity))[0]||null;return {results,comparison,bestByWinRate:best('winRatePct'),bestByProfitFactor:best('profitFactor'),bestByTotalReturn:best('totalReturnPct')};}
  function optimizeStrategy(candles,records,grid={}){
-  const combinations=[],context={minuteCandles:grid.minuteCandles,prepared:new Map(),summaryOnly:true};let tested=0;
-  for(const splitCount of grid.splitCounts||[0,3,5,10])for(const rsiOversold of grid.rsiOversolds||[20,25,30])for(const takeProfitPct of grid.takeProfitPcts||[1,2,3])for(const stopLossPct of grid.stopLossPcts||[2,3,5])for(const splitTrigger of grid.splitTriggers||(grid.minuteCandles?.length?['step_pct','rsi_cross_up','rsi_cross_up_1m']:['step_pct','rsi_cross_up'])){
+  const combinations=[],context={minuteCandles:grid.minuteCandles,prepared:new Map(),summaryOnly:true},splits=grid.splitCounts||[0,3,5,10],oversolds=grid.rsiOversolds||[20,25,30],targets=grid.takeProfitPcts||[1,2,3],stops=grid.stopLossPcts||[2,3,5],triggers=grid.splitTriggers||(grid.minuteCandles?.length?['step_pct','rsi_cross_up','rsi_cross_up_1m']:['step_pct','rsi_cross_up']),total=splits.length*oversolds.length*targets.length*stops.length*triggers.length;let tested=0;
+  for(const splitCount of splits)for(const rsiOversold of oversolds)for(const takeProfitPct of targets)for(const stopLossPct of stops)for(const splitTrigger of triggers){
    const params={splitCount,rsiOversold,takeProfitPct,stopLossPct,splitTrigger};tested++;if(tested>1000)throw Error('최적화 조합은 1,000개까지 지원합니다.');
+   grid.onProgress?.({phase:'optimize',timeframe:grid.baseConfig?.timeframe,count:tested,total});
    let result;try{result=runBacktest(candles,records,{...grid.baseConfig,...params},context);}catch(error){if(/총금액/.test(error.message))continue;throw error;}
    if(result.summary.totalTrades<(grid.minTrades??2))continue;const score=result.summary.winRatePct*Math.min(10,result.summary.profitFactor??10)/(1+result.summary.maxDrawdownPct/10);combinations.push({params,summary:result.summary,score});
   }
