@@ -23,16 +23,24 @@ function cleanItem(item){
  return {id:String(item.id||'').slice(0,100),tool:item.tool,pane:String(item.pane||'price').slice(0,40),points,color,width:Math.max(1,Math.min(8,Number(item.width)||2)),dash:[0,1,2].includes(item.dash)?item.dash:0,fill:Math.max(0,Math.min(.8,finite(item.fill)?item.fill:.12)),text:String(item.text||'').slice(0,1000),fontSize:Math.max(10,Math.min(40,Number(item.fontSize)||14)),locked:Boolean(item.locked),hidden:Boolean(item.hidden)};
 }
 function normalize(value){const ids=new Set();return {items:(Array.isArray(value?.items)?value.items:[]).slice(0,500).map(cleanItem).filter(v=>{if(!v||!v.id||ids.has(v.id))return false;ids.add(v.id);return true;}),hidden:Boolean(value?.hidden),locked:Boolean(value?.locked)};}
+function rebase(before,after,latest){
+ const next=clone(latest),original=new Map(before.items.map(v=>[v.id,v])),updated=new Map(after.items.map(v=>[v.id,v]));
+ for(const item of before.items)if(!updated.has(item.id))next.items=next.items.filter(v=>v.id!==item.id);
+ for(const item of after.items){const old=original.get(item.id),index=next.items.findIndex(v=>v.id===item.id);if(!old){if(index<0)next.items.push(clone(item));continue;}const patch={};for(const k of Object.keys(item))if(JSON.stringify(old[k])!==JSON.stringify(item[k]))patch[k]=clone(item[k]);if(Object.keys(patch).length){if(index<0)next.items.push(clone(item));else Object.assign(next.items[index],patch);}}
+ for(const k of ['hidden','locked'])if(before[k]!==after[k])next[k]=after[k];return normalize(next);
+}
 class Store {
- constructor(storage,key='funding-chart-drawings-v1'){this.storage=storage;this.key=key;this.markets=new Map();this.market='';this.state=normalize(null);this.past=[];this.future=[];}
- switchMarket(key){if(this.market===key)return false;if(this.market)this.markets.set(this.market,{state:this.state,past:this.past,future:this.future});this.market=key;let entry=this.markets.get(key);if(!entry){let saved;try{saved=JSON.parse(this.storage?.getItem(this.key+':'+key));}catch{}entry={state:normalize(saved),past:[],future:[]};}this.state=entry.state;this.past=entry.past;this.future=entry.future;return true;}
- persist(){try{this.storage?.setItem(this.key+':'+this.market,JSON.stringify(this.state));return true;}catch{return false;}}
- commit(next){const state=normalize(next);if(JSON.stringify(state)===JSON.stringify(this.state))return false;this.past.push(clone(this.state));if(this.past.length>100)this.past.shift();this.future=[];this.state=state;this.persist();return true;}
+ constructor(storage,key='funding-chart-drawings-v1'){this.storage=storage;this.key=key;this.markets=new Map();this.market='';this.state=normalize(null);this.saved=clone(this.state);this.past=[];this.future=[];}
+ read(){try{const raw=this.storage?.getItem(this.key+':'+this.market);return raw?normalize(JSON.parse(raw)):null;}catch{return null;}}
+ switchMarket(key){if(this.market===key)return false;if(this.market)this.markets.set(this.market,{state:this.state,saved:this.saved,past:this.past,future:this.future});this.market=key;let entry=this.markets.get(key);if(!entry){const state=this.read()||normalize(null);entry={state,saved:clone(state),past:[],future:[]};}this.state=entry.state;this.saved=entry.saved;this.past=entry.past;this.future=entry.future;this.sync();return true;}
+ sync(){const latest=this.read();if(!latest)return false;const next=rebase(this.saved,this.state,latest),changed=JSON.stringify(next)!==JSON.stringify(this.state);this.state=next;this.saved=latest;return changed;}
+ persist(){try{const latest=this.read()||this.saved;this.state=rebase(this.saved,this.state,latest);this.storage?.setItem(this.key+':'+this.market,JSON.stringify(this.state));this.saved=clone(this.state);return true;}catch{return false;}}
+ commit(next){const state=normalize(next);if(JSON.stringify(state)===JSON.stringify(this.state))return false;this.past.push({before:clone(this.state),after:clone(state)});if(this.past.length>100)this.past.shift();this.future=[];this.state=state;this.persist();return true;}
  add(item){const next=clone(this.state);next.items.push(item);return this.commit(next);}
  update(id,patch){const next=clone(this.state),i=next.items.findIndex(v=>v.id===id);if(i<0)return false;next.items[i]={...next.items[i],...clone(patch),id};return this.commit(next);}
  remove(id){return this.commit({...this.state,items:this.state.items.filter(v=>v.id!==id)});}
- undo(){if(!this.past.length)return false;this.future.push(clone(this.state));this.state=this.past.pop();this.persist();return true;}
- redo(){if(!this.future.length)return false;this.past.push(clone(this.state));this.state=this.future.pop();this.persist();return true;}
+ undo(){if(!this.past.length)return false;this.sync();const action=this.past.pop();this.future.push(action);this.state=rebase(action.after,action.before,this.state);this.persist();return true;}
+ redo(){if(!this.future.length)return false;this.sync();const action=this.future.pop();this.past.push(action);this.state=rebase(action.before,action.after,this.state);this.persist();return true;}
 }
 function lower(rows,time){let lo=0,hi=rows.length;while(lo<hi){const m=(lo+hi)>>>1;if(rows[m].time<time)lo=m+1;else hi=m;}return lo;}
 function logicalTime(rows,index,step){if(!rows.length||!finite(index))return null;if(index<=0)return rows[0].time+index*step;const last=rows.length-1;if(index>=last)return rows[last].time+(index-last)*step;const i=Math.floor(index),f=index-i;return rows[i].time+(rows[i+1].time-rows[i].time)*f;}

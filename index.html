@@ -913,7 +913,8 @@
     <link rel="stylesheet" href="chart-drawings.css?v=20261027-drawing-axes-1">
     <link rel="stylesheet" href="chart-workspace.css?v=20261027-all-exchange-search-1">
     <link rel="stylesheet" href="dashboard.css?v=20261027-news-reading-2">
-    <link rel="stylesheet" href="backtest.css?v=20261026-context-data-ruler-1">
+    <link rel="stylesheet" href="backtest.css?v=20261029-chart-tools-1">
+    <link rel="stylesheet" href="funding-rank.css?v=20261029-chart-tools-1">
 </head>
 <body>
 
@@ -1067,7 +1068,7 @@
                 </div>
                 <div class="funding-rank-filter-box">
                     <div class="funding-rank-row">
-                        <select id="fundingRankExchangeSelect" style="flex:1; background:#1f2937; color:#f3f4f6; border:1px solid #374151; padding:5px 8px; border-radius:4px; font-size:11px; font-weight:700;">
+                        <select id="fundingRankExchangeSelect" aria-label="펀딩 순위 거래소" style="flex:1; background:#1f2937; color:#f3f4f6; border:1px solid #374151; padding:5px 8px; border-radius:4px; font-size:11px; font-weight:700;">
                             <option value="ALL">🌐 전체 거래소 통합 순위</option>
                             <option value="BINANCE">Binance (바이낸스)</option>
                             <option value="BYBIT">Bybit (바이비트)</option>
@@ -1082,15 +1083,29 @@
                         <button type="button" class="btn-funding-sort" data-sort="positive" title="양수 펀딩비 순: 롱 스퀴즈 / 숏 반락 후보">🚀 양수 펀비 순</button>
                         <button type="button" class="btn-funding-sort" data-sort="magnitude" title="절대값 극단 펀딩비 순">⚡ 극단값 순</button>
                     </div>
+                    <div class="funding-filter-modes" role="group" aria-label="펀딩 스캔 조건">
+                        <button type="button" class="btn-funding-mode active" data-mode="rate" aria-pressed="true">펀딩률만</button>
+                        <button type="button" class="btn-funding-mode" data-mode="cycle" aria-pressed="false">주기만</button>
+                        <button type="button" class="btn-funding-mode" data-mode="both" aria-pressed="false">둘 다</button>
+                    </div>
+                    <div class="funding-condition" id="fundingRankRateCondition">
+                        <div class="funding-condition-fields"><label for="fundingRankRateValue">펀딩률</label><select id="fundingRankRateOperator" aria-label="펀딩률 비교 조건"><option value="lte">≤ 이하</option><option value="gte">≥ 이상</option></select><input id="fundingRankRateValue" type="number" step="any" min="-100" max="100" placeholder="전체" aria-label="펀딩률 기준 퍼센트"><span>%</span></div>
                     <div class="funding-rank-thresh-btns">
                         <button type="button" class="btn-funding-thresh active" data-thresh="all">전체</button>
                         <button type="button" class="btn-funding-thresh" data-thresh="neg_01">≤ -0.1%</button>
                         <button type="button" class="btn-funding-thresh" data-thresh="neg_05">≤ -0.5% (극단)</button>
                         <button type="button" class="btn-funding-thresh" data-thresh="pos_005">≥ +0.05%</button>
                     </div>
+                    </div>
+                    <div class="funding-condition" id="fundingRankCycleCondition" hidden>
+                        <div class="funding-condition-fields"><label for="fundingRankHoursSelect">정산 주기</label><select id="fundingRankHoursSelect" aria-label="펀딩 정산 주기"><option value="1">1시간</option><option value="2">2시간</option><option value="4">4시간</option><option value="6">6시간</option><option value="8">8시간</option><option value="12">12시간</option><option value="24">24시간</option><option value="custom">직접 입력</option></select><input id="fundingRankCustomHours" type="number" min="0.25" max="24" step="any" value="1" aria-label="직접 입력할 펀딩 주기 시간" hidden></div>
+                    </div>
+                    <div class="funding-cycle-legend" aria-label="정산 주기 색상"><span style="--cycle-color:#ef4444"><i></i>1h</span><span style="--cycle-color:#a78bfa"><i></i>2h</span><span style="--cycle-color:#f59e0b"><i></i>4h</span><span style="--cycle-color:#3b82f6"><i></i>8h</span></div>
                     <div class="funding-rank-row">
                         <input type="text" id="fundingRankSearchInput" placeholder="심볼 검색 (예: BLUR, PUFFER, BTC)..." style="width:100%; padding:5px 8px; font-size:11px; background:#111827; border:1px solid #374151; border-radius:4px; color:#f3f4f6;">
                     </div>
+                    <span id="fundingRankFilterCount" class="funding-rank-count" role="status"></span>
+                    <p id="fundingRankCycleStatus" class="funding-cycle-status" role="status"></p>
                     <div class="scanner-status-bar">
                         <span id="fundingRankStatusText">실시간 펀딩비 순위 분석 준비 중...</span>
                         <div id="fundingRankProgressBar" class="scanner-progress-bar"><div id="fundingRankProgressFill" class="scanner-progress-fill"></div></div>
@@ -1255,32 +1270,33 @@
     <script src="market-shared.js?v=20261025-mtf-1"></script>
     <script src="relay-config.js?v=20261013-relay-1"></script>
     <script src="market-api.js?v=20261026-context-data-ruler-1"></script>
-    <script src="funding.js?v=20261027-funding-cursor-1"></script>
+    <script src="funding.js?v=20261029-chart-tools-1"></script>
     <script src="funding-history.js?v=20261027-funding-cursor-1"></script>
     <script src="timeframes.js?v=20261024-dashboard-1"></script>
     <script src="chart-data.js?v=20261026-cycle-evidence-1"></script>
     <script src="date-navigation.js?v=20261025-backtest-1"></script>
     <script src="indicators.js?v=20261027-cycle-coverage-1"></script>
     <script src="ruler-settings.js?v=20261024-ruler-date-1"></script>
-    <script src="drawing-engine.js?v=20261016-drawings-1"></script>
-    <script src="drawing-renderer.js?v=20261027-drawing-axes-1"></script>
-    <script src="chart-drawings.js?v=20261027-drawing-axes-1"></script>
+    <script src="drawing-engine.js?v=20261029-chart-tools-1"></script>
+    <script src="drawing-renderer.js?v=20261029-chart-tools-1"></script>
+    <script src="chart-drawings.js?v=20261029-chart-tools-1"></script>
     <script src="market-catalog.js?v=20261027-all-exchange-search-1"></script>
     <script src="symbol-picker.js?v=20261027-all-exchange-search-1"></script>
     <script src="chart-workspace.js?v=20261027-layout-funding-1"></script>
-    <script src="scanner.js?v=20261025-backtest-1"></script>
+    <script src="funding-rank.js?v=20261029-chart-tools-1"></script>
+    <script src="scanner.js?v=20261029-chart-tools-1"></script>
     <script src="backtest-bars.js?v=20261028-long-backtest-1"></script>
     <script src="backtest-engine.js?v=20261028-long-backtest-1"></script>
     <script src="backtest-data.js?v=20261028-long-backtest-1"></script>
-    <script src="backtest-overlay.js?v=20261028-backtest-lines-1"></script>
-    <script src="backtest-ui.js?v=20261028-long-backtest-1"></script>
+    <script src="backtest-overlay.js?v=20261029-chart-tools-1"></script>
+    <script src="backtest-ui.js?v=20261029-chart-tools-1"></script>
     <script src="dashboard-model.js?v=20261028-long-backtest-1"></script>
     <script src="news-ui.js?v=20261027-news-reading-2"></script>
     <script src="dashboard.js?v=20261025-news-archive-1"></script>
     <script src="signal-sidebar.js?v=20261025-sidebar-fullscreen-1"></script>
     <script src="workspace-sidebar.js?v=20261025-sidebar-fullscreen-1"></script>
     <script src="chart-info.js?v=20261027-layout-funding-1"></script>
-    <script src="app.js?v=20261028-backtest-lines-1"></script>
+    <script src="app.js?v=20261029-chart-tools-1"></script>
 </body>
 </html>
 

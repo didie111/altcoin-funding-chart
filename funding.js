@@ -16,6 +16,7 @@ const FundingEngine = (() => {
     const result = n === null ? null : n * 100;
     return result !== null && Number.isFinite(result) ? result : null;
   }
+  function cycleColor(hours) {return ({1:'#ef4444',2:'#a78bfa',4:'#f59e0b',8:'#3b82f6',12:'#14b8a6',24:'#64748b'})[hours] || '#94a3b8';}
   function seconds(value) {
     const n = numeric(value);
     return n !== null && n > 0 ? Math.floor(n >= 1e11 ? n / 1000 : n) : null;
@@ -169,7 +170,7 @@ const FundingEngine = (() => {
     const values = new Map(records.map(row => [row.time, row.rate]));
     return bars.map(bar => values.has(bar.time) ? {time: bar.time, value: values.get(bar.time)} : {time: bar.time});
   }
-  return {exchanges, numeric, percent, seconds, base, contract, currentRequest, normalizeCurrent, historyRequest, normalizeHistory, nextHistoryCursor, merge, mapToCandles, minimum, observedCycles, cycleTransitions, observeCurrent, liveSeriesData};
+  return {exchanges, numeric, cycleColor, percent, seconds, base, contract, currentRequest, normalizeCurrent, historyRequest, normalizeHistory, nextHistoryCursor, merge, mapToCandles, minimum, observedCycles, cycleTransitions, observeCurrent, liveSeriesData};
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = FundingEngine;

@@ -90,7 +90,7 @@ function axisOverlay(entries,{width,totalWidth,height,plotBottom,formatTime,rule
   const indices=item.points.length<=6?item.points.map((_,i)=>i):[0,item.points.length-1];
   if(['vline','crossline'].includes(item.tool)){const x=geometry.points[0]?.x;if(x>=0&&x<=width)vertical.push(`<path data-drawing-vertical="${esc(item.id)}" d="M${n(x)} 0V${n(plotBottom)}" stroke="${esc(color)}" stroke-width="${n(item.width||2)}"${item.dash?' stroke-dasharray="'+(item.dash===1?'2 4':'8 5')+'"':''}${draft?' opacity=".8"':''}/>`);}
   for(const i of indices){const point=item.points[i],p=geometry.points[i];if(!p)continue;
-   if(ownPane&&(selected||draft||priceAlways.has(item.tool))&&p.y>=0&&p.y<=pane.height&&axisWidth>10){const value=formatPrice(point.price);prices.push({id:item.id,pane:pane.id,value,y:pane.top+p.y,top:pane.top,bottom:pane.bottom,color,priority});}
+   if(ownPane&&!['vline','fibTime'].includes(item.tool)&&(selected||draft||priceAlways.has(item.tool))&&p.y>=0&&p.y<=pane.height&&axisWidth>10){const value=formatPrice(point.price);prices.push({id:item.id,pane:pane.id,value,y:pane.top+p.y,top:pane.top,bottom:pane.bottom,color,priority});}
    if((selected||draft||timeAlways.has(item.tool))&&p.x>=0&&p.x<=width&&timeHeight>5)times.push({id:item.id,value:formatTime(point.time),x:p.x,color,priority});
   }
  }

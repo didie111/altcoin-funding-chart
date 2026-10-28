@@ -1,10 +1,12 @@
 (function(root,factory){'use strict';if(typeof module==='object'&&module.exports)module.exports=factory(require('./backtest-engine.js'),require('./timeframes.js'));else root.BacktestOverlay=factory(root.BacktestEngine,TimeframeEngine);})(typeof globalThis!=='undefined'?globalThis:this,function(E,T){
  'use strict';
- function matches(result,market){const clean=s=>String(s||'').replace(/[-_]/g,'');return result&&market&&result.market?.ex===market.ex&&clean(result.market.symbol)===clean(market.symbol)&&result.market.int===market.int;}
+ const clean=s=>String(s||'').replace(/[-_]/g,'');
+ function displayTimeframe(result){const source=result.market,view=result.displayMarket;return view&&view.ex===source?.ex&&clean(view.symbol)===clean(source.symbol)&&Object.hasOwn(T.seconds,view.int)?view.int:source?.int;}
+ function matches(result,market){return result&&market&&result.market?.ex===market.ex&&clean(result.market.symbol)===clean(market.symbol)&&displayTimeframe(result)===market.int;}
  function lower(rows,time,key='time'){let lo=0,hi=rows.length;while(lo<hi){const mid=(lo+hi)>>>1;if(rows[mid][key]<time)lo=mid+1;else hi=mid;}return lo;}
  function markers(result,bars){
-  if(!result||!bars.length)return [];const rows=result.signals||[],visible=rows.slice(lower(rows,bars[0].time),lower(rows,T.end(bars.at(-1).time,result.market.int))),groups=[],entries=new Map();
-  for(const s of visible){const i=T.indexAt(bars,s.time,result.market.int);if(i<0)continue;const time=bars[i].time,exit=s.type==='EXIT',marker={time,position:exit?'aboveBar':'belowBar',color:s.type==='BUY_INITIAL'?'#60a5fa':s.type==='DCA_BUY'?'#22d3ee':s.reason==='STOP_LOSS'?'#fb7185':s.reason==='TAKE_PROFIT'?'#34d399':'#c4b5fd',shape:exit?'arrowDown':'arrowUp',text:E.signalLabel(s)};
+  if(!result||!bars.length)return [];const interval=displayTimeframe(result),rows=result.signals||[],visible=rows.slice(lower(rows,bars[0].time),lower(rows,T.end(bars.at(-1).time,interval))),groups=[],entries=new Map();
+  for(const s of visible){const i=T.indexAt(bars,s.time,interval);if(i<0)continue;const time=bars[i].time,exit=s.type==='EXIT',marker={time,position:exit?'aboveBar':'belowBar',color:s.type==='BUY_INITIAL'?'#60a5fa':s.type==='DCA_BUY'?'#22d3ee':s.reason==='STOP_LOSS'?'#fb7185':s.reason==='TAKE_PROFIT'?'#34d399':'#c4b5fd',shape:exit?'arrowDown':'arrowUp',text:E.signalLabel(s)};
    if(exit){groups.push({marker});continue;}
    let group=entries.get(time);if(!group){group={marker,initial:false,steps:[]};entries.set(time,group);groups.push(group);}if(s.type==='BUY_INITIAL')group.initial=true;else group.steps.push(s.step);
   }
@@ -15,7 +17,7 @@
  function geometry(result,{chart,series,bars,width,height}){
   const scene={segments:[],exits:[],groups:[]};if(!result?.trades?.length||!bars.length||width<=0||height<=0)return scene;
   const scale=chart.timeScale(),range=scale.getVisibleRange();if(!range)return scene;
-  const interval=result.market.int,from=Number(range.from),to=T.end(Number(range.to),interval),spacing=scale.options().barSpacing;
+  const interval=displayTimeframe(result),from=Number(range.from),to=T.end(Number(range.to),interval),spacing=scale.options().barSpacing;
   if(!Number.isFinite(from)||!Number.isFinite(to)||!(spacing>0))return scene;
   // Use the chart's real time coordinates, including when older price pages
   // are prepended or the rendered data window changes. Never snap a gap to a bar.
