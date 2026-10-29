@@ -1153,13 +1153,16 @@
                                 <input type="checkbox" id="stratFundingRsiToggle" checked>
                                 <span class="switch-slider"></span>
                             </label>
-                            <span class="strategy-name">펀딩비 + 5분봉 RSI BUY 신호</span>
+                            <span class="strategy-name">펀딩비 + 현재 주기 RSI BUY 신호</span>
                         </div>
                         <div class="strategy-input-row">
                             <label for="stratFundingThresh">펀딩비 기준</label>
                             <input type="number" id="stratFundingThresh" value="-0.5" step="0.1" style="width:70px"> % 이하
                         </div>
-                        <p class="strategy-desc">펀딩비 과열(-0.5% 이하) 발생 후 5분봉 RSI가 과매도(≤30) 진입 후 다시 30선 상향 돌파 시 [⚡BUY] 신호 발생!</p>
+                        <div class="strategy-input-row"><label for="stratFundingHours">RSI 검사 시점 주기</label><select id="stratFundingHours"><option value="0">모든 주기</option><option value="1">1시간</option><option value="2">2시간</option><option value="4">4시간</option><option value="6">6시간</option><option value="8">8시간</option><option value="12">12시간</option><option value="24">24시간</option></select></div>
+                        <div class="strategy-input-row"><label for="stratFundingWindow">정산 후 유효 · 분</label><input id="stratFundingWindow" type="number" min="0" max="14400" value="60"></div>
+                        <div class="strategy-input-row"><label for="stratFundingTransition">전환 직전 포함 · 분</label><input id="stratFundingTransition" type="number" min="0" max="1440" value="60"></div>
+                        <p class="strategy-desc">선택한 차트 주기의 완성 봉에서 RSI 30 상향 돌파를 확인합니다. 주기 전환이 확인되면 직전 설정 시간 안의 음펀딩도 포함합니다. 전환 전 미래 정산을 미리 사용하지 않습니다. 전환 직전 포함 0은 끔입니다.</p>
                     </div>
 
                     <div class="strategy-card">
@@ -1287,6 +1290,7 @@
     <script src="scanner.js?v=20261029-chart-tools-1"></script>
     <script src="backtest-bars.js?v=20261028-long-backtest-1"></script>
     <script src="backtest-engine.js?v=20261029-entry-cooldown-1"></script>
+    <script src="funding-signals.js?v=20261029-funding-history-1"></script>
     <script src="backtest-data.js?v=20261028-long-backtest-1"></script>
     <script src="backtest-overlay.js?v=20261029-chart-tools-1"></script>
 <script src="backtest-ui.js?v=20261029-entry-cooldown-1"></script>

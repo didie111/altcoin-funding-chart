@@ -19,7 +19,8 @@
    if(exchange==='BYBIT')change=numeric(t.price24hPcnt);if(exchange==='BITGET')change=numeric(t.change24h);if(exchange==='MEXC')change=numeric(t.riseFallRate);
    if(['BYBIT','BITGET','MEXC'].includes(exchange)&&change!==null)change*=100;
    if(exchange==='OKX'){const open=numeric(t.open24h);change=price!==null&&open>0?(price-open)/open*100:null;}
-   rows.set(coin,{exchange,symbol:coin+'USDT',base:coin,native,price:price>0?price:null,change,volume:volume!==null?volume:null,volumeApprox:exchange==='OKX'});
+   const listed=numeric(exchange==='BINANCE'?c.onboardDate:exchange==='BYBIT'?c.launchTime:exchange==='OKX'?c.listTime:null),listedAt=listed>1e11?Math.floor(listed/1000):listed;
+   rows.set(coin,{...(listedAt>0&&listedAt<Date.now()/1000?{listedAt}:{}),exchange,symbol:coin+'USDT',base:coin,native,price:price>0?price:null,change,volume:volume!==null?volume:null,volumeApprox:exchange==='OKX'});
   }
   return [...rows.values()].sort((a,b)=>(b.volume??-1)-(a.volume??-1)||a.base.localeCompare(b.base));
  }

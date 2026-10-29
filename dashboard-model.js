@@ -22,8 +22,8 @@
   return {start:date(value.start,prior),end:date(value.end,day),capital:number(value.capital,10000,1,1e12),orderSize:number(value.orderSize,10,0.01,100),commission:number(value.commission,0.05,0,10),slippage:number(value.slippage,.03,0,10),height:number(value.height,280,180,900),open:value.open===true};
  }
  function validateSettings(value){const s=settings(value);if(value.start!==s.start||value.end!==s.end||s.start>s.end)throw Error('시작일과 종료일을 확인해 주세요.');for(const key of ['capital','orderSize','commission','slippage'])if(Number(value[key])!==s[key])throw Error('설정값의 허용 범위를 확인해 주세요.');return s;}
- function backtestTarget({follow=true,custom}={},active={}){
-  const value=follow?active:custom||active;
+ function backtestTarget({follow=true,followTimeframe=follow,custom}={},active={}){
+  const value={...(follow?active:custom||active),int:followTimeframe?active.int:(custom||active).int};
   const symbol=String(value.symbol||'').trim().toUpperCase().replace(/[-_]/g,'').replace(/USDTSWAP$|USDT$/,'')+'USDT';
   if(!exchanges[value.ex]||!labels[value.int]||!/^[A-Z0-9]{1,28}USDT$/.test(symbol))throw Error('실행할 거래소·코인·타임프레임을 확인하세요.');
   return {ex:value.ex,symbol,int:value.int};

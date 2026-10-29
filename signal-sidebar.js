@@ -1,7 +1,7 @@
 (function(root,factory){'use strict';const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.SignalSidebar=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){
  'use strict';
  const filters=['all','funding_rsi','rsi','combo'],names={BINANCE:'Binance',BYBIT:'Bybit',BINGX:'BingX',BITGET:'Bitget',MEXC:'MEXC',OKX:'OKX'},frames={'1m':'1분','3m':'3분','5m':'5분','15m':'15분','30m':'30분','1h':'1시간','2h':'2시간','4h':'4시간','1d':'일봉','1w':'주봉','1M':'월봉'};
- function settings(value={}){return {rsi:value.rsi!==false,fundingRsi:value.fundingRsi!==false,combo:value.combo===true,fundingThreshold:Number.isFinite(Number(value.fundingThreshold))?Number(value.fundingThreshold):-.5};}
+ function settings(value={}){const number=(key,fallback,max)=>Number.isFinite(Number(value[key]))&&Number(value[key])>=0&&Number(value[key])<=max?Number(value[key]):fallback;return {fundingHours:number('fundingHours',0,24),fundingWindowMinutes:number('fundingWindowMinutes',60,14400),fundingTransitionMinutes:number('fundingTransitionMinutes',60,1440),rsi:value.rsi!==false,fundingRsi:value.fundingRsi!==false,combo:value.combo===true,fundingThreshold:Number.isFinite(Number(value.fundingThreshold))?Number(value.fundingThreshold):-.5};}
  function snapshot({market,revision=0,settings:options,filter='all',strategy=[],funding=[],page=0,loading=false}){
   filter=filters.includes(filter)?filter:'all';
   const coin=strategy.filter(s=>!s.symbol||s.symbol===market.symbol),filtered=filter==='all'?coin:coin.filter(s=>s.category===filter);
@@ -15,13 +15,13 @@
   const $=id=>doc.getElementById(id);let timer,disposed=false;
   const publish=()=>{if(disposed||timer)return;timer=setTimeout(()=>{timer=null;if(!disposed)workspace?.signalsChanged();},80);};
   if(workspace?.embedded)return {publish,dispose(){disposed=true;clearTimeout(timer);}};
-  const fieldNames={stratRsiToggle:'rsi',stratFundingRsiToggle:'fundingRsi',stratComboToggle:'combo',stratFundingThresh:'fundingThreshold'};
+  const fieldNames={stratRsiToggle:'rsi',stratFundingRsiToggle:'fundingRsi',stratComboToggle:'combo',stratFundingThresh:'fundingThreshold',stratFundingHours:'fundingHours',stratFundingWindow:'fundingWindowMinutes',stratFundingTransition:'fundingTransitionMinutes'};
   function command(value,view=workspace.activeSignals(),index=workspace.activeCell()){
    if(!view)return false;return workspace.signalCommand(value,index,view.market,view.revision);
   }
   for(const [id,key]of Object.entries(fieldNames))if($(id))$(id).onchange=event=>{
-   const value=key==='fundingThreshold'?Number(event.target.value):event.target.checked;
-   if(key==='fundingThreshold'&&!Number.isFinite(value)){render();return;}
+   const value=key.startsWith('funding')&&key!=='fundingRsi'?Number(event.target.value):event.target.checked;
+   if(typeof value==='number'&&!Number.isFinite(value)){render();return;}
    command({kind:'settings',patch:{[key]:value}});
   };
   for(const button of doc.querySelectorAll('.btn-strat-filter'))button.onclick=()=>command({kind:'filter',filter:button.dataset.filter});
@@ -34,7 +34,7 @@
    if($('signal-sidebar')?.hidden)return;
    const view=workspace.activeSignals(),market=view?.market||workspace.activeMarket(),index=workspace.activeCell();
    context('strategyChartContext',view,market,index);context('fundingChartContext',view,market,index);
-   for(const [id,key]of Object.entries(fieldNames)){const el=$(id);if(!el)continue;el.disabled=!view;if(key==='fundingThreshold'){if(doc.activeElement!==el||!view)el.value=view?.settings[key]??-.5;}else el.checked=view?.settings[key]===true;}
+   for(const [id,key]of Object.entries(fieldNames)){const el=$(id);if(!el)continue;el.disabled=!view;if(key.startsWith('funding')&&key!=='fundingRsi'){if(doc.activeElement!==el||!view)el.value=view?.settings[key]??-.5;}else el.checked=view?.settings[key]===true;}
    for(const button of doc.querySelectorAll('.btn-strat-filter')){const selected=button.dataset.filter===(view?.filter||'all');button.classList.toggle('active',selected);button.style.background=selected?'#2563eb':'#374151';button.style.color=selected?'#fff':'#cbd5e1';button.disabled=!view;}
    if($('strategyCurrentCoinLabel'))$('strategyCurrentCoinLabel').textContent='['+market.symbol+'] 전략 신호';
    const total=view?.fundingTotal||0;for(const id of ['fundingCountBadge','signalCountTag'])if($(id))$(id).textContent=total+'개';
