@@ -18,7 +18,10 @@ const oldResults=[
 ];
 for(const [tf,trigger,source,expected]of oldResults)test(tf+' '+trigger+' preserves every trade and statistic from the pre-change engine',()=>{
  const {data,fund}=fixture(),cfg=config(tf,trigger,source),normal=E.runBacktest(data[tf],fund,cfg,{minuteCandles:data['1m']}),compact=E.runBacktest(pack(data[tf]),fund,cfg,{minuteCandles:pack(data['1m'])});
- assert.equal(sha(normal),expected);assert.deepEqual(compact,normal);
+ // Only new option metadata is excluded from the original result snapshot.
+ assert.equal(normal.config.oneEntryPerFunding,false);assert.equal(normal.diagnostics.rejected.funding_reuse,0);assert.equal(normal.model.fundingReentry,'reuse-unexpired-settlement');
+ const legacy=structuredClone(normal);delete legacy.config.oneEntryPerFunding;delete legacy.diagnostics.rejected.funding_reuse;delete legacy.model.fundingReentry;
+ assert.equal(sha(legacy),expected);assert.deepEqual(compact,normal);
 });
 test('the memory-efficient RSI matches the original chart indicator across all sources and after data gaps',()=>{
  const rows=fixture().data['1m'].filter((_,i)=>i!==300&&i!==301&&i!==900),sources=['close','open','high','low','hl2','hlc3','ohlc4','hlcc4'];
