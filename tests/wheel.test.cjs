@@ -27,7 +27,7 @@ function wheelHarness() {
       style: {}
     },
     getPaneInfoAtY: y => panes.find(pane => y >= pane.top && y < pane.bottom),
-    rulerEnabled: false, shiftHeld: false, rulerDragging: false, chartDateFocus: null,
+    rulerEnabled: false, shiftHeld: false, rulerDragging: false, chartDrawings: null, chartDateFocus: null,
     holdPriceAxisWidth: () => {},
     zoomPanePrice: (pane, y, factor) => priceChanges.push({pane: pane.series.name, y, factor}),
     requestAnimationFrame: callback => {frames.set(++frameId, callback); return frameId;},
@@ -51,6 +51,7 @@ function wheelHarness() {
   }
   return {
     wheel, priceChanges, frames, options: () => options,
+    interaction: state => {Object.assign(context,state);vm.runInContext('rulerInteraction()',context);},
     ruler: active => {context.rulerEnabled = active; vm.runInContext('rulerInteraction()', context);},
     flush: () => {const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback());}
   };
@@ -97,17 +98,39 @@ test('the plot/axis boundary isolates vertical price zoom from native time zoom'
   assert.equal(h.priceChanges.length, 1);
 });
 
-test('ruler mode blocks zoom and normal wheel zoom returns when the ruler exits', () => {
+test('ruler mode preserves price-axis drag and wheel zoom while the plot remains reserved for measuring', () => {
   const h = wheelHarness();
   h.ruler(true);
-  assert.equal(h.options().handleScale, false);
+  assert.equal(h.options().handleScroll, false);
+  assert.equal(h.options().handleScale.mouseWheel, false);
+  assert.equal(h.options().handleScale.pinch, false);
+  assert.equal(h.options().handleScale.axisPressedMouseMove.price, true);
+  assert.equal(h.options().handleScale.axisPressedMouseMove.time, false);
   assert.equal(h.wheel(500, 170, -100).defaultPrevented, true);
   assert.equal(h.wheel(1150, 170, -100).defaultPrevented, true);
   h.flush();
-  assert.deepEqual(h.priceChanges, []);
+  assert.equal(h.priceChanges.length, 1);
+  assert.equal(h.priceChanges[0].pane, 'price');
+  assert.ok(h.priceChanges[0].factor < 1);
   h.ruler(false);
   assert.equal(h.options().handleScale.mouseWheel, true);
+  assert.equal(h.options().handleScale.pinch, true);
+  assert.equal(h.options().handleScale.axisPressedMouseMove.time, true);
   assert.equal(h.wheel(500, 170, -100).defaultPrevented, false);
+});
+
+test('toolbar ruler and Shift ruler both leave each indicator price axis independently usable', () => {
+  for (const state of [{chartDrawings:{capturesChart:()=>true}}, {shiftHeld:true}, {rulerDragging:true}]) {
+    const h=wheelHarness();h.interaction(state);
+    assert.equal(h.options().handleScale.axisPressedMouseMove.price,true);
+    assert.equal(h.wheel(1099,470,-100).stopped,true);
+    for(let i=0;i<3;i++)h.wheel(1100,470,100);
+    assert.equal(h.frames.size,1);h.flush();
+    assert.equal(h.priceChanges.length,1);
+    assert.equal(h.priceChanges[0].pane,'funding');
+    assert.equal(h.priceChanges[0].y,120);
+    assert.ok(h.priceChanges[0].factor>1);
+  }
 });
 
 test('wheel over the time axis is available to native time zoom without manual price changes', () => {

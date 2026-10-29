@@ -317,7 +317,7 @@ const rulerBtn=$('btnRuler');rulerBtn.className='btn-toggle';rulerBtn.textConten
 const rulerLabel=document.createElement('div');rulerLabel.id='rulerMeasurementLabel';rulerLabel.hidden=true;rulerLabel.style.cssText='position:absolute;pointer-events:none;z-index:7;background:#2563eb;color:#fff;border:1px solid #93c5fd;padding:8px 12px;border-radius:4px;font-size:13px;font-weight:700;line-height:1.6;text-align:center;white-space:pre-line;box-shadow:0 2px 8px #0009;max-width:280px';$('unified-chart').append(rulerLabel);
 function priceChange(start,end){if(!Number.isFinite(start)||!Number.isFinite(end)||start<=0)return null;return {difference:end-start,percent:(end-start)/start*100};}
 function clearRuler(){rulerStart=null;rulerEnd=null;rulerLocked=false;rulerTemporary=false;rulerLabel.hidden=true;schedule();}
-function rulerInteraction(){const active=rulerEnabled||shiftHeld||rulerDragging||(typeof chartDrawings!=='undefined'&&Boolean(chartDrawings?.capturesChart()));chart.applyOptions({handleScroll:active?false:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:active?false:{mouseWheel:true,pinch:true,axisPressedMouseMove:{time:true,price:true},axisDoubleClickReset:{time:true,price:false}}});$('unified-chart').style.cursor=active?'crosshair':'';}
+function rulerInteraction(){const active=rulerEnabled||shiftHeld||rulerDragging||(typeof chartDrawings!=='undefined'&&Boolean(chartDrawings?.capturesChart()));chart.applyOptions({handleScroll:active?false:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:{mouseWheel:!active,pinch:!active,axisPressedMouseMove:{time:!active,price:true},axisDoubleClickReset:{time:!active,price:false}}});$('unified-chart').style.cursor=active?'crosshair':'';}
 function endRulerDrag(){if(rulerPointer!==null&&$('unified-chart').hasPointerCapture(rulerPointer))$('unified-chart').releasePointerCapture(rulerPointer);rulerDragging=false;rulerPointer=null;rulerInteraction();}
 function toggleRuler(enabled){if(enabled&&chartDrawings?.capturesChart())chartDrawings.setTool('cross');endRulerDrag();rulerEnabled=enabled;rulerBtn.classList.toggle('active',enabled);rulerBtn.setAttribute('aria-pressed',String(enabled));clearRuler();rulerInteraction();if(enabled)status('줄자: 가격 차트에서 누른 채 드래그하세요. Shift+드래그도 가능 · Esc 종료');}
 rulerBtn.onclick=()=>toggleRuler(!rulerEnabled);
@@ -503,14 +503,14 @@ rulerHost.addEventListener('wheel', e => {
   const box = rulerHost.getBoundingClientRect(), x = e.clientX - box.left, y = e.clientY - box.top;
   const pane = getPaneInfoAtY(y);
   if (!pane?.series || x < 0 || x >= box.width) return;
-  if (rulerEnabled || shiftHeld || rulerDragging) {
-    e.preventDefault();
-    e.stopImmediatePropagation();
+  // Drawing gestures own the plot; the price axis stays available in every tool mode.
+  if (x < chart.timeScale().width()) {
+    if (rulerEnabled || shiftHeld || rulerDragging || chartDrawings?.capturesChart()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    } else chartDateFocus=null;
     return;
   }
-  // Let Lightweight Charts keep the candle under the pointer fixed while zooming time.
-  // Do not set a manual price range when the wheel is over the chart plot.
-  if (x < chart.timeScale().width()) {chartDateFocus=null;return;}
   e.preventDefault();
   e.stopImmediatePropagation();
   const delta = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? pane.height : 1);
