@@ -30,3 +30,5 @@
 #backtestDock[data-running=true] #backtestToggle:after{content:'진행 중';font-size:9px;font-weight:400;color:#a6c9ff;padding:2px 5px;border:1px solid #436089;border-radius:3px;margin-left:4px}
 @media(max-width:1000px){.bt-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.bt-summary-card strong{font-size:14px}#btRunTarget{flex-basis:100%}}
 @media(max-width:600px){.bt-settings-dialog .research-dialog-body{grid-template-columns:minmax(0,1fr);padding:12px;gap:12px}.bt-runbar{gap:5px;padding:7px 9px}.bt-run-actions{margin-left:0}.bt-report{padding:10px}.bt-summary-card{padding:9px}.bt-progress-row{padding:5px 9px}.bt-progress-row #btClearChart{display:none}}
+
+.bt-entry-cooldown{display:grid;gap:7px;padding:11px 12px;border:1px solid #486484;border-radius:6px;background:#192b42}.bt-settings-dialog .bt-entry-cooldown label{display:grid;gap:7px;color:#d9eaff;font-size:12px;font-weight:600}.bt-settings-dialog .bt-entry-cooldown small{color:#afc5df;font-size:11px;line-height:1.7}
