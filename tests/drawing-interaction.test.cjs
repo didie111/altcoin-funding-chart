@@ -40,3 +40,10 @@ test('a completed ruler stays fixed until unlocked, then moves without disappear
  m.setRulerLocked(true);const moved=E.clone(m.measurement.points);
  m.onDown(event(170,85));assert.equal(m.gesture,null);assert.deepEqual(m.measurement.points,moved);
 });
+
+test('starting a price-axis drag with the ruler selected does not capture input or clear an existing measurement',()=>{
+ const {m,event,captures}=harness('ruler');m.point=ChartDrawings.prototype.point;
+ const measurement={id:'measured',tool:'ruler',pane:'price',points:[{time:100,price:80},{time:220,price:50}],locked:true};m.measurement=measurement;
+ for(const y of [80,290]){const e=event(1050,y);m.onDown(e);assert.equal(e.prevented,undefined);assert.equal(e.stopped,undefined);assert.equal(m.gesture,null);assert.equal(m.draft,null);assert.equal(captures.size,0);assert.equal(m.measurement,measurement);assert.equal(m.tool,'ruler');}
+ assert.equal(m.store.state.items.length,0);assert.equal(m.store.past.length,0);
+});
