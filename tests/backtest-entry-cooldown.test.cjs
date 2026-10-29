@@ -6,7 +6,7 @@ const base=T.parseKst('2026-02-03','10:00');
 function scenario(extra={},records){
  const tf=extra.timeframe||'3m',start=tf==='1M'?Date.UTC(2020,0,1)/1000:T.start(base,tf);
  const bars=Array.from({length:100},(_,i)=>{const close=100-i*.1;return {time:T.shift(start,tf,i-20),open:close,high:close,low:close*.98,close,volume:1};});
- const config={timeframe:tf,startTime:start,endTime:T.shift(start,tf,75),rsiPeriod:2,rsiOversold:30,entryTrigger:'rsi_oversold',fundingIntervalHours:1,minFundingRate:-.5,fundingWindowSeconds:3600,splitCount:1,takeProfitPct:0,stopLossPct:1,maxHoldBars:0,feePct:0,slippagePct:0,initialCapital:1000,...extra};
+ const config={requireFreshFundingAfterCooldown:false,timeframe:tf,startTime:start,endTime:T.shift(start,tf,75),rsiPeriod:2,rsiOversold:30,entryTrigger:'rsi_oversold',fundingIntervalHours:1,minFundingRate:-.5,fundingWindowSeconds:3600,splitCount:1,takeProfitPct:0,stopLossPct:1,maxHoldBars:0,feePct:0,slippagePct:0,initialCapital:1000,...extra};
  return {bars,config,records:records||bars.map(b=>({time:b.time,rate:-.6,hours:config.fundingIntervalHours||1}))};
 }
 const run=s=>E.runBacktest(s.bars,s.records,s.config),pack=rows=>{const b=B.builder();for(let i=rows.length-1;i>=0;i--)b.push(rows[i]);return b.finish();};
@@ -91,7 +91,7 @@ test('the real worker keeps the candle wait in single, comparison and optimizati
  }
 });
 test('actual UI settings persist the count alongside the independent settlement reuse option',()=>{
- const source=fs.readFileSync(require.resolve('../backtest-ui.js'),'utf8'),nodes=new Map(),values=new Map(),market={ex:'BITGET',symbol:'BTCUSDT',int:'3m'},ctx={E,M:require('../dashboard-model.js'),strategy:E.normalizeConfig(),follow:true,custom:null,target:()=>market,chartWorkspace:{activeMarket:()=>market},$:id=>{if(!nodes.has(id))nodes.set(id,{});return nodes.get(id);},form:{elements:{capital:{value:'1000'},orderSize:{value:'10'},commission:{value:'.05'},slippage:{value:'.03'}}},root:{localStorage:{setItem:(k,v)=>values.set(k,v)}},key:'test-settings',toggleTarget(){},preview(){},updateTarget(){}};
+ const source=fs.readFileSync(require.resolve('../backtest-ui.js'),'utf8'),nodes=new Map(),values=new Map(),market={ex:'BITGET',symbol:'BTCUSDT',int:'3m'},ctx={E,M:require('../dashboard-model.js'),strategy:E.normalizeConfig(),follow:true,followTimeframe:true,custom:null,target:()=>market,chartWorkspace:{activeMarket:()=>market},$:id=>{if(!nodes.has(id))nodes.set(id,{});return nodes.get(id);},form:{elements:{capital:{value:'1000'},orderSize:{value:'10'},commission:{value:'.05'},slippage:{value:'.03'}}},root:{localStorage:{setItem:(k,v)=>values.set(k,v)}},key:'test-settings',toggleTarget(){},preview(){},updateTarget(){}};
  vm.createContext(ctx);vm.runInContext(source.slice(source.indexOf('  const names='),source.indexOf('  function preview()'))+source.slice(source.indexOf('  function populateSettings()'),source.indexOf("  form.addEventListener('input'")),ctx);
  ctx.populateSettings();assert.equal(nodes.get('btEntryCooldownBars').value,0);
  for(const [count,once]of [[3,true],[15,false],[0,true]]){nodes.get('btEntryCooldownBars').value=String(count);nodes.get('btOneEntryPerFunding').checked=once;ctx.settingsSaved(ctx.readSettings());ctx.strategy=E.normalizeConfig(JSON.parse(values.get('test-settings')));nodes.get('btEntryCooldownBars').value='999';ctx.populateSettings();assert.equal(nodes.get('btEntryCooldownBars').value,count);assert.equal(nodes.get('btOneEntryPerFunding').checked,once);}

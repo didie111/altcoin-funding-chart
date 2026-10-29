@@ -21,7 +21,7 @@ for(const [tf,trigger,source,expected]of oldResults)test(tf+' '+trigger+' preser
  // Only new option metadata is excluded from the original result snapshot.
  assert.equal(normal.config.entryCooldownBars,0);assert.equal(normal.diagnostics.rejected.entry_cooldown,0);assert.equal(normal.model.entryCooldown.bars,0);
  assert.equal(normal.config.oneEntryPerFunding,false);assert.equal(normal.diagnostics.rejected.funding_reuse,0);assert.equal(normal.model.fundingReentry,'reuse-unexpired-settlement');
- const legacy=structuredClone(normal);delete legacy.config.entryCooldownBars;delete legacy.diagnostics.rejected.entry_cooldown;delete legacy.model.entryCooldown;delete legacy.config.oneEntryPerFunding;delete legacy.diagnostics.rejected.funding_reuse;delete legacy.model.fundingReentry;
+ const legacy=structuredClone(normal);delete legacy.config.requireFreshFundingAfterCooldown;delete legacy.diagnostics.rejected.funding_before_cooldown;delete legacy.config.fundingTransitionLookbackSeconds;delete legacy.config.entryCooldownBars;delete legacy.diagnostics.rejected.entry_cooldown;delete legacy.model.entryCooldown;delete legacy.config.oneEntryPerFunding;delete legacy.diagnostics.rejected.funding_reuse;delete legacy.model.fundingReentry;
  assert.equal(sha(legacy),expected);assert.deepEqual(compact,normal);
 });
 test('the memory-efficient RSI matches the original chart indicator across all sources and after data gaps',()=>{
@@ -83,7 +83,7 @@ test('long interior gaps in settled funding are visible as gaps even if both per
 });
 test('the result banner explicitly marks incomplete history and distinguishes long funding intervals',()=>{
  const fs=require('node:fs'),vm=require('node:vm'),source=fs.readFileSync(require.resolve('../backtest-ui.js'),'utf8'),market={ex:'BITGET',symbol:'BTCUSDT',int:'1h'};
- const ctx={view:'overview',comparison:null,optimized:null,single:{meta:{market,config:{},coverage:{'1h':{}},fundingCoverage:{first:1,last:2,startMissing:true}}},target:()=>market,M,follow:false,lastFailure:false,busy:false,chartWorkspace:{},stamp:t=>String(t),resultContext:{},modeNotice:{},dataNotice:{}};
+ const ctx={view:'overview',comparison:null,optimized:null,single:{meta:{market,config:{},coverage:{'1h':{}},fundingCoverage:{first:1,last:2,startMissing:true}}},target:()=>market,M,follow:false,followTimeframe:false,lastFailure:false,busy:false,chartWorkspace:{},stamp:t=>String(t),resultContext:{},modeNotice:{},dataNotice:{}};
  vm.createContext(ctx);vm.runInContext(source.slice(source.indexOf('function updateResultContext()'),source.indexOf('  function updateTarget()')),ctx);ctx.updateResultContext();
  assert.equal(ctx.dataNotice.hidden,false);assert.match(ctx.dataNotice.textContent,/완전한 백테스트 결과가 아닙니다/);assert.match(ctx.dataNotice.textContent,/정산 이력 1 ~ 2 KST/);
  ctx.single.meta.fundingCoverage={longGaps:1};ctx.updateResultContext();assert.match(ctx.dataNotice.textContent,/24시간을 넘는 구간 1곳/);assert.doesNotMatch(ctx.dataNotice.textContent,/완전한 백테스트 결과가 아닙니다/);

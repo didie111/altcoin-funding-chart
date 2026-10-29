@@ -48,6 +48,14 @@ test('fixed-minute additions keep the selected main timeframe and progress ident
  assert.match(M.backtestProgress(m,'single',{phase:'candles',timeframe:'3m',count:2000,pages:2}),/3분 기준 캔들/);
  assert.deepEqual(M.backtestPlan(m,'compare',{}).intervals,Object.keys(M.labels));
 });
+test('coin/exchange following and timeframe following resolve all four combinations independently',()=>{
+ const active={ex:'BITGET',symbol:'BTCUSDT',int:'1h'},custom={ex:'BYBIT',symbol:'TUSDT',int:'3m'};
+ for(const follow of [true,false])for(const followTimeframe of [true,false]){
+  const resolved=M.backtestTarget({follow,followTimeframe,custom},active);
+  assert.equal(resolved.ex,follow?active.ex:custom.ex);assert.equal(resolved.symbol,follow?active.symbol:custom.symbol);assert.equal(resolved.int,followTimeframe?active.int:custom.int);
+ }
+ assert.equal(M.backtestTarget({follow:true,followTimeframe:false,custom},{...active,int:'1M',symbol:'SNTUSDT'}).int,'3m');
+});
 test('a stale coin, exchange or missing main timeframe is rejected before worker calculation',()=>{
  const m={ex:'BYBIT',symbol:'SNTUSDT',int:'3m'},data={exchange:m.ex,symbol:m.symbol,timeframeCandles:{'1m':[{}],'3m':[{}]}};
  M.validateBacktestDataset(data,m);

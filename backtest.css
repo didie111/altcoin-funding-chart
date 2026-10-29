@@ -32,3 +32,5 @@
 @media(max-width:600px){.bt-settings-dialog .research-dialog-body{grid-template-columns:minmax(0,1fr);padding:12px;gap:12px}.bt-runbar{gap:5px;padding:7px 9px}.bt-run-actions{margin-left:0}.bt-report{padding:10px}.bt-summary-card{padding:9px}.bt-progress-row{padding:5px 9px}.bt-progress-row #btClearChart{display:none}}
 
 .bt-entry-cooldown{display:grid;gap:7px;padding:11px 12px;border:1px solid #486484;border-radius:6px;background:#192b42}.bt-settings-dialog .bt-entry-cooldown label{display:grid;gap:7px;color:#d9eaff;font-size:12px;font-weight:600}.bt-settings-dialog .bt-entry-cooldown small{color:#afc5df;font-size:11px;line-height:1.7}
+
+.bt-settings-dialog .bt-entry-cooldown .bt-check{display:flex;align-items:center;gap:8px;font-size:11px;line-height:1.7;font-weight:600;cursor:pointer}

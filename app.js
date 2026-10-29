@@ -1417,41 +1417,11 @@ function calculateStrategySignals() {
     }
   }
 
-  // 2) 펀딩비 극단 + RSI 과매도 후 30 돌파 BUY 신호 (숏 스퀴즈 롱 타점)
-  const rsiNative = calculateRSI(all, 14);
-  if (fundingRsiOn && mapped.size && rsiNative.length > 2) {
-    for (const [fTime, fData] of mapped) {
-      if (fData.rate <= fundingThresh) {
-        const fIdx = lowerBound(all, fTime);
-        let foundOversold = false;
-        for (let k = fIdx; k < Math.min(all.length, fIdx + 40); k++) {
-          const rObj = rsiNative.find(r => r.time === all[k].time);
-          if (!rObj) continue;
-          if (rObj.rsi <= 32) foundOversold = true;
-          if (foundOversold && rObj.rsi >= 30) {
-            if (!strategySignals.some(s => s.time === all[k].time && s.type === 'FUNDING_RSI_BUY')) {
-              strategySignals.push({
-                symbol,
-                category: 'funding_rsi',
-                time: all[k].time,
-                eventTime: all[k].time,
-                timeframe: currentTfText,
-                badgeText: '⚡ 펀딩+RSI BUY',
-                type: 'FUNDING_RSI_BUY',
-                title: `펀딩비(${fData.rate.toFixed(3)}%) + RSI 30돌파 롱`,
-                conditionDesc: `펀딩비 ${fData.rate.toFixed(3)}% (기준 ${fundingThresh}% 이하) + RSI 과매도 탈출 반등`,
-                color: '#22c55e',
-                position: 'belowBar',
-                shape: 'arrowUp',
-                text: '⚡BUY',
-                price: all[k].close
-              });
-            }
-            break;
-          }
-        }
-      }
-    }
+  // Funding and RSI use the same causal settlement windows as backtesting.
+  if(fundingRsiOn&&globalThis.FundingSignals){
+    const fundingRecords=FundingEngine.merge(historyState?.cycleNeighbors||[],rates);
+    const matches=FundingSignals.calculate(all,fundingRecords,{timeframe:$('intervalSelect').value,threshold:fundingThresh,hours:signalSettings.fundingHours,windowMinutes:signalSettings.fundingWindowMinutes,transitionMinutes:signalSettings.fundingTransitionMinutes});
+    for(const match of matches)strategySignals.push({symbol,category:'funding_rsi',...match,timeframe:currentTfText,badgeText:'⚡ 펀딩+RSI BUY',type:'FUNDING_RSI_BUY',title:`펀딩비(${match.rate.toFixed(3)}%) + RSI 30돌파 롱`,conditionDesc:`정산 ${date(match.settleTime)} · ${match.hours??'?'}시간 · 펀딩 ${match.rate.toFixed(3)}% ≤ ${fundingThresh}% · RSI ${match.previousRsi.toFixed(1)} → ${match.rsi.toFixed(1)} 마감${match.transitionTime?' · 전환 직전 음펀딩 포함':''}`,color:'#22c55e',position:'belowBar',shape:'arrowUp',text:'⚡BUY'});
   }
 
   // 3) 5일 급등락 + 지표 결합 필터 신호
@@ -1536,7 +1506,7 @@ function localSignalSnapshot(){
 function applySignalCommand(command){
  if(command.kind==='settings'){
   const patch={};for(const key of ['rsi','fundingRsi','combo'])if(typeof command.patch?.[key]==='boolean')patch[key]=command.patch[key];
-  if(typeof command.patch?.fundingThreshold==='number'&&Number.isFinite(command.patch.fundingThreshold))patch.fundingThreshold=command.patch.fundingThreshold;
+  for(const key of ['fundingThreshold','fundingHours','fundingWindowMinutes','fundingTransitionMinutes'])if(typeof command.patch?.[key]==='number'&&Number.isFinite(command.patch[key]))patch[key]=command.patch[key];
   signalSettings=SignalSidebar.settings({...signalSettings,...patch});calculateStrategySignals();renderSignalMarkers(all.slice(windowStart,windowEnd));schedule();
  }else if(command.kind==='filter'){
   currentStrategyFilter=['all','funding_rsi','rsi','combo'].includes(command.filter)?command.filter:'all';
@@ -1829,5 +1799,5 @@ globalThis.ChartWorkspace?.bind({
 });
 signalSidebar=SignalSidebar.bind({workspace:globalThis.ChartWorkspace,document,formatTime:date,formatPrice:price=>typeof ScannerEngine!=='undefined'?ScannerEngine.formatPrice(price):Number(price).toFixed(4)});
 $('searchBtn').onclick=loadInputMarket;$('symbolInput').onkeydown=e=>{if(e.key==='Enter')loadInputMarket();};$('exchangeSelect').onchange=loadInputMarket;
-if(!globalThis.ChartWorkspace?.embedded){setupSidebarTabs();setupScanner();setupFundingRank();globalThis.ChartDashboard?.bind({workspace:chartWorkspace,selectMarket:loadDetectedMarket,chartWorkspace:globalThis.ChartWorkspace,backtestData:globalThis.BacktestData?.create({candlePage,fundingPage}),onBacktestJump:async(m,time)=>{if(globalThis.ChartWorkspace?.selectActive(m,{kind:'date',time}))return;if(loadedMarket&&m.ex===loadedMarket.ex&&m.symbol===loadedMarket.symbol&&m.int===loadedMarket.int)await jumpToChartDate(time,new AbortController().signal,m.int);else await selectWorkspaceMarket(m,{kind:'date',time});}});globalThis.ChartSidebar=globalThis.WorkspaceSidebar?.bind({window:globalThis,workspace:chartWorkspace,onVisibilityChange:()=>signalSidebar?.render?.()});}
+if(!globalThis.ChartWorkspace?.embedded){globalThis.FundingArchiveUI?.bind({document,workspace:globalThis.ChartWorkspace,page:fundingPage,catalog:globalThis.MarketCatalog.create(),loadMarket:loadDetectedMarket});setupSidebarTabs();setupScanner();setupFundingRank();globalThis.ChartDashboard?.bind({workspace:chartWorkspace,selectMarket:loadDetectedMarket,chartWorkspace:globalThis.ChartWorkspace,backtestData:globalThis.BacktestData?.create({candlePage,fundingPage}),onBacktestJump:async(m,time)=>{if(globalThis.ChartWorkspace?.selectActive(m,{kind:'date',time}))return;if(loadedMarket&&m.ex===loadedMarket.ex&&m.symbol===loadedMarket.symbol&&m.int===loadedMarket.int)await jumpToChartDate(time,new AbortController().signal,m.int);else await selectWorkspaceMarket(m,{kind:'date',time});}});globalThis.ChartSidebar=globalThis.WorkspaceSidebar?.bind({window:globalThis,workspace:chartWorkspace,onVisibilityChange:()=>signalSidebar?.render?.()});}
 loadData();
