@@ -15,6 +15,7 @@ function parseArgs() {
     timeframe: '5m',
     allTimeframes: false,
     oneEntryPerFunding: false,
+    entryCooldownBars: 0,
     exchange:'BINANCE',initialCapital:10000,dcaMethod:'equal',stopLossMode:'immediate',fundingIntervalHours:1,startTime:undefined,endTime:undefined,
     splits: 5,
     splitTrigger: 'rsi_cross_up', // 기본값: RSI 과매도(<=30) 후 30 돌파마감시마다 진입
@@ -45,6 +46,9 @@ function parseArgs() {
     else if (arg === '--timeframe' && args[i + 1]) options.timeframe = args[++i];
     else if (arg === '--all-timeframes') options.allTimeframes = true;
     else if (arg === '--one-entry-per-funding') options.oneEntryPerFunding = true;
+    else if (arg === '--entry-cooldown-bars') {
+      const value=args[++i];if(value===undefined||!/^\d+$/.test(value)||Number(value)>1000000)throw Error('--entry-cooldown-bars는 0~1000000 사이 정수여야 합니다.');options.entryCooldownBars=Number(value);
+    }
     else if (arg === '--splits' && args[i + 1]) options.splits = parseInt(args[++i], 10);
     else if (arg === '--split-trigger' && args[i + 1]) options.splitTrigger = args[++i];
     else if (arg === '--entry-trigger' && args[i + 1]) options.entryTrigger = args[++i];
@@ -84,6 +88,7 @@ function printHelp() {
   --stop-loss-mode <mode> immediate 또는 after_all_dca
   --funding-hours <hours> 정산 주기, 0은 전체
   --one-entry-per-funding 같은 정산으로 새 매매 재진입 금지 · 분할매수 유지
+  --entry-cooldown-bars <N> 첫 BUY 신호 다음 N개 테스트 주기 캔들 차단 · 0은 끔
   --symbol <coin>          대상 코인 심볼 (기본값: ARKUSDT)
   --timeframe <tf>         타임프레임 (1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 1d, 1w, 1M / 기본값: 5m)
   --all-timeframes         1분봉부터 월봉까지 전체 타임프레임 일괄 비교 백테스트
@@ -151,6 +156,7 @@ async function main() {
     initialCapital:options.initialCapital,dcaMethod:options.dcaMethod,stopLossMode:options.stopLossMode,timeframe:options.timeframe,startTime:dataset.startTime,endTime:dataset.endTime,fundingIntervalHours:options.fundingIntervalHours,
     minFundingRate: options.minFunding,
     oneEntryPerFunding: options.oneEntryPerFunding,
+    entryCooldownBars: options.entryCooldownBars,
     maxFundingRate: options.maxFunding,
     splitCount: options.splits,
     splitTrigger: options.splitTrigger,
