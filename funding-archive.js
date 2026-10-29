@@ -4,7 +4,7 @@
  const marketKey=m=>m.exchange+':'+m.symbol;
  function options(value={}){
   const number=(v,f,min,max)=>v===undefined?f:Number.isFinite(Number(v))&&Number(v)>=min&&Number(v)<=max?Number(v):NaN;
-  const c={exchange:value.exchange||'ALL',mode:value.mode||'both',hours:number(value.hours,1,0,24),transitionMinutes:number(value.transitionMinutes,60,0,1440),rate:number(value.rate,-.5,-100,100),from:number(value.from,0,0,1e12),to:value.to?number(value.to,0,0,1e12):0,query:String(value.query||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'')};
+  const c={exchange:value.exchange||'ALL',mode:value.mode||'both',hours:number(value.hours,1,0,24),transitionMinutes:number(value.transitionMinutes,60,0,1440),rate:number(value.rate,-.5,-100,100),from:number(value.from,0,0,1e12),to:value.to===undefined||value.to===null||value.to===''?0:number(value.to,0,0,1e12),query:String(value.query||'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'')};
   if(!['ALL',...venues].includes(c.exchange)||!['rate','cycle','both'].includes(c.mode)||Object.values(c).some(v=>typeof v==='number'&&!Number.isFinite(v))||(c.to&&c.to<=c.from))throw Error('펀딩 이력의 거래소·기간·수치 조건을 확인하세요.');return c;
  }
  function keyFor(value,now=Date.now()){const c=options(value);return JSON.stringify({...c,day:c.to?0:Math.floor((now/1000+9*3600)/day)});}

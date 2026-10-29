@@ -24,6 +24,6 @@ test('a reverse transition can use the same rule for the chosen 4h target',()=>{
 });
 test('the carried settlement retains its identity under the no-reuse and candle-cooldown options',()=>{
  const bars=Array.from({length:160},(_,i)=>{const time=base+(i-80)*60,close=200-i*.1;return {time,open:close,high:close,low:close*.98,close,volume:1};});
- const options={...config,timeframe:'1m',startTime:base,endTime:base+3600,rsiPeriod:2,entryTrigger:'rsi_oversold',splitCount:1,takeProfitPct:0,stopLossPct:1,feePct:0,slippagePct:0,oneEntryPerFunding:true,entryCooldownBars:3};
+ const options={...config,timeframe:'1m',startTime:base,endTime:base+3600,rsiPeriod:2,entryTrigger:'rsi_oversold',splitCount:1,takeProfitPct:0,stopLossPct:1,feePct:0,slippagePct:0,oneEntryPerFunding:true,entryCooldownBars:3,requireFreshFundingAfterCooldown:false};
  const r=E.runBacktest(bars,records,options);assert.equal(r.trades.length,1);assert.equal(r.trades[0].fundingCondition.settleTime,base-3600);assert.equal(r.trades[0].fundingCondition.transitionTime,base);assert.ok(r.diagnostics.rejected.funding_reuse>0);assert.ok(r.diagnostics.rejected.entry_cooldown>0);
 });
