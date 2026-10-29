@@ -6,7 +6,7 @@ const base=T.parseKst('2026-02-03','10:00');
 function scenario(extra={},records){
  const tf=extra.timeframe||'3m',start=tf==='1M'?Date.UTC(2020,0,1)/1000:T.start(base,tf);
  const bars=Array.from({length:100},(_,i)=>{const close=100-i*.1;return {time:T.shift(start,tf,i-20),open:close,high:close,low:close*.98,close,volume:1};});
- const config={timeframe:tf,startTime:start,endTime:T.shift(start,tf,75),rsiPeriod:2,rsiOversold:30,entryTrigger:'rsi_oversold',fundingIntervalHours:1,minFundingRate:-.5,fundingWindowSeconds:3600,splitCount:1,takeProfitPct:0,stopLossPct:1,maxHoldBars:0,feePct:0,slippagePct:0,initialCapital:1000,...extra};
+ const config={requireFreshFundingAfterCooldown:false,timeframe:tf,startTime:start,endTime:T.shift(start,tf,75),rsiPeriod:2,rsiOversold:30,entryTrigger:'rsi_oversold',fundingIntervalHours:1,minFundingRate:-.5,fundingWindowSeconds:3600,splitCount:1,takeProfitPct:0,stopLossPct:1,maxHoldBars:0,feePct:0,slippagePct:0,initialCapital:1000,...extra};
  return {bars,config,records:records||bars.map(b=>({time:b.time,rate:-.6,hours:config.fundingIntervalHours||1}))};
 }
 const run=s=>E.runBacktest(s.bars,s.records,s.config),pack=rows=>{const b=B.builder();for(let i=rows.length-1;i>=0;i--)b.push(rows[i]);return b.finish();};

@@ -16,6 +16,8 @@ function parseArgs() {
     allTimeframes: false,
     oneEntryPerFunding: false,
     entryCooldownBars: 0,
+    requireFreshFundingAfterCooldown: true,
+    transitionLookbackMinutes: 60,
     exchange:'BINANCE',initialCapital:10000,dcaMethod:'equal',stopLossMode:'immediate',fundingIntervalHours:1,startTime:undefined,endTime:undefined,
     splits: 5,
     splitTrigger: 'rsi_cross_up', // 기본값: RSI 과매도(<=30) 후 30 돌파마감시마다 진입
@@ -45,7 +47,11 @@ function parseArgs() {
     else if (arg === '--symbol' && args[i + 1]) options.symbol = args[++i].toUpperCase();
     else if (arg === '--timeframe' && args[i + 1]) options.timeframe = args[++i];
     else if (arg === '--all-timeframes') options.allTimeframes = true;
+    else if (arg === '--reuse-funding-after-cooldown') options.requireFreshFundingAfterCooldown = false;
     else if (arg === '--one-entry-per-funding') options.oneEntryPerFunding = true;
+    else if (arg === '--transition-lookback-minutes') {
+      const value=args[++i];if(value===undefined||!/^\d+$/.test(value)||Number(value)>1440)throw Error('--transition-lookback-minutes는 0~1440 사이 정수여야 합니다.');options.transitionLookbackMinutes=Number(value);
+    }
     else if (arg === '--entry-cooldown-bars') {
       const value=args[++i];if(value===undefined||!/^\d+$/.test(value)||Number(value)>1000000)throw Error('--entry-cooldown-bars는 0~1000000 사이 정수여야 합니다.');options.entryCooldownBars=Number(value);
     }
@@ -88,6 +94,8 @@ function printHelp() {
   --stop-loss-mode <mode> immediate 또는 after_all_dca
   --funding-hours <hours> 정산 주기, 0은 전체
   --one-entry-per-funding 같은 정산으로 새 매매 재진입 금지 · 분할매수 유지
+  --transition-lookback-minutes <N> 주기 전환 직전 N분 음펀딩 포함 · 기본 60, 0은 끔
+  --reuse-funding-after-cooldown 대기 종료 전의 유효한 펀딩도 재사용 · 기본은 새 정산만
   --entry-cooldown-bars <N> 첫 BUY 신호 다음 N개 테스트 주기 캔들 차단 · 0은 끔
   --symbol <coin>          대상 코인 심볼 (기본값: ARKUSDT)
   --timeframe <tf>         타임프레임 (1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 1d, 1w, 1M / 기본값: 5m)
@@ -157,6 +165,8 @@ async function main() {
     minFundingRate: options.minFunding,
     oneEntryPerFunding: options.oneEntryPerFunding,
     entryCooldownBars: options.entryCooldownBars,
+    requireFreshFundingAfterCooldown: options.requireFreshFundingAfterCooldown,
+    fundingTransitionLookbackSeconds: options.transitionLookbackMinutes*60,
     maxFundingRate: options.maxFunding,
     splitCount: options.splits,
     splitTrigger: options.splitTrigger,

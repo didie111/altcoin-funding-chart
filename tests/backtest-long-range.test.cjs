@@ -21,7 +21,7 @@ for(const [tf,trigger,source,expected]of oldResults)test(tf+' '+trigger+' preser
  // Only new option metadata is excluded from the original result snapshot.
  assert.equal(normal.config.entryCooldownBars,0);assert.equal(normal.diagnostics.rejected.entry_cooldown,0);assert.equal(normal.model.entryCooldown.bars,0);
  assert.equal(normal.config.oneEntryPerFunding,false);assert.equal(normal.diagnostics.rejected.funding_reuse,0);assert.equal(normal.model.fundingReentry,'reuse-unexpired-settlement');
- const legacy=structuredClone(normal);delete legacy.config.fundingTransitionLookbackSeconds;delete legacy.config.entryCooldownBars;delete legacy.diagnostics.rejected.entry_cooldown;delete legacy.model.entryCooldown;delete legacy.config.oneEntryPerFunding;delete legacy.diagnostics.rejected.funding_reuse;delete legacy.model.fundingReentry;
+ const legacy=structuredClone(normal);delete legacy.config.requireFreshFundingAfterCooldown;delete legacy.diagnostics.rejected.funding_before_cooldown;delete legacy.config.fundingTransitionLookbackSeconds;delete legacy.config.entryCooldownBars;delete legacy.diagnostics.rejected.entry_cooldown;delete legacy.model.entryCooldown;delete legacy.config.oneEntryPerFunding;delete legacy.diagnostics.rejected.funding_reuse;delete legacy.model.fundingReentry;
  assert.equal(sha(legacy),expected);assert.deepEqual(compact,normal);
 });
 test('the memory-efficient RSI matches the original chart indicator across all sources and after data gaps',()=>{
