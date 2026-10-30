@@ -19,3 +19,5 @@
 @media(max-width:550px){.favorites-toolbar{padding-inline:10px}.favorites-tools summary{padding-inline:10px}.favorites-bulk{padding-inline:10px}.symbol-picker-footer{flex-wrap:wrap;padding:8px 10px}.symbol-picker-footer>span{flex-basis:100%;font-size:9px}.symbol-picker .favorites-batch{margin-left:auto}.favorites-tools{max-height:42dvh}.favorites-hint,.favorites-status{padding-inline:10px}.symbol-picker .symbol-picker-viewport{min-height:130px;flex-basis:260px}.symbol-picker-heading h2{font-size:14px}}
 
 @media(max-height:550px){.symbol-picker[open]{overflow-y:auto}.symbol-picker .symbol-picker-viewport{flex-shrink:0;min-height:130px}.favorites-tools{max-height:40dvh;flex-shrink:0}.symbol-picker-heading{padding-top:9px}}
+
+#coinFavoritesOpen{margin-left:4px;min-height:31px;padding:6px 8px;border:1px solid #527396;border-radius:5px;background:#263f61;color:#d5e6ff;font:11px system-ui;cursor:pointer;vertical-align:middle}#coinFavoritesOpen:hover{background:#345682}#coinFavoritesOpen:focus-visible{outline:2px solid #a4c8ff;outline-offset:2px}@media(pointer:coarse){#coinFavoritesOpen{min-height:40px}}

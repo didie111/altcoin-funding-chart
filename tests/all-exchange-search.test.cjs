@@ -102,3 +102,7 @@ test('pointer painting changes every crossed row once, commits only on release a
 test('cancelled pointer gestures discard uncommitted changes',async()=>{
  const h=harness(async()=>result([row('BITGET','A',30),row('BITGET','B',20)]));h.picker.open({ex:'BITGET',symbol:'AUSDT'});await tick();h.flush();const v=h.ids.get('symbolPickerList'),star=h.find('symbol-picker-rows').children[0].children[0],e={target:star,button:0,pointerId:2,clientX:12,clientY:20,preventDefault(){}};v.events.pointerdown(e);v.events.pointermove({...e,clientY:80});v.events.pointercancel(e);assert.equal(h.favorites.snapshot().size,0);assert.equal(h.favorites.snapshot().canUndo,false);
 });
+
+test('top search can prefill a full pasted list in the picker without losing newline boundaries',async()=>{
+ const h=harness(async()=>result([row('BITGET','AKE'),row('MEXC','1000TOSHI')]));h.picker.open({ex:'BITGET',symbol:'AKEUSDT'},2,{query:'AKEUSDT\n1000TOSHIUSDT'});await tick();h.flush();assert.equal(h.ids.get('symbolPickerSearch').value,'AKEUSDT 1000TOSHIUSDT');assert.equal(h.ids.get('favoritesBulkText').value,'AKEUSDT\n1000TOSHIUSDT');assert.equal(h.find('symbol-picker-rows').children.length,2);
+});
