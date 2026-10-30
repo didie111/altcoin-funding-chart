@@ -65,6 +65,7 @@
   function requestWorkspaceFullscreen(){if(embedded)send({type:'workspace-fullscreen'});else void api.fullscreen({workspace:true});}
   function exitWorkspaceFullscreen(){if(!embedded||!workspaceFullscreen)return false;send({type:'exit-workspace-fullscreen'});return true;}
   function current(){return market(api?.getMarket()||{ex:$('exchangeSelect').value,symbol:$('symbolInput').value,int:$('intervalSelect').value});}
+  function openPicker(options={}){if(embedded){send({type:'picker',market:current()});return;}picker?.open(mode===4?markets[active]||current():current(),mode===4?active:0,options);}
   function choose(value,index=0,navigation){const m=market(value,markets[index]||current());if(index===0){api.selectMarket(m,navigation);return;}const frame=frames.find(f=>Number(f.dataset.chartCell)===index);if(frame){markets[index]=m;signalViews[index]=null;persist();if(active===index){notify();notifySignals();}deliver(frame,{type:'select',market:m,navigation});}}
   function setBacktest(value,index=active){if(embedded)return;if(mode===1||index===0){api.backtest?.(value);return;}const frame=frames.find(f=>Number(f.dataset.chartCell)===index);if(frame)deliver(frame,{type:'backtest-result',value});}
   function selectActive(value,navigation){if(!hasRemoteTarget())return false;choose(value,active,navigation);return true;}
@@ -114,6 +115,11 @@
     firstCell.addEventListener('pointerdown',()=>selected(0),{capture:true,passive:true});firstCell.addEventListener('focusin',()=>selected(0));
     let catalog;try{catalog=win.MarketCatalog.create();}catch{}
     picker=win.SymbolPicker.bind({host:api.workspace,catalog,onSelect:choose});
+    if($('coinFavoritesOpen'))$('coinFavoritesOpen').onclick=()=>openPicker();
+    const bulkInput=(event,text)=>{if((win.CoinFavorites?.parse(text).symbols.length||0)<2)return false;event.preventDefault();event.stopImmediatePropagation();openPicker({query:text});return true;};
+    $('symbolInput').addEventListener('paste',event=>bulkInput(event,event.clipboardData?.getData('text')||''));
+    $('symbolInput').addEventListener('keydown',event=>{if(event.key==='Enter')bulkInput(event,$('symbolInput').value);},{capture:true});
+    $('searchBtn')?.addEventListener('click',event=>bulkInput(event,$('symbolInput').value),{capture:true});
     toggle=doc.createElement('button');toggle.id='chartLayoutToggle';toggle.type='button';toggle.className='chart-layout-toggle';toggle.textContent='⊞ 4분할';toggle.setAttribute('aria-label','4분할 차트');toggle.title='4분할 차트';toggle.setAttribute('aria-pressed','false');toggle.onclick=()=>setLayout(mode===4?1:4);$('drawingHistoryControls').append(toggle);
     win.addEventListener('message',event=>{
      if(event.origin!==win.location.origin||event.data?.channel!==channel)return;
@@ -137,7 +143,7 @@
    updateControls();marketChanged(current());if(embedded)send({type:'ready'});api.syncFullscreen?.();
    win.addEventListener('pagehide',()=>{disposed=true;api.dispose();},{once:true});
   }
-  return {embedded,bind,marketChanged,reportStatus,selectActive,runOnActive,controlsChanged,setBacktest,signalsChanged,activeSignals,signalCommand,subscribeSignals:listener=>{signalListeners.add(listener);return ()=>signalListeners.delete(listener);},activeCell:()=>active,subscribe:listener=>{listeners.add(listener);return ()=>listeners.delete(listener);},activeMarket:()=>hasRemoteTarget()?market(markets[active],current()):current(),isMulti:()=>embedded||mode===4,visible:()=>!disposed&&!doc.hidden,requestFullscreen,requestWorkspaceFullscreen,exitWorkspaceFullscreen,restoreMaximized,fullscreenState,syncWorkspaceFullscreen,setLayout};
+  return {openPicker,embedded,bind,marketChanged,reportStatus,selectActive,runOnActive,controlsChanged,setBacktest,signalsChanged,activeSignals,signalCommand,subscribeSignals:listener=>{signalListeners.add(listener);return ()=>signalListeners.delete(listener);},activeCell:()=>active,subscribe:listener=>{listeners.add(listener);return ()=>listeners.delete(listener);},activeMarket:()=>hasRemoteTarget()?market(markets[active],current()):current(),isMulti:()=>embedded||mode===4,visible:()=>!disposed&&!doc.hidden,requestFullscreen,requestWorkspaceFullscreen,exitWorkspaceFullscreen,restoreMaximized,fullscreenState,syncWorkspaceFullscreen,setLayout};
  }
  return {create,market,preferences,embedUrl,assetRevision};
 });

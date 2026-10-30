@@ -36,7 +36,7 @@
   tabs.forEach((button,index)=>{button.onclick=()=>selectReport(index);button.onkeydown=event=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?3:(index+(event.key==='ArrowRight'?1:3))%4;selectReport(next);tabs[next].focus();};});
   doc.addEventListener('keydown',event=>{if(event.key==='Escape'&&!doc.querySelector('dialog[open]')&&workspace.classList.contains('backtest-maximized')){setMaximized(false);event.preventDefault();}});
   updatePref();setOpen(pref.open);
-  backtestView=root.BacktestUI?.bind({workspace,dock,dialog,chartWorkspace,getPreferences:()=>pref,openSettings,dataSource:backtestData,onJump:onBacktestJump,requestChartView:()=>setMaximized(false)});
+  backtestView=root.BacktestUI?.bind({workspace,dock,dialog,chartWorkspace,getPreferences:()=>pref,openSettings,dataSource:backtestData,onJump:onBacktestJump,requestChartView:()=>setMaximized(false),openPanel:()=>setOpen(true)});
   bindNews({doc,$,workspace,selectMarket,chartWorkspace,icon});
  }
  function bindNews(options){root.ChartNews?.bind(options);}

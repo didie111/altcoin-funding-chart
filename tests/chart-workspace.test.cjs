@@ -1,4 +1,5 @@
 'use strict';
+const Favorites=require('../coin-favorites.js');
 const test=require('node:test'),assert=require('node:assert/strict'),Shared=require('../market-shared.js'),Catalog=require('../market-catalog.js'),Workspace=require('../chart-workspace.js');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 test('four chart subscribers share one request and cancel independently',async()=>{
@@ -70,9 +71,9 @@ function workspaceHarness({embedded=false,saved={},signalSnapshot=null}={}){
  const doc={body:new Element('body'),documentElement:new Element('html'),createElement:tag=>new Element(tag),getElementById:id=>ids.get(id),addEventListener:(name,fn)=>docEvents[name]=fn,querySelector:()=>null};
  for(const id of ['exchangeSelect','symbolInput','intervalSelect','chartWorkspace','chartTopbar','chartBody','drawingHistoryControls','chartSymbolLabel','host']){const element=new Element('div');element.id=id;doc.body.append(element);}
  ids.get('exchangeSelect').value='BITGET';ids.get('symbolInput').value='SAHARAUSDT';ids.get('intervalSelect').value='1h';
- const parent={postMessage:data=>messages.push({data})},win={document:doc,location:new URL('https://example.test/'+(embedded?'?chart-embed=1&cell=2':'')),parent:embedded?parent:null,localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},addEventListener:(name,fn)=>events[name]=fn,SymbolPicker:{bind:()=>({open(){}})},MarketCatalog:{create:()=>({})}};
+ const parent={postMessage:data=>messages.push({data})},win={document:doc,location:new URL('https://example.test/'+(embedded?'?chart-embed=1&cell=2':'')),parent:embedded?parent:null,localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},addEventListener:(name,fn)=>events[name]=fn,CoinFavorites:Favorites,SymbolPicker:{bind:()=>({open(...args){calls.picker.push(args);}})},MarketCatalog:{create:()=>({})}};
  if(!embedded)win.parent=win;
- const calls={schedule:0,dispose:0,split:0,fullscreen:[],market:[],navigation:[],action:[],backtest:[],signalCommands:[]},controller=Workspace.create(win);
+ const calls={picker:[],schedule:0,dispose:0,split:0,fullscreen:[],market:[],navigation:[],action:[],backtest:[],signalCommands:[]},controller=Workspace.create(win);
  controller.bind({signalSnapshot:()=>signalSnapshot,signalCommand:value=>calls.signalCommands.push(value),workspace:ids.get('chartWorkspace'),host:ids.get('host'),symbolButton:ids.get('chartSymbolLabel'),getMarket:()=>({ex:'BITGET',symbol:'SAHARAUSDT',int:'1h'}),selectMarket:(m,n)=>{calls.market.push(m);calls.navigation.push(n);},action:a=>calls.action.push(a),backtest:value=>calls.backtest.push(value),onSplit:()=>calls.split++,dispose:()=>calls.dispose++,schedule:()=>calls.schedule++,fullscreen:options=>calls.fullscreen.push(options),syncFullscreen(){},jumpDate(){}});
  return {ids,doc,messages,calls,controller,parent,win,storage,frames:()=>ids.get('chartGrid')?.children.filter(x=>x.tagName==='iframe')||[],message:(source,data,origin=win.location.origin)=>events.message({source,origin,data:{channel:'funding-chart-workspace-v1',...data}}),key:event=>docEvents.keydown({target:{closest:()=>null},preventDefault(){this.defaultPrevented=true;},...event})};
 }
@@ -211,4 +212,8 @@ test('embedded signal settings and focus commands require the current market, re
  const command={kind:'settings',patch:{rsi:false}},message={type:'signal-command',command,market:state.market,revision:7};
  h.message(h.parent,{...message,revision:6});h.message(h.parent,{...message,market:{...state.market,symbol:'BTCUSDT'}});h.message({},message);h.message(h.parent,message,'https://untrusted.test');assert.equal(h.calls.signalCommands.length,0);
  h.message(h.parent,message);assert.deepEqual(h.calls.signalCommands,[command]);assert.equal(h.calls.market.length,0);
+});
+
+test('top input bulk paste and Enter open exact symbols in the active cell without loading an invalid chart',()=>{
+ const h=workspaceHarness();h.controller.setLayout(4);const frame=h.frames()[1];h.message(frame.contentWindow,{type:'ready'});h.message(frame.contentWindow,{type:'active'});const text='AKEUSDT\n1000TOSHIUSDT\nBIRBUSDT',event={clipboardData:{getData:()=>text},preventDefault(){this.prevented=true;},stopImmediatePropagation(){this.stopped=true;}};h.ids.get('symbolInput').events.paste(event);assert.equal(event.prevented,true);assert.equal(event.stopped,true);assert.equal(h.calls.picker.at(-1)[1],2);assert.equal(h.calls.picker.at(-1)[2].query,text);assert.equal(h.calls.market.length,0);h.ids.get('symbolInput').value='AKEUSDT BIRBUSDT';h.ids.get('symbolInput').events.keydown({...event,key:'Enter'});assert.equal(h.calls.picker.at(-1)[2].query,'AKEUSDT BIRBUSDT');h.controller.setLayout(1);
 });

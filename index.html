@@ -913,9 +913,10 @@
     <link rel="stylesheet" href="chart-drawings.css?v=20261027-drawing-axes-1">
     <link rel="stylesheet" href="chart-workspace.css?v=20261027-all-exchange-search-1">
     <link rel="stylesheet" href="dashboard.css?v=20261027-news-reading-2">
-    <link rel="stylesheet" href="backtest.css?v=20261029-entry-cooldown-1">
-    <link rel="stylesheet" href="funding-archive.css?v=20261029-history-copy-2">
+    <link rel="stylesheet" href="backtest.css?v=20261031-favorites-batch-1">
+    <link rel="stylesheet" href="funding-archive.css?v=20261031-favorites-batch-1">
     <link rel="stylesheet" href="funding-rank.css?v=20261029-chart-tools-1">
+    <link rel="stylesheet" href="coin-favorites.css?v=20261031-favorites-batch-1">
 </head>
 <body>
 
@@ -923,7 +924,7 @@
         <div class="control-group">
             <div>
                 <label>코인 심볼</label><br>
-                <input type="text" id="symbolInput" value="AKEUSDT">
+                <input type="text" id="symbolInput" value="AKEUSDT"><button id="coinFavoritesOpen" type="button" aria-label="코인 검색·즐겨찾기 열기" title="코인 검색·즐겨찾기 · 여러 코인 붙여넣기 지원">★ 목록</button>
             </div>
             <div>
                 <label>거래소</label><br>
@@ -1284,22 +1285,28 @@
     <script src="drawing-engine.js?v=20261029-chart-tools-1"></script>
     <script src="drawing-renderer.js?v=20261029-chart-tools-1"></script>
     <script src="chart-drawings.js?v=20261029-drawing-timeframes-1"></script>
+    <script src="list-navigation.js?v=20261031-favorites-batch-1"></script>
+    <script src="coin-favorites.js?v=20261031-favorites-batch-1"></script>
+    <script src="coin-favorites-ui.js?v=20261031-favorites-batch-1"></script>
     <script src="market-catalog.js?v=20261029-funding-history-1"></script>
-    <script src="symbol-picker.js?v=20261027-all-exchange-search-1"></script>
-    <script src="chart-workspace.js?v=20261027-layout-funding-1"></script>
+    <script src="symbol-picker.js?v=20261031-favorites-batch-1"></script>
+    <script src="chart-workspace.js?v=20261031-favorites-batch-1"></script>
     <script src="funding-rank.js?v=20261029-chart-tools-1"></script>
     <script src="scanner.js?v=20261029-chart-tools-1"></script>
     <script src="backtest-bars.js?v=20261028-long-backtest-1"></script>
     <script src="backtest-engine.js?v=20261029-funding-history-1"></script>
     <script src="funding-signals.js?v=20261029-funding-history-1"></script>
     <script src="funding-archive.js?v=20261029-funding-history-1"></script>
-    <script src="funding-archive-ui.js?v=20261029-history-copy-1"></script>
-    <script src="backtest-data.js?v=20261028-long-backtest-1"></script>
+    <script src="funding-archive-ui.js?v=20261031-favorites-batch-1"></script>
+    <script src="backtest-data.js?v=20261031-favorites-batch-1"></script>
     <script src="backtest-overlay.js?v=20261029-chart-tools-1"></script>
-<script src="backtest-ui.js?v=20261029-funding-history-1"></script>
+    <script src="backtest-cache.js?v=20261031-favorites-batch-1"></script>
+    <script src="backtest-batch.js?v=20261031-favorites-batch-1"></script>
+    <script src="backtest-batch-ui.js?v=20261031-favorites-batch-1"></script>
+    <script src="backtest-ui.js?v=20261031-favorites-batch-1"></script>
     <script src="dashboard-model.js?v=20261029-funding-history-1"></script>
     <script src="news-ui.js?v=20261027-news-reading-2"></script>
-    <script src="dashboard.js?v=20261025-news-archive-1"></script>
+    <script src="dashboard.js?v=20261031-favorites-batch-1"></script>
     <script src="signal-sidebar.js?v=20261029-funding-history-1"></script>
     <script src="workspace-sidebar.js?v=20261029-funding-history-1"></script>
     <script src="chart-info.js?v=20261027-layout-funding-1"></script>

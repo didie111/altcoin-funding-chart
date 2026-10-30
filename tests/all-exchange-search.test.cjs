@@ -1,6 +1,6 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-const Catalog=require('../market-catalog.js'),tick=()=>new Promise(resolve=>setImmediate(resolve));
+const Favorites=require('../coin-favorites.js'),Catalog=require('../market-catalog.js'),tick=()=>new Promise(resolve=>setImmediate(resolve));
 function fakeAPI({fail=new Set(),hold}={}){
  const calls=[];
  const json=async(url,params)=>{
@@ -49,20 +49,22 @@ test('complete failure reports an error instead of fabricating a default exchang
 function harness(load){
  const ids=new Map(),frames=[],storage=new Map(),selections=[];
  class Element{
-  constructor(tag,cls=''){this.tagName=tag;this.className=cls;this.children=[];this.style={};this.attrs={};this.events={};this.value='';this.hidden=false;this.scrollTop=0;this.clientHeight=300;this._text='';this.classList={toggle:(key,on)=>{const classes=new Set(this.className.split(' '));on?classes.add(key):classes.delete(key);this.className=[...classes].join(' ');}};}
+  constructor(tag,cls=''){this.tagName=tag;this.className=cls;this.children=[];this.style={};this.dataset={};this.attrs={};this.events={};this.value='';this.hidden=false;this.scrollTop=0;this.clientHeight=300;this._text='';this.classList={toggle:(key,on)=>{const classes=new Set(this.className.split(' '));on?classes.add(key):classes.delete(key);this.className=[...classes].join(' ');}};}
   set id(value){this._id=value;ids.set(value,this);}get id(){return this._id;}
   set textContent(value){this._text=String(value);this.children=[];}get textContent(){return this._text+this.children.map(c=>c.textContent).join('');}
-  append(...nodes){this.children.push(...nodes.flatMap(n=>n.tagName==='fragment'?n.children:[n]));}
+  append(...nodes){const expanded=nodes.flatMap(n=>n.tagName==='fragment'?n.children:[n]);for(const n of expanded)n.parentElement=this;this.children.push(...expanded);}
+  closest(selector){if(selector.startsWith('.')&&this.className.split(' ').includes(selector.slice(1)))return this;return this.parentElement?.closest(selector)||null;}
+  setPointerCapture(id){this.capture=id;}hasPointerCapture(id){return this.capture===id;}releasePointerCapture(){this.capture=null;}
   replaceChildren(...nodes){this.children=[];this.append(...nodes);}
   setAttribute(key,value){this.attrs[key]=String(value);}addEventListener(name,handler){this.events[name]=handler;}
   focus(){}showModal(){this.open=true;}close(){this.open=false;this.events.close?.();}click(){this.onclick?.();}
   getBoundingClientRect(){return {left:0,right:650,top:0,bottom:500};}
  }
  const doc={hidden:false,createElement:tag=>new Element(tag),createDocumentFragment:()=>new Element('fragment')},host=new Element('section');
- const context={document:doc,MarketCatalog:Catalog,localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},requestAnimationFrame:fn=>{frames.push(fn);return frames.length;},AbortController,ResizeObserver:class{observe(){}},setInterval:()=>1,clearInterval(){},Intl};vm.createContext(context);vm.runInContext(fs.readFileSync(require.resolve('../symbol-picker.js'),'utf8'),context);
+ const context={CoinFavorites:{...Favorites,store:Favorites.create({storage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)}})},CoinFavoritesUI:{confirm:async()=>true},document:doc,MarketCatalog:Catalog,localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},requestAnimationFrame:fn=>{frames.push(fn);return frames.length;},cancelAnimationFrame(){},AbortController,ResizeObserver:class{observe(){}},setInterval:()=>1,clearInterval(){},Intl};vm.createContext(context);vm.runInContext(fs.readFileSync(require.resolve('../symbol-picker.js'),'utf8'),context);
  const picker=context.SymbolPicker.bind({host,catalog:{load},onSelect:(value,target)=>selections.push({value:JSON.parse(JSON.stringify(value)),target})});
  const walk=n=>[n,...n.children.flatMap(walk)],find=(cls,text)=>walk(host).find(n=>n.className.split(' ').includes(cls)&&(text===undefined||n.textContent===text));
- return {picker,ids,selections,find,storage,flush(){while(frames.length)frames.shift()();},input(value){const n=ids.get('symbolPickerSearch');n.value=value;n.events.input();},key(key){ids.get('symbolPickerSearch').events.keydown({key,preventDefault(){}});}};
+ return {picker,ids,selections,find,storage,favorites:context.CoinFavorites.store,flush(){while(frames.length)frames.shift()();},input(value){const n=ids.get('symbolPickerSearch');n.value=value;n.events.input();},key(key){ids.get('symbolPickerSearch').events.keydown({key,preventDefault(){}});}};
 }
 const row=(exchange,base='BTC',volume=10)=>({exchange,base,symbol:base+'USDT',price:2,change:1,volume}),result=rows=>({rows,fetchedAt:1000,stale:false});
 test('the picker defaults to all exchanges regardless of the chart and routes the clicked exchange to its target cell',async()=>{
@@ -89,4 +91,18 @@ test('late results respect current search, keyboard selection, scope changes and
 test('the actual picker renders a bounded set of rows for a combined 20,000-listing catalog',async()=>{
  const rows=Array.from({length:20000},(_,i)=>row(Catalog.exchanges[i%6][0],'COIN'+i,i)),h=harness(async()=>result(rows));h.picker.open({ex:'BINANCE',symbol:'BTCUSDT'});await tick();h.flush();
  assert.ok(h.find('symbol-picker-rows').children.length<=14);h.input('COIN19999');h.flush();assert.equal(h.find('symbol-picker-rows').children.length,1);assert.match(h.find('symbol-picker-rows').textContent,/COIN19999/);
+});
+
+test('multi-coin input filters the list, asks before adding, preserves exact venues and supports one-step undo',async()=>{
+ const h=harness(async()=>result([row('BITGET','AKE'),row('BITGET','BIRB'),row('BINANCE','AKE'),row('MEXC','1000TOSHI')]));h.picker.open({ex:'BITGET',symbol:'AKEUSDT'});await tick();h.input('AKEUSDT BIRBUSDT 1000TOSHIUSDT LOSTUSDT');h.flush();assert.equal(h.find('symbol-picker-rows').children.length,4);assert.equal(h.ids.get('favoritesBulkAdd').disabled,false);h.ids.get('favoritesBulkAdd').click();await tick();h.flush();assert.deepEqual(h.favorites.snapshot().keys,['BITGET:AKEUSDT','BITGET:BIRBUSDT','MEXC:1000TOSHIUSDT']);assert.match(h.find('favorites-preview').textContent,/LOSTUSDT/);h.find('favorites-toolbar').children.at(-1).click();assert.equal(h.favorites.snapshot().size,0);
+});
+test('pointer painting changes every crossed row once, commits only on release and undoes as one action',async()=>{
+ const h=harness(async()=>result([row('BITGET','A',30),row('BITGET','B',20),row('BITGET','C',10)]));h.picker.open({ex:'BITGET',symbol:'AUSDT'});await tick();h.flush();const viewport=h.ids.get('symbolPickerList'),star=h.find('symbol-picker-rows').children[0].children[0],event=(y)=>({target:star,button:0,pointerId:1,clientX:12,clientY:y,preventDefault(){}});viewport.events.pointerdown(event(22));viewport.events.pointermove(event(135));assert.equal(h.favorites.snapshot().size,0);viewport.events.pointerup(event(135));assert.equal(h.favorites.snapshot().size,3);h.favorites.undo();assert.equal(h.favorites.snapshot().size,0);
+});
+test('cancelled pointer gestures discard uncommitted changes',async()=>{
+ const h=harness(async()=>result([row('BITGET','A',30),row('BITGET','B',20)]));h.picker.open({ex:'BITGET',symbol:'AUSDT'});await tick();h.flush();const v=h.ids.get('symbolPickerList'),star=h.find('symbol-picker-rows').children[0].children[0],e={target:star,button:0,pointerId:2,clientX:12,clientY:20,preventDefault(){}};v.events.pointerdown(e);v.events.pointermove({...e,clientY:80});v.events.pointercancel(e);assert.equal(h.favorites.snapshot().size,0);assert.equal(h.favorites.snapshot().canUndo,false);
+});
+
+test('top search can prefill a full pasted list in the picker without losing newline boundaries',async()=>{
+ const h=harness(async()=>result([row('BITGET','AKE'),row('MEXC','1000TOSHI')]));h.picker.open({ex:'BITGET',symbol:'AKEUSDT'},2,{query:'AKEUSDT\n1000TOSHIUSDT'});await tick();h.flush();assert.equal(h.ids.get('symbolPickerSearch').value,'AKEUSDT 1000TOSHIUSDT');assert.equal(h.ids.get('favoritesBulkText').value,'AKEUSDT\n1000TOSHIUSDT');assert.equal(h.find('symbol-picker-rows').children.length,2);
 });
