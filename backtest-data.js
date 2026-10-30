@@ -63,5 +63,5 @@
  }
  async function fetchBinanceFundingHistory(symbol,limit=1000,signal=new AbortController().signal){const request=F.historyRequest('BINANCE',symbol,Date.now()-90*86400000,1);request.params.limit=Math.min(1000,limit);return F.normalizeHistory('BINANCE',await API.json(request.url,request.params,signal),symbol);}
  async function fetchBinanceKlines(symbol,interval='5m',startTime=null,endTime=null,limit=1000,signal=new AbortController().signal){const params={symbol:String(symbol).toUpperCase().replace(/USDT$/,'')+'USDT',interval,limit:Math.min(1500,limit)};if(startTime)params.startTime=startTime>=1e11?startTime:startTime*1000;if(endTime)params.endTime=endTime>=1e11?endTime:endTime*1000;const data=await API.json('https://fapi.binance.com/fapi/v1/klines',params,signal);return T.sorted(data.map(API.candle));}
- return {ALL_TIMEFRAMES,create,...create(),transferables:B.transferables,fetchBinanceFundingHistory,fetchBinanceKlines};
+ return {ALL_TIMEFRAMES,create,...create(),candlePage,fundingPage,transferables:B.transferables,fetchBinanceFundingHistory,fetchBinanceKlines};
 });
