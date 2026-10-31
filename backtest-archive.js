@@ -17,13 +17,13 @@
   if(!/^[A-Z0-9]{1,28}USDT$/.test(symbol)||!T.seconds[tf]||T.seconds[tf]>3600||!Number.isFinite(edge)||!Number.isFinite(lower))return null;
   const time=Math.min(edge/1000,now/1000),month=T.start(time,'1M'),currentMonth=T.start(now/1000,'1M');let from=month,to=T.end(month,'1M'),kind='monthly';
   if(to>currentMonth){if(tf!=='1m')return null;from=T.start(time,'1d');to=T.end(from,'1d');if(to>T.start(now/1000,'1d'))return null;kind='daily';}
-  const count=T.closedRange(Math.max(from,lower),Math.min(to,T.end(T.start(time,tf),tf)),tf).count;if(count<500)return null;
+  const first=Math.max(from,lower),last=Math.min(to,T.end(T.start(time,tf),tf));if(first>=last)return null;const count=T.closedRange(first,last,tf).count;if(count<500)return null;
   const date=new Date(from*1000).toISOString().slice(0,kind==='monthly'?7:10),filename=symbol+'-'+tf+'-'+date+'.zip',url=host+'/data/futures/um/'+kind+'/klines/'+symbol+'/'+tf+'/'+filename;
   return {symbol,timeframe:tf,from,to,kind,date,filename,url,csv:filename.replace(/\.zip$/,'.csv')};
  }
  function allowedUrl(value,symbol,tf){try{const u=new URL(value),parts=u.pathname.split('/'),file=parts.at(-1),pattern=new RegExp('^'+symbol+'-'+tf+'-\\d{4}-\\d{2}'+(parts[4]==='daily'?'-\\d{2}':'')+'\\.zip(?:\\.CHECKSUM)?$');return u.origin===host&&!u.search&&!u.hash&&!u.username&&!u.password&&parts.length===9&&parts.slice(1,4).join('/')==='data/futures/um'&&['monthly','daily'].includes(parts[4])&&parts[5]==='klines'&&parts[6]===symbol&&parts[7]===tf&&pattern.test(file);}catch{return false;}}
  async function fetchAsset(url,kind,signal=new AbortController().signal,fetcher=globalThis.fetch){
-  const limit=kind==='zip'?maxZip:4096,controller=new AbortController(),abort=()=>controller.abort(signal.reason),timer=setTimeout(()=>controller.abort(new DOMException('공식 과거 파일 응답 제한','TimeoutError')),15000);signal.throwIfAborted();signal.addEventListener('abort',abort,{once:true});let reader;
+  signal.throwIfAborted();const limit=kind==='zip'?maxZip:4096,controller=new AbortController(),abort=()=>controller.abort(signal.reason),timer=setTimeout(()=>controller.abort(new DOMException('공식 과거 파일 응답 제한','TimeoutError')),15000);signal.addEventListener('abort',abort,{once:true});let reader;
   try{const response=await fetcher(url,{signal:controller.signal,credentials:'omit',cache:'no-store'});if(!response.ok)throw Object.assign(Error('공식 과거 파일 HTTP '+response.status),{status:response.status,name:'ArchiveHTTPError'});if(Number(response.headers?.get('content-length'))>limit)throw Error('공식 과거 파일 크기 제한을 초과했습니다.');reader=response.body?.getReader();if(!reader)throw Error('공식 과거 파일 본문을 읽을 수 없습니다.');const chunks=[];let size=0;for(;;){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;if(size>limit)throw Error('공식 과거 파일 크기 제한을 초과했습니다.');chunks.push(value);}const result=new Uint8Array(size);let offset=0;for(const part of chunks){result.set(part,offset);offset+=part.length;}return kind==='zip'?result.buffer:decoder.decode(result);
   }finally{clearTimeout(timer);signal.removeEventListener('abort',abort);if(reader)try{await reader.cancel();}catch{}}
  }

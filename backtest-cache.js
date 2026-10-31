@@ -29,12 +29,12 @@
  const sleep=(ms,signal)=>new Promise((resolve,reject)=>{signal.throwIfAborted();const abort=()=>{clearTimeout(timer);reject(signal.reason);},timer=setTimeout(()=>{signal.removeEventListener('abort',abort);resolve();},ms);signal.addEventListener('abort',abort,{once:true});});
  function adapter({candlePage,fundingPage,store,now=Date.now,wait=sleep,onCache=()=>{},minimumDelay=500}){
   let next=0,queue=Promise.resolve();
-  async function paced(ex,signal,producer){const task=queue.then(async()=>{signal.throwIfAborted();const delay=Math.max(0,next-now());if(delay)await wait(delay,signal);signal.throwIfAborted();next=now()+Math.max(minimumDelay,ex==='BINGX'?1200:0);return await producer();});queue=task.catch(()=>{});return task;}
+  async function paced(ex,signal,producer,kind){const task=queue.then(async()=>{signal.throwIfAborted();const delay=Math.max(0,next-now());if(delay)await wait(delay,signal);signal.throwIfAborted();next=now()+Math.max(minimumDelay,ex==='BINGX'?1200:0,ex==='BINANCE'&&kind==='funding'?750:0);return await producer();});queue=task.catch(()=>{});return task;}
   async function page(kind,args,producer){
    const signal=args.at(-1),candle=kind==='candles',key=JSON.stringify([candle?'page-v2':'page-v1',kind,...args.slice(0,-1)]);signal.throwIfAborted();const saved=await store.get(key,now());signal.throwIfAborted();
    if(saved!==null){const rows=candle?unpackCandles(saved):saved;if(rows!==null){onCache();return rows;}}
    if(candle){const legacyKey=JSON.stringify(['page-v1',kind,...args.slice(0,-1)]),legacy=await store.get(legacyKey,now());signal.throwIfAborted();if(Array.isArray(legacy)){const packed=packCandles(legacy),edge=Number(args[3]),expires=now()+(edge<now()-2*86400000&&legacy.length?30*86400000:60000);await store.put(key,packed,{expires,bytes:packed.values.byteLength+key.length*2+128});if(store.deletePage)await store.deletePage(legacyKey);signal.throwIfAborted();onCache();return legacy;}}
-   const rows=await paced(args[0],signal,producer);signal.throwIfAborted();const edge=Number(candle?args[3]:args[2]),old=edge<now()-2*86400000,expires=now()+(old&&rows.length?30*86400000:60000);
+   const rows=await paced(args[0],signal,producer,kind);signal.throwIfAborted();const edge=Number(candle?args[3]:args[2]),old=edge<now()-2*86400000,expires=now()+(old&&rows.length?30*86400000:60000);
    if(candle){const packed=packCandles(rows);await store.put(key,packed,{expires,bytes:packed.values.byteLength+key.length*2+128});}else await store.put(key,rows,{expires});signal.throwIfAborted();return rows;
   }
   return {candlePage:(ex,symbol,tf,end,signal)=>page('candles',[ex,symbol,tf,end,signal],()=>candlePage(ex,symbol,tf,end,signal)),fundingPage:(ex,symbol,cursor,number,signal)=>page('funding',[ex,symbol,cursor,number,signal],()=>fundingPage(ex,symbol,cursor,number,signal))};
