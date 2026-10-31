@@ -48,8 +48,8 @@ test('rate-only, cycle-only and combined filters honor configurable thresholds w
  assert.equal(A.matches(rows,A.options({mode:'rate',rate:-.5})).length,2);assert.equal(A.matches(rows,A.options({mode:'cycle',hours:1})).length,2);assert.equal(A.matches(rows,A.options({mode:'both',hours:1,rate:-.6})).length,1);
  for(const invalid of [{rate:NaN},{to:NaN},{hours:-1},{from:10,to:1},{exchange:'UNKNOWN'},{transitionMinutes:1441}])assert.throws(()=>A.options(invalid));
 });
-test('search configuration keys are isolated and a fresh search preserves the previous run',async()=>{
- const f=fixture({exchanges:['BYBIT']}),one=await f.scanner.scan({from:base}),fresh=await f.scanner.scan({from:base},{fresh:true}),strict=await f.scanner.scan({from:base,rate:-.8});assert.notEqual(one.run.id,fresh.run.id);assert.notEqual(strict.run.key,fresh.run.key);assert.equal(strict.states[0].matches,0);assert.equal((await f.store.query(one.run.id)).rows.length,12);
+test('changed conditions are isolated and an explicit refresh reuses the original archive',async()=>{
+ const f=fixture({exchanges:['BYBIT']}),one=await f.scanner.scan({from:base}),fresh=await f.scanner.scan({from:base},{fresh:true}),strict=await f.scanner.scan({from:base,rate:-.8});assert.equal(one.run.id,fresh.run.id);assert.notEqual(strict.run.key,fresh.run.key);assert.equal(strict.states[0].matches,0);assert.equal((await f.store.query(one.run.id)).rows.length,12);
 });
 test('an exact manually entered symbol can request retained history even when it is absent from the active catalog',async()=>{
  const calls=[],scanner=A.create({catalog:async()=>({rows:[]}),page:async(ex,s)=>{calls.push({ex,s});return [];},pause:async()=>{}}),r=await scanner.scan({exchange:'BITGET',query:'OLDUSDT'});assert.equal(r.run.status,'done');assert.deepEqual(calls,[{ex:'BITGET',s:'OLDUSDT'}]);
