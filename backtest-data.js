@@ -5,7 +5,7 @@
  function estimate(options={}){
   const start=options.startTime,end=Math.min(options.endTime,options.now??Date.now()/1000),ex=options.exchange||'BINANCE',intervals=[...new Set([...(options.intervals||['5m']),...(options.requireMinuteData?['1m']:[])])],warmupBars=Math.max(80,(options.rsiPeriod||14)*3),frames={};
   for(const tf of intervals){const plan=T.plan(ex,tf),warmupStart=Math.max(0,T.shift(T.start(start,tf),tf,-warmupBars)),inside=T.closedRange(start,end,tf),total=T.closedRange(warmupStart,end,tf),pageSize=ex==='BITGET'?200:ex==='OKX'?300:ex==='MEXC'?2000:1000;frames[tf]={...inside,totalCount:total.count,warmup:total.count-inside.count,warmupStart,nativeTimeframe:plan.source,pageSize,expectedPages:Math.ceil(total.count/Math.max(1,Math.floor(pageSize/plan.factor)))};}
-  return {startTime:start,endTime:end,frames,totalCount:Object.values(frames).reduce((n,f)=>n+f.totalCount,0),expectedPages:Object.values(frames).reduce((n,f)=>n+f.expectedPages,0)};
+  return {exchange:ex,startTime:start,endTime:end,frames,totalCount:Object.values(frames).reduce((n,f)=>n+f.totalCount,0),expectedPages:Object.values(frames).reduce((n,f)=>n+f.expectedPages,0)};
  }
  async function candlePage(ex,symbol,tf,end,signal){
   const b=symbol.replace(/[-_]/g,'').replace(/USDT$/,''),plan=T.plan(ex,tf),limit=ex==='BITGET'?200:ex==='OKX'?300:1000;let data,rows;
@@ -36,11 +36,11 @@
     else{if(rows[0].time<=fundingStart)break;const next=F.nextHistoryCursor(ex,rows);if(next>=cursor&&!['BITGET','MEXC'].includes(ex))throw Error('펀딩비 API의 과거 페이지가 진행되지 않습니다.');if(['BITGET','MEXC'].includes(ex)&&page>1&&rows.every(r=>r.time>=cursor/1000))throw Error('펀딩비 API가 같은 페이지를 반복했습니다.');cursor=next;page++;}
    }
    if(!allFunding.size)throw Error('선택 기간의 공식 정산 기록이 없어 진입 조건을 검증할 수 없습니다.');
-   const gaps=[];let gapsCount=0;
+   const gaps=[];let gapsCount=0,archiveFiles=0;
    for(const tf of intervals){try{
-    const warmupStart=Math.max(0,T.shift(T.start(start,tf),tf,-Math.max(80,(options.rsiPeriod||14)*3))),map=packed?null:new Map(),compact=packed?B.builder():null,localGaps=[];let localGapCount=0,edge=Math.floor(end*1000)-1,tfPages=0,firstInside=null,lastInside=null,insideCount=0,newer=null,oldestRetained=null,newestRetained=null;
+    const warmupStart=Math.max(0,T.shift(T.start(start,tf),tf,-Math.max(80,(options.rsiPeriod||14)*3))),map=packed?null:new Map(),compact=packed?B.builder():null,localGaps=[];let localGapCount=0,edge=Math.floor(end*1000)-1,tfPages=0,firstInside=null,lastInside=null,insideCount=0,newer=null,oldestRetained=null,newestRetained=null,tfArchives=0,tfRest=0;
     for(;;){
-     signal.throwIfAborted();const pageRows=T.sorted(await candles(ex,symbol,tf,edge,signal,false)),rows=pageRows.filter(b=>b.time*1000<=edge);signal.throwIfAborted();tfPages++;if(!rows.length&&pageRows.length)throw Error(tf+' 캔들 API의 과거 커서가 진행되지 않습니다.');
+     signal.throwIfAborted();const reply=await candles(ex,symbol,tf,edge,signal,false),archiveMeta=reply.archiveMeta,pageRows=T.sorted(reply),rows=pageRows.filter(b=>b.time*1000<=edge);signal.throwIfAborted();tfPages++;if(archiveMeta){tfArchives++;archiveFiles++;}else tfRest++;if(!rows.length&&pageRows.length)throw Error(tf+' 캔들 API의 과거 커서가 진행되지 않습니다.');
      if(!rows.length)break;
      for(let i=rows.length-1;i>=0;i--){const b=rows[i];if(b.time<warmupStart||T.end(b.time,tf)>end)continue;oldestRetained=b.time;if(newestRetained===null)newestRetained=b.time;
       if(packed){compact.push(b);if(newer!==null&&T.end(b.time,tf)<newer){localGapCount++;if(localGaps.length<2000)localGaps.push({timeframe:tf,from:T.end(b.time,tf),to:newer});}newer=b.time;
@@ -49,7 +49,7 @@
      }
      const count=packed?compact.length:map.size;
      if(count+totalCount>maxBars)throw Error((packed?'현재 환경의 메모리 보호 기준 ':'선택 기간의 데이터가 ')+maxBars.toLocaleString()+'봉을 초과합니다. 기간을 나누어 실행해 주세요. 일부만 계산하지 않고 중단했습니다.');
-     onProgress({phase:'candles',timeframe:tf,pages:tfPages,count,exchange:ex,expectedCount:expected.frames[tf].totalCount,expectedPages:expected.frames[tf].expectedPages,startTime:start,endTime:end,first:oldestRetained,last:newestRetained});
+     onProgress({phase:'candles',timeframe:tf,pages:tfPages,count,exchange:ex,expectedCount:expected.frames[tf].totalCount,expectedPages:expected.frames[tf].expectedPages,archiveFiles:tfArchives,restPages:tfRest,startTime:start,endTime:end,first:oldestRetained,last:newestRetained});
      if(rows[0].time<=warmupStart)break;const next=rows[0].time*1000-1;if(next>=edge)throw Error(tf+' 캔들 API의 과거 페이지가 진행되지 않습니다.');edge=next;
     }
     const values=packed?compact.finish():[...map.values()].sort((a,b)=>a.time-b.time);if(!values.length)throw Error(tf+'의 해당 기간 캔들 기록을 거래소가 제공하지 않습니다.');
@@ -62,7 +62,7 @@
    if(!packed)for(const [tf,rows]of Object.entries(timeframeCandles))for(let i=1;i<rows.length;i++)if(T.end(rows[i-1].time,tf)<rows[i].time){gapsCount++;gaps.push({timeframe:tf,from:T.end(rows[i-1].time,tf),to:rows[i].time});}
    const available=Object.entries(coverage).filter(([,v])=>Number.isFinite(v.first)&&Number.isFinite(v.last)),priceStart=Math.max(start,Math.min(...available.map(([,v])=>v.first))),priceEnd=Math.min(end,Math.max(...available.map(([tf,v])=>T.end(v.last,tf)))),first=fundingRecords[0].time,last=fundingRecords.at(-1).time;let longGaps=0;
    for(let i=1;i<fundingRecords.length;i++)if(fundingRecords[i].time-fundingRecords[i-1].time>86400+60&&fundingRecords[i].time>priceStart&&fundingRecords[i-1].time<priceEnd)longGaps++;
-   return {symbol,exchange:ex,startTime:start,endTime:end,fundingRecords,timeframeCandles,coverage,gaps,gapsCount,source:'official-exchange-api',fundingCoverage:{first,last,count:fundingRecords.length,startMissing:first>priceStart+2*86400,endMissing:last<priceEnd-2*86400,longGaps}};
+   return {symbol,exchange:ex,startTime:start,endTime:end,fundingRecords,timeframeCandles,coverage,gaps,gapsCount,source:archiveFiles?'official-exchange-api+binance-public-archive':'official-exchange-api',fundingCoverage:{first,last,count:fundingRecords.length,startMissing:first>priceStart+2*86400,endMissing:last<priceEnd-2*86400,longGaps}};
   }
   return {loadBacktestDataset};
  }
