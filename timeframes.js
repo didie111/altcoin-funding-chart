@@ -19,6 +19,13 @@ const TimeframeEngine = (() => {
     const date=new Date(time*1000);return Date.UTC(date.getUTCFullYear(),date.getUTCMonth()+count,1)/1000;
   }
   function end(time,interval){return shift(time,interval,1);}
+  function closedRange(from,to,interval){
+    if(!seconds[interval]||!Number.isFinite(from)||!Number.isFinite(to)||from>=to)throw Error('캔들 수를 계산할 기간·주기를 확인하세요.');
+    let first=start(from,interval);if(first<from)first=shift(first,interval,1);
+    let last=start(to,interval);if(end(last,interval)>to)last=shift(last,interval,-1);
+    const distance=interval==='1M'?((new Date(last*1000).getUTCFullYear()-new Date(first*1000).getUTCFullYear())*12+new Date(last*1000).getUTCMonth()-new Date(first*1000).getUTCMonth()):Math.round((last-first)/seconds[interval]);
+    return {first:first<=last?first:null,last:first<=last?last:null,count:Math.max(0,distance+1)};
+  }
   function requestEnd(milliseconds,interval){const time=milliseconds/1000,first=start(time,interval);return (time===first?first:end(first,interval))*1000;}
   function plan(exchange, interval) {
     if (!seconds[interval] || !['BINANCE','BYBIT','BINGX','BITGET','MEXC','OKX'].includes(exchange)) throw Error('지원하지 않는 타임프레임입니다.');
@@ -89,6 +96,6 @@ const TimeframeEngine = (() => {
     signal.throwIfAborted();
     return indexAt(bars,target,interval)<0 ? [] : bars;
   }
-  return {seconds, plan, sorted, aggregate, indexAt, kstFields, parseKst, dateWindow,start,end,shift,requestEnd};
+  return {seconds, plan, sorted, aggregate, indexAt, kstFields, parseKst, dateWindow,start,end,shift,requestEnd,closedRange};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports=TimeframeEngine;

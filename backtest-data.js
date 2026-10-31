@@ -2,6 +2,11 @@
  'use strict';if(typeof module==='object'&&module.exports){require('./relay-config.js');module.exports=factory(require('./market-api.js'),require('./timeframes.js'),require('./funding.js'),require('./backtest-bars.js'));}else root.BacktestData=factory(MarketAPI,TimeframeEngine,FundingEngine,root.BacktestBars);
 })(typeof globalThis!=='undefined'?globalThis:this,function(API,T,F,B){
  'use strict';const ALL_TIMEFRAMES=Object.keys(T.seconds);
+ function estimate(options={}){
+  const start=options.startTime,end=Math.min(options.endTime,options.now??Date.now()/1000),ex=options.exchange||'BINANCE',intervals=[...new Set([...(options.intervals||['5m']),...(options.requireMinuteData?['1m']:[])])],warmupBars=Math.max(80,(options.rsiPeriod||14)*3),frames={};
+  for(const tf of intervals){const plan=T.plan(ex,tf),warmupStart=Math.max(0,T.shift(T.start(start,tf),tf,-warmupBars)),inside=T.closedRange(start,end,tf),total=T.closedRange(warmupStart,end,tf),pageSize=ex==='BITGET'?200:ex==='OKX'?300:ex==='MEXC'?2000:1000;frames[tf]={...inside,totalCount:total.count,warmup:total.count-inside.count,warmupStart,nativeTimeframe:plan.source,pageSize,expectedPages:Math.ceil(total.count/Math.max(1,Math.floor(pageSize/plan.factor)))};}
+  return {startTime:start,endTime:end,frames,totalCount:Object.values(frames).reduce((n,f)=>n+f.totalCount,0),expectedPages:Object.values(frames).reduce((n,f)=>n+f.expectedPages,0)};
+ }
  async function candlePage(ex,symbol,tf,end,signal){
   const b=symbol.replace(/[-_]/g,'').replace(/USDT$/,''),plan=T.plan(ex,tf),limit=ex==='BITGET'?200:ex==='OKX'?300:1000;let data,rows;
   if(ex==='BINANCE'){data=await API.json('https://fapi.binance.com/fapi/v1/klines',{symbol:b+'USDT',interval:plan.native,limit,endTime:end},signal);rows=data;}
@@ -20,7 +25,7 @@
    const ex=options.exchange||'BINANCE',end=Math.min(options.endTime??Date.now()/1000,Date.now()/1000),start=options.startTime??end-7*86400,intervals=[...new Set([...(options.intervals||['5m']),...(options.requireMinuteData?['1m']:[])])],signal=options.signal||new AbortController().signal,onProgress=options.onProgress||(()=>{}),packed=options.packed===true,maxBars=options.maxBars??(packed?B.recommendedMaxBars():500000);
    if(options.requireMinuteData){intervals.splice(intervals.indexOf('1m'),1);intervals.unshift('1m');}
    if(!Number.isFinite(start)||!Number.isFinite(end)||start>=end||start<0)throw Error('테스트 기간을 확인하세요.');symbol=String(symbol).trim().toUpperCase().replace(/[-_]/g,'').replace(/USDT$/,'')+'USDT';if(!/^[A-Z0-9]{1,28}USDT$/.test(symbol))throw Error('코인 심볼을 확인하세요.');
-   for(const tf of intervals)T.plan(ex,tf);signal.throwIfAborted();
+   for(const tf of intervals)T.plan(ex,tf);signal.throwIfAborted();const expected=estimate({...options,exchange:ex,intervals,startTime:start,endTime:end});
    const timeframeCandles={},coverage={},allFunding=new Map(),fundingStart=Math.max(0,start-Math.max(48*3600,Math.min(864000,Number(options.fundingWindowSeconds)||0))),fundingEnd=Math.min(Date.now()/1000,end+(options.fundingIntervalBasis==='chart'?48*3600:0));let totalCount=0,pages=0,cursor=ex==='BINANCE'?fundingStart*1000:Math.floor(fundingEnd*1000)-1,page=1;
    for(;;){
     signal.throwIfAborted();const rows=F.merge(await funding(ex,symbol,cursor,page,signal));signal.throwIfAborted();pages++;
@@ -33,18 +38,18 @@
    if(!allFunding.size)throw Error('선택 기간의 공식 정산 기록이 없어 진입 조건을 검증할 수 없습니다.');
    const gaps=[];let gapsCount=0;
    for(const tf of intervals){try{
-    const warmupStart=Math.max(0,T.shift(T.start(start,tf),tf,-Math.max(80,(options.rsiPeriod||14)*3))),map=packed?null:new Map(),compact=packed?B.builder():null,localGaps=[];let localGapCount=0,edge=Math.floor(end*1000)-1,tfPages=0,firstInside=null,lastInside=null,insideCount=0,newer=null;
+    const warmupStart=Math.max(0,T.shift(T.start(start,tf),tf,-Math.max(80,(options.rsiPeriod||14)*3))),map=packed?null:new Map(),compact=packed?B.builder():null,localGaps=[];let localGapCount=0,edge=Math.floor(end*1000)-1,tfPages=0,firstInside=null,lastInside=null,insideCount=0,newer=null,oldestRetained=null,newestRetained=null;
     for(;;){
      signal.throwIfAborted();const pageRows=T.sorted(await candles(ex,symbol,tf,edge,signal,false)),rows=pageRows.filter(b=>b.time*1000<=edge);signal.throwIfAborted();tfPages++;if(!rows.length&&pageRows.length)throw Error(tf+' 캔들 API의 과거 커서가 진행되지 않습니다.');
      if(!rows.length)break;
-     for(let i=rows.length-1;i>=0;i--){const b=rows[i];if(b.time<warmupStart||T.end(b.time,tf)>end)continue;
+     for(let i=rows.length-1;i>=0;i--){const b=rows[i];if(b.time<warmupStart||T.end(b.time,tf)>end)continue;oldestRetained=b.time;if(newestRetained===null)newestRetained=b.time;
       if(packed){compact.push(b);if(newer!==null&&T.end(b.time,tf)<newer){localGapCount++;if(localGaps.length<2000)localGaps.push({timeframe:tf,from:T.end(b.time,tf),to:newer});}newer=b.time;
        if(b.time>=start){firstInside=b.time;if(lastInside===null)lastInside=b.time;insideCount++;}}
       else map.set(b.time,b);
      }
      const count=packed?compact.length:map.size;
      if(count+totalCount>maxBars)throw Error((packed?'현재 환경의 메모리 보호 기준 ':'선택 기간의 데이터가 ')+maxBars.toLocaleString()+'봉을 초과합니다. 기간을 나누어 실행해 주세요. 일부만 계산하지 않고 중단했습니다.');
-     onProgress({phase:'candles',timeframe:tf,pages:tfPages,count,exchange:ex});
+     onProgress({phase:'candles',timeframe:tf,pages:tfPages,count,exchange:ex,expectedCount:expected.frames[tf].totalCount,expectedPages:expected.frames[tf].expectedPages,startTime:start,endTime:end,first:oldestRetained,last:newestRetained});
      if(rows[0].time<=warmupStart)break;const next=rows[0].time*1000-1;if(next>=edge)throw Error(tf+' 캔들 API의 과거 페이지가 진행되지 않습니다.');edge=next;
     }
     const values=packed?compact.finish():[...map.values()].sort((a,b)=>a.time-b.time);if(!values.length)throw Error(tf+'의 해당 기간 캔들 기록을 거래소가 제공하지 않습니다.');
@@ -63,5 +68,5 @@
  }
  async function fetchBinanceFundingHistory(symbol,limit=1000,signal=new AbortController().signal){const request=F.historyRequest('BINANCE',symbol,Date.now()-90*86400000,1);request.params.limit=Math.min(1000,limit);return F.normalizeHistory('BINANCE',await API.json(request.url,request.params,signal),symbol);}
  async function fetchBinanceKlines(symbol,interval='5m',startTime=null,endTime=null,limit=1000,signal=new AbortController().signal){const params={symbol:String(symbol).toUpperCase().replace(/USDT$/,'')+'USDT',interval,limit:Math.min(1500,limit)};if(startTime)params.startTime=startTime>=1e11?startTime:startTime*1000;if(endTime)params.endTime=endTime>=1e11?endTime:endTime*1000;const data=await API.json('https://fapi.binance.com/fapi/v1/klines',params,signal);return T.sorted(data.map(API.candle));}
- return {ALL_TIMEFRAMES,create,...create(),candlePage,fundingPage,transferables:B.transferables,fetchBinanceFundingHistory,fetchBinanceKlines};
+ return {ALL_TIMEFRAMES,estimate,create,...create(),candlePage,fundingPage,transferables:B.transferables,fetchBinanceFundingHistory,fetchBinanceKlines};
 });

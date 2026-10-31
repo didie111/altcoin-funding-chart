@@ -37,7 +37,8 @@
   if(state.phase==='compare')return prefix+' / '+labels[state.timeframe]+' 주기 비교 '+state.count+' / '+state.total;
   if(state.phase==='optimize')return prefix+' / 전략 조건 탐색 '+state.count.toLocaleString()+' / '+state.total.toLocaleString()+'개 조합';
   const phase=state.phase==='funding'?'정산 기록':state.timeframe==='1m'&&market.int!=='1m'?(mode==='compare'?'1분 비교·보조 데이터':'보조 1분봉 RSI·체결 검증'):labels[state.timeframe]+' 기준 캔들';
-  return prefix+' / '+phase+' '+state.count.toLocaleString()+'건 · '+state.pages+'페이지';
+  const count=state.count.toLocaleString()+(Number.isFinite(state.expectedCount)?' / 최대 '+state.expectedCount.toLocaleString()+'봉':'건'),pages=state.pages+(Number.isFinite(state.expectedPages)?' / 약 '+state.expectedPages:'')+'페이지',format=time=>new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'short',timeStyle:'short',hour12:false}).format(time*1000);
+  return prefix+' / '+phase+' '+count+' · '+pages+(Number.isFinite(state.first)&&Number.isFinite(state.last)?' · 확보 '+format(state.first)+' ~ '+format(state.last)+' KST':'');
  }
  function validateBacktestDataset(data,market,mode='single'){
   if(data.exchange!==market.ex||data.symbol!==market.symbol||(mode!=='compare'&&!data.timeframeCandles?.[market.int]?.length))throw Error('수집한 종목·거래소·기준 주기가 실행 대상과 일치하지 않습니다. 다시 실행하세요.');
