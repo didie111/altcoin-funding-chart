@@ -32,12 +32,15 @@
  function backtestPlan(market,mode,config){return {intervals:mode==='compare'?Object.keys(labels):[market.int],requireMinuteData:mode==='optimize'||config.splitTrigger==='rsi_cross_up_1m'};}
  function backtestProgress(market,mode,state){
   const prefix=exchanges[market.ex]+' '+market.symbol+' · 기준 '+labels[market.int];
+  if(state.phase==='archive')return prefix+' / 공식 '+(state.kind==='daily'?'일별':'월별')+' 과거 파일 확인 중 · 같은 코인·주기·전체 기간 유지';
+  if(state.phase==='archive-fallback')return prefix+' / 파일 미제공·검증 제한 구간은 같은 코인의 API로 이어서 확인합니다.';
   if(state.phase==='prepare')return prefix+' / 데이터 준비 및 RSI 계산 중…';
   if(state.phase==='compute')return prefix+' / '+labels[state.timeframe]+' 계산 · '+(state.executionTimeframe!==state.timeframe?labels[state.executionTimeframe]+' 체결 데이터 ':'')+state.count.toLocaleString()+' / '+state.total.toLocaleString()+'봉';
   if(state.phase==='compare')return prefix+' / '+labels[state.timeframe]+' 주기 비교 '+state.count+' / '+state.total;
   if(state.phase==='optimize')return prefix+' / 전략 조건 탐색 '+state.count.toLocaleString()+' / '+state.total.toLocaleString()+'개 조합';
   const phase=state.phase==='funding'?'정산 기록':state.timeframe==='1m'&&market.int!=='1m'?(mode==='compare'?'1분 비교·보조 데이터':'보조 1분봉 RSI·체결 검증'):labels[state.timeframe]+' 기준 캔들';
-  return prefix+' / '+phase+' '+state.count.toLocaleString()+'건 · '+state.pages+'페이지';
+  const count=state.count.toLocaleString()+(Number.isFinite(state.expectedCount)?' / 최대 '+state.expectedCount.toLocaleString()+'봉':'건'),pages=state.archiveFiles?'공식 과거 '+state.archiveFiles+'파일 · API '+state.restPages+'페이지':state.pages+(Number.isFinite(state.expectedPages)?' / 약 '+state.expectedPages:'')+'페이지',format=time=>new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',dateStyle:'short',timeStyle:'short',hour12:false}).format(time*1000);
+  return prefix+' / '+phase+' '+count+' · '+pages+(Number.isFinite(state.first)&&Number.isFinite(state.last)?' · 확보 '+format(state.first)+' ~ '+format(state.last)+' KST':'');
  }
  function validateBacktestDataset(data,market,mode='single'){
   if(data.exchange!==market.ex||data.symbol!==market.symbol||(mode!=='compare'&&!data.timeframeCandles?.[market.int]?.length))throw Error('수집한 종목·거래소·기준 주기가 실행 대상과 일치하지 않습니다. 다시 실행하세요.');
