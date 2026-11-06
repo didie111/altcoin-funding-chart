@@ -63,7 +63,7 @@
  function adapter({candlePage,fundingPage,store,now=Date.now,wait=sleep,onCache=()=>{},minimumDelay=500}){
   let next=0,queue=Promise.resolve();
   async function paced(ex,signal,producer,kind){const task=queue.then(async()=>{signal.throwIfAborted();const delay=Math.max(0,next-now());if(delay)await wait(delay,signal);signal.throwIfAborted();next=now()+Math.max(minimumDelay,ex==='BINGX'?1200:0,ex==='BINANCE'&&kind==='funding'?750:0);return await producer();});queue=task.catch(()=>{});return task;}
-  
+
   async function cachedRange(ex,symbol,tf,end,signal){
    if(!store.keys)return null;const last=T.start(end/1000,tf),prefix=JSON.stringify(['candles-v3',ex,symbol,tf]).slice(0,-1)+',',candidates=[];
    for(const key of await store.keys())if(key.startsWith(prefix)){try{const k=JSON.parse(key);if(k[4]<=last&&k[5]>=last)candidates.push({key,first:k[4]});}catch{}}
