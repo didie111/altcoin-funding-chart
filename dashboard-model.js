@@ -31,7 +31,7 @@
  const sameTarget=(a,b)=>Boolean(a&&b&&a.ex===b.ex&&a.symbol===b.symbol&&a.int===b.int);
  function backtestPlan(market,mode,config){const p={intervals:mode==='compare'?Object.keys(labels):[market.int],requireMinuteData:mode==='optimize'||config.splitTrigger==='rsi_cross_up_1m'};if(mode==='compare')p.fastResample=true;return p;}
  function backtestProgress(market,mode,state){
-  const prefix=exchanges[market.ex]+' '+market.symbol+' · 기준 '+labels[market.int];
+  const prefix=exchanges[market.ex]+' '+market.symbol+' · 기준 '+(market.int==='all'?'전체 주기':labels[market.int]);
   if(state.phase==='archive')return prefix+' / 공식 '+(state.kind==='daily'?'일별':'월별')+' 과거 파일 확인 중 · 같은 코인·주기·전체 기간 유지';
   if(state.phase==='archive-fallback')return prefix+' / 파일 미제공·검증 제한 구간은 같은 코인의 API로 이어서 확인합니다.';
   if(state.phase==='prepare')return prefix+' / 데이터 준비 및 RSI 계산 중…';

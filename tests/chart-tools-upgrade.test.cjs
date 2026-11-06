@@ -24,8 +24,8 @@ test('vertical date tools do not acquire a misleading price label when selected'
  assert.match(svg,/data-drawing-axis="time"/);assert.doesNotMatch(svg,/data-drawing-axis="price"/);
 });
 function tradeUI(){
- const source=fs.readFileSync(require.resolve('../backtest-ui.js'),'utf8'),report={innerHTML:''},jumps=[],overlays=[],market={ex:'BYBIT',symbol:'PUFFERUSDT',int:'3m'},trade={id:1,entryTime:1793000010,exitTime:1793000590,entries:[],dcaSteps:1,splitTarget:3,netPnl:1};
- const ctx={M,E:require('../backtest-engine.js'),single:{meta:{market,startTime:trade.entryTime,endTime:trade.exitTime,config:{}},result:{summary:{},trades:[trade]}},tradeJumpTimeframe:null,view:'trades',page:0,comparison:null,optimized:null,$:()=>report,number:String,money:String,stamp:String,escape:String,updateResultContext(){},requestChartView(){},chartWorkspace:{setBacktest:v=>overlays.push(v)},onJump:async(m,t)=>jumps.push({market:m,time:t}),setStatus(){}};
+ const source=fs.readFileSync(require.resolve('../backtest-ui.js'),'utf8'),report={innerHTML:'',classList:{toggle(){}}},jumps=[],overlays=[],market={ex:'BYBIT',symbol:'PUFFERUSDT',int:'3m'},trade={id:1,entryTime:1793000010,exitTime:1793000590,entries:[],dcaSteps:1,splitTarget:3,netPnl:1};
+ const ctx={M,dock:{dataset:{}},E:require('../backtest-engine.js'),single:{meta:{market,startTime:trade.entryTime,endTime:trade.exitTime,config:{}},result:{summary:{},trades:[trade]}},tradeJumpTimeframe:null,view:'trades',page:0,comparison:null,optimized:null,$:()=>report,number:String,money:String,stamp:String,escape:String,updateResultContext(){},requestChartView(){},chartWorkspace:{setBacktest:v=>overlays.push(v)},onJump:async(m,t)=>jumps.push({market:m,time:t}),setStatus(){}};
  vm.createContext(ctx);vm.runInContext(source.slice(source.indexOf('  function table('),source.indexOf('  function provenance('))+source.slice(source.indexOf('  function render(){'),source.indexOf("  $('btExportCsv').onclick")),ctx);return {ctx,report,jumps,overlays,market};
 }
 test('the actual trade table defaults to its backtest frame and retains a selected viewing frame across pages',()=>{

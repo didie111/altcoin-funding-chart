@@ -39,59 +39,30 @@
  }
  function parseCsv(body,spec,signal=new AbortController().signal){
   const rows=[],lines=decoder.decode(body).replace(/^\uFEFF/,'').split('\n');let previous=null;for(let i=0;i<lines.length;i++){if(i%2048===0)signal.throwIfAborted();const line=lines[i].trim();if(!line)continue;const parts=line.split(',');if(!rows.length&&/^open[_ ]?time$/i.test(parts[0]))continue;if(parts.length<6||parts.slice(0,6).some(s=>!s.trim()||!Number.isFinite(Number(s))))throw Error('공식 CSV 캔들 값이 올바르지 않습니다.');const ms=Number(parts[0]),time=ms/1000,[open,high,low,close,volume]=parts.slice(1,6).map(Number);if(!Number.isSafeInteger(ms)||ms<1e11||ms>=1e14||!Number.isInteger(time)||time<spec.from||time>=spec.to||T.start(time,spec.timeframe)!==time||previous!==null&&T.end(previous,spec.timeframe)!==time||Math.min(open,high,low,close)<=0||volume<0||high<Math.max(open,close,low)||low>Math.min(open,close,high))throw Error('공식 CSV 범위·봉 간격·가격 검증에 실패했습니다.');rows.push({time,open,high,low,close,volume});previous=time;}
-  const expected=T.closedRange(spec.from,spec.to,spec.timeframe);
-  const countFromStart=T.closedRange(rows[0]?.time,spec.to,spec.timeframe).count;
-  const isFullMonth=rows[0]?.time===expected.first&&rows.length===expected.count;
-  const isListingMonth=rows[0]?.time>spec.from&&rows.length===countFromStart&&rows.length>=500;
-  if(!isFullMonth&&!isListingMonth)throw Error('공식 CSV에 비어 있는 캔들 구간이 있어 API로 확인합니다.');
-  if(rows.at(-1)?.time!==expected.last)throw Error('공식 CSV에 비어 있는 캔들 구간이 있어 API로 확인합니다.');
-  if(Number.isFinite(spec.first)&&rows[0]?.time>spec.first)throw Error('공식 CSV에 비어 있는 캔들 구간이 있어 API로 확인합니다.');
+  const expected=T.closedRange(spec.from,spec.to,spec.timeframe),first=rows[0]?.time;
+  const full=first===expected.first&&rows.length===expected.count;
+  const listed=Number.isFinite(spec.listedAt)&&first===spec.listedAt&&first>spec.from&&rows.length===T.closedRange(first,spec.to,spec.timeframe).count;
+  if((!full&&!listed)||rows.at(-1)?.time!==expected.last)throw Error('공식 CSV에 비어 있는 캔들 구간이 있어 API로 확인합니다.');
   return rows;
  }
  function packRows(rows){const f64=new Float64Array(rows.length*6);for(let i=0;i<rows.length;i++){const r=rows[i],o=i*6;f64[o]=r.time;f64[o+1]=r.open;f64[o+2]=r.high;f64[o+3]=r.low;f64[o+4]=r.close;f64[o+5]=r.volume;}return f64;}
- function unpackRows(f64){const vals=ArrayBuffer.isView(f64)?f64:(ArrayBuffer.isView(f64?.values)?f64.values:f64),len=vals.length/6,rows=new Array(len);for(let i=0;i<len;i++){const o=i*6;rows[i]={time:vals[o],open:vals[o+1],high:vals[o+2],low:vals[o+3],close:vals[o+4],volume:vals[o+5]};}return rows;}
+ function unpackRows(value){const vals=ArrayBuffer.isView(value)?value:value?.values;if(!(vals instanceof Float64Array)||vals.length%6)throw Error('저장된 캔들 형식이 올바르지 않습니다.');const rows=new Array(vals.length/6);for(let i=0;i<rows.length;i++){const o=i*6;rows[i]={time:vals[o],open:vals[o+1],high:vals[o+2],low:vals[o+3],close:vals[o+4],volume:vals[o+5]};if(Object.values(rows[i]).some(n=>!Number.isFinite(n)))throw Error('저장된 캔들 값이 올바르지 않습니다.');}return rows;}
  function create({candlePage,store,loadAsset=fetchAsset,lower=()=>0,resolveListing=null,now=Date.now,onProgress=()=>{},onCache=()=>{},prefetchCount=0}){
   const failed=new Set(),stats={files:0,cachedFiles:0,downloadBytes:0,restPages:0,fallbacks:0,reasons:[]};let disabled=false,lastDecoded=null;
-  const inflight=new Map(),memoryCache=new Map(),listingMap=new Map();
+  const listingMap=new Map();
   try{new DecompressionStream('deflate-raw');}catch{disabled=true;}
-  async function executeRead(spec,signal){
-   const mem=memoryCache.get(spec.url);
-   if(mem){stats.cachedFiles++;onCache();return {rows:mem,cached:true};}
-   if(lastDecoded?.url===spec.url)return {rows:lastDecoded.rows,cached:true};const key=JSON.stringify(['binance-official-zip-v1',spec.url]);let saved=await store.get(key,now()),cached=Boolean(saved),zip,checksum,packed=saved?.packed;
-   if(saved?.zip&&/^[a-f0-9]{64}$/.test(saved.checksum)){
-    zip=bytes(saved.zip);checksum=saved.checksum;
-    if(now()-saved.checkedAt>=86400000){
-     const text=await loadAsset(spec.url+'.CHECKSUM','checksum',signal),m=text.trim().match(/^([a-f0-9]{64})\s+(.+)$/i);
-     if(!m||m[2]!==spec.filename)throw Error('공식 체크섬 계약이 일치하지 않습니다.');
-     if(m[1].toLowerCase()!==checksum){zip=null;packed=null;cached=false;}
-     else saved.checkedAt=now();
-    }
-   }
-   else {zip=null;packed=null;}
-   if(packed&&zip){
-    const rows=unpackRows(packed);
-    if(saved.checkedAt===now()){
-     await store.put(key,{zip,checksum,checkedAt:now(),packed},{expires:now()+30*86400000,bytes:zip.byteLength+key.length*2+256});
-    }
-    if(cached){stats.cachedFiles++;onCache();}
-    lastDecoded={url:spec.url,rows};
-    if(memoryCache.size>120){const firstKey=memoryCache.keys().next().value;memoryCache.delete(firstKey);}
-    memoryCache.set(spec.url,rows);
-    return {rows,cached:true};
-   }
-   if(!zip){const [buffer,text]=await Promise.all([loadAsset(spec.url,'zip',signal),loadAsset(spec.url+'.CHECKSUM','checksum',signal)]),m=text.trim().match(/^([a-f0-9]{64})\s+(.+)$/i);if(!m||m[2]!==spec.filename)throw Error('공식 체크섬 계약이 일치하지 않습니다.');checksum=m[1].toLowerCase();zip=bytes(buffer);stats.downloadBytes+=zip.byteLength;}
-   signal.throwIfAborted();if(await sha256(zip)!==checksum)throw Error('공식 파일 SHA-256 검증에 실패했습니다.');const rows=parseCsv(await unpack(zip,spec,{signal}),spec,signal);if(rows[0]?.time>spec.from){listingMap.set(spec.symbol,rows[0].time);store.put(JSON.stringify(['listing-time-v1',spec.symbol]),rows[0].time,{expires:now()+365*86400000}).catch(()=>{});}packed=packRows(rows);await store.put(key,{zip,checksum,checkedAt:now(),packed},{expires:now()+30*86400000,bytes:zip.byteLength+key.length*2+256});if(cached){stats.cachedFiles++;onCache();}lastDecoded={url:spec.url,rows};if(memoryCache.size>120){const firstKey=memoryCache.keys().next().value;memoryCache.delete(firstKey);}memoryCache.set(spec.url,rows);return {rows,cached};
-  }
-  function read(spec,signal){
-   let p=inflight.get(spec.url);
-   if(!p){
-    p=executeRead(spec,signal).finally(()=>inflight.delete(spec.url));
-    inflight.set(spec.url,p);
-   }
-   return p;
+  async function read(spec,signal){
+   if(lastDecoded?.url===spec.url&&now()-lastDecoded.checkedAt<86400000){stats.cachedFiles++;onCache();return {rows:lastDecoded.rows,cached:true};}
+   const key=JSON.stringify(['binance-official-zip-v1',spec.url]),saved=await store.get(key,now()),checked=text=>{const m=text.trim().match(/^([a-f0-9]{64})\s+(.+)$/i);if(!m||m[2]!==spec.filename)throw Error('공식 체크섬 계약이 일치하지 않습니다.');return m[1].toLowerCase();};
+   let cached=Boolean(saved?.zip&&/^[a-f0-9]{64}$/.test(saved.checksum)),zip=cached?bytes(saved.zip):null,checksum=cached?saved.checksum:null,checkedAt=Number.isFinite(saved?.checkedAt)?saved.checkedAt:0,freshChecksum=null;
+   if(zip&&now()-checkedAt>=86400000){freshChecksum=checked(await loadAsset(spec.url+'.CHECKSUM','checksum',signal));checkedAt=now();if(freshChecksum!==checksum){zip=null;cached=false;checksum=freshChecksum;}}
+   if(!zip){if(freshChecksum)zip=bytes(await loadAsset(spec.url,'zip',signal));else{const [buffer,text]=await Promise.all([loadAsset(spec.url,'zip',signal),loadAsset(spec.url+'.CHECKSUM','checksum',signal)]);checksum=checked(text);zip=bytes(buffer);}checkedAt=now();stats.downloadBytes+=zip.byteLength;}
+   signal.throwIfAborted();let rows;try{if(await sha256(zip)!==checksum)throw Error('공식 파일 SHA-256 검증에 실패했습니다.');rows=parseCsv(await unpack(zip,spec,{signal}),spec,signal);}catch(error){if(saved&&store.deletePage)await store.deletePage(key);throw error;}
+   // Keep one decoded file, and account for every persisted byte. Cache reads do not renew checksum deadlines.
+   await store.put(key,{zip,checksum,checkedAt},{expires:now()+30*86400000,bytes:zip.byteLength+key.length*2+256});if(cached){stats.cachedFiles++;onCache();}lastDecoded={url:spec.url,rows,checkedAt};return {rows,cached};
   }
   return {info:()=>({...stats,reasons:stats.reasons.slice()}),async candlePage(ex,symbol,tf,edge,signal){
-   if(ex==='BINANCE'&&!listingMap.has(symbol)){
+   signal.throwIfAborted();if(ex==='BINANCE'&&!listingMap.has(symbol)){
     const savedListing=await store.get(JSON.stringify(['listing-time-v1',symbol]),now()).catch(()=>null);
     if(Number.isFinite(savedListing)&&savedListing>0)listingMap.set(symbol,savedListing);
     else if(typeof resolveListing==='function'){
@@ -101,7 +72,7 @@
        listingMap.set(symbol,detected);
        store.put(JSON.stringify(['listing-time-v1',symbol]),detected,{expires:now()+365*86400000}).catch(()=>{});
       }
-     }catch(_){}
+     }catch(error){signal.throwIfAborted();if(error.name==='RateLimitError')throw error;}
     }
    }
    const knownListing=listingMap.get(symbol)||0;
@@ -109,16 +80,7 @@
    const lowerBound=Math.max(Number(lower(tf,symbol))||0,knownListing);
    const spec=!disabled&&ex==='BINANCE'?specification(symbol,tf,edge,lowerBound,now()):null;
    if(spec&&!failed.has(spec.url)){
-    if(prefetchCount>0&&!disabled){
-     let nextEdge=spec.from*1000-1;
-     for(let i=0;i<prefetchCount;i++){
-      if(nextEdge<=lowerBound*1000)break;
-      const nextSpec=specification(symbol,tf,nextEdge,lowerBound,now());
-      if(!nextSpec||failed.has(nextSpec.url))break;
-      if(!inflight.has(nextSpec.url))read(nextSpec,signal).catch(()=>{});
-      nextEdge=nextSpec.from*1000-1;
-     }
-    }
+    spec.listedAt=knownListing||null;
     try{onProgress({phase:'archive',timeframe:tf,kind:spec.kind,from:spec.from,to:spec.to});const result=await read(spec,signal),rows=result.rows.filter(r=>r.time*1000<=edge);if(rows.length){stats.files++;Object.defineProperty(rows,'archiveMeta',{value:{kind:spec.kind,cached:result.cached,url:spec.url},configurable:true,writable:true});return rows;}}
     catch(error){signal.throwIfAborted();failed.add(spec.url);stats.fallbacks++;if(stats.reasons.length<5)stats.reasons.push(error.message);if(error.name==='TypeError'||error.name==='TimeoutError'||error.name==='ArchiveUnavailableError'||[403,429].includes(error.status)||error.status>=500)disabled=true;onProgress({phase:'archive-fallback',timeframe:tf,message:error.message});}}
    stats.restPages++;return candlePage(ex,symbol,tf,edge,signal);

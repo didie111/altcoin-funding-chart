@@ -39,21 +39,23 @@
    if(!allFunding.size)throw Error('선택 기간의 공식 정산 기록이 없어 진입 조건을 검증할 수 없습니다.');
    const gaps=[];let gapsCount=0,archiveFiles=0;
    for(const tf of intervals){try{
-    if(fastResample && tf !== '1m' && timeframeCandles['1m']){
-     const minuteRows = packed ? B.toArray(timeframeCandles['1m']) : timeframeCandles['1m'];
-     const warmupStart = Math.max(0, T.shift(T.start(start, tf), tf, -Math.max(80, (options.rsiPeriod || 14) * 3)));
-     const resampled = T.resample(minuteRows, tf, '1m').filter(b => b.time >= warmupStart && T.end(b.time, tf) <= end);
+    if(fastResample&&tf!=='1m'&&timeframeCandles['1m']){
+     const minute=timeframeCandles['1m'],warmupStart=Math.max(0,T.shift(T.start(start,tf),tf,-Math.max(80,(options.rsiPeriod||14)*3))),resampled=T.resample(minute,tf,'1m',B.isPacked(minute)?B.get:undefined).filter(b=>b.time>=warmupStart&&T.end(b.time,tf)<=end);
      if(resampled.length){
-      const inside = resampled.filter(b => b.time >= start);
-      if(inside.length){
-       const firstInside = inside[0].time, lastInside = inside.at(-1).time;
-       const values = packed ? B.pack(resampled) : resampled;
-       timeframeCandles[tf] = values;
-       totalCount += resampled.length;
-       coverage[tf] = {first: firstInside, last: lastInside, count: inside.length, endMissing: T.end(lastInside, tf) < T.start(end, tf), warmup: resampled.length - inside.length, startMissing: firstInside > T.end(T.start(start, tf), tf)};
-       onProgress({phase: 'candles', timeframe: tf, pages: 0, count: resampled.length, exchange: ex, expectedCount: resampled.length, expectedPages: 0, archiveFiles: 0, restPages: 0, startTime: start, endTime: end, first: resampled[0].time, last: resampled.at(-1).time, synthesized: true});
-       continue;
+      const first=resampled[0].time,earlier=new Map();let edge=first*1000-1,warmupPages=0;
+      while(edge/1000>=warmupStart){
+       signal.throwIfAborted();const raw=await candles(ex,symbol,tf,edge,signal,false),all=T.sorted(raw),rows=all.filter(b=>b.time*1000<=edge);if(!rows.length){if(all.length)throw Error(tf+' 캔들 API의 과거 커서가 진행되지 않습니다.');break;}
+       warmupPages++;for(const r of rows)if(r.time>=warmupStart&&r.time<first&&T.end(r.time,tf)<=end)earlier.set(r.time,r);
+       if(rows[0].time<=warmupStart)break;const next=rows[0].time*1000-1;if(next>=edge)throw Error(tf+' 캔들 API의 과거 커서가 진행되지 않습니다.');edge=next;
       }
+      const combined=[...earlier.values(),...resampled].sort((a,b)=>a.time-b.time),inside=combined.filter(b=>b.time>=start);
+      if(!inside.length)throw Error(tf+'의 선택 기간에 완성된 캔들이 없습니다.');
+      if(totalCount+combined.length>maxBars)throw Error('현재 환경의 메모리 보호 기준을 초과합니다. 일부만 계산하지 않고 중단했습니다.');
+      timeframeCandles[tf]=packed?B.pack(combined):combined;totalCount+=combined.length;
+      const firstInside=inside[0].time,lastInside=inside.at(-1).time;
+      coverage[tf]={first:firstInside,last:lastInside,count:inside.length,endMissing:T.end(lastInside,tf)<T.start(end,tf),warmup:combined.length-inside.length,startMissing:firstInside>T.end(T.start(start,tf),tf),resampled:true};
+      if(packed)for(let i=1;i<combined.length;i++)if(T.end(combined[i-1].time,tf)<combined[i].time){gapsCount++;if(gaps.length<2000)gaps.push({timeframe:tf,from:T.end(combined[i-1].time,tf),to:combined[i].time});}
+      onProgress({phase:'candles',timeframe:tf,pages:warmupPages,count:combined.length,exchange:ex,expectedCount:expected.frames[tf].totalCount,expectedPages:warmupPages,archiveFiles:0,restPages:warmupPages,startTime:start,endTime:end,first:combined[0].time,last:combined.at(-1).time,synthesized:true});continue;
      }
     }
     const warmupStart=Math.max(0,T.shift(T.start(start,tf),tf,-Math.max(80,(options.rsiPeriod||14)*3))),map=packed?null:new Map(),compact=packed?B.builder():null,localGaps=[];let localGapCount=0,edge=Math.floor(end*1000)-1,tfPages=0,firstInside=null,lastInside=null,insideCount=0,newer=null,oldestRetained=null,newestRetained=null,tfArchives=0,tfRest=0;
