@@ -3,7 +3,7 @@
  function bind({host,report,getConfig,isBusy,onBusy,onOpen,onResult,onSettings}){
   const doc=host.ownerDocument,F=root.CoinFavorites,M=root.DashboardModel,storePromise=root.BacktestCache.open(),node=(tag,text,cls)=>{const n=doc.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
   const panel=node('section',undefined,'bt-batch');panel.setAttribute('aria-label','즐겨찾기 일괄 백테스트');
-  panel.innerHTML='<header class="bt-batch-heading"><div><span>WATCHLIST RESEARCH</span><h3>즐겨찾기 일괄 백테스트</h3></div><button type="button" id="btBatchManage">★ 즐겨찾기 편집</button></header><div class="bt-batch-setup"><label>테스트 주기<select id="btBatchFrame"><option value="">백테스팅 설정 주기</option>'+Object.entries(M.labels).map(([v,t])=>'<option value="'+v+'">'+t+'</option>').join('')+'</select></label><label>기간<select id="btBatchPeriod"><option value="settings">설정한 시작일 ~ 종료일 · 기본</option><option value="all">전체 과거 ~ 현재 · 직접 선택</option></select></label><label class="bt-batch-speed"><input id="btBatchArchive" type="checkbox" checked>공식 과거 파일로 빠르게 읽기 · Binance</label><button type="button" id="btBatchSettings">기간·전략 설정</button><button type="button" class="bt-primary" id="btBatchStart">새 일괄 테스트</button><button type="button" id="btBatchResume" hidden>이어서 실행</button><button type="button" id="btBatchPause" hidden>일시 중지</button></div><div class="bt-batch-range" id="btBatchRange" role="status"></div><p class="bt-batch-plan" id="btBatchPlan"></p><details class="bt-batch-estimates"><summary>1분봉 ~ 월봉 수집량 미리보기</summary><p>기존 API 기준 코인 1개당 예상 상한 · 공식 파일 사용 시 요청 감소 · RSI 예열 포함 · 실제 상장일·제공 범위·누락에 따라 줄어들 수 있습니다. 정산 이력 조회는 별도이며, 페이지 수는 API 응답 길이에 따라 달라집니다.</p><div id="btBatchEstimates"></div></details><p class="bt-batch-range-warning" id="btBatchRangeWarning" role="status" hidden></p><p class="bt-footnote">각 코인에 초기 자본을 각각 적용합니다. 공유 자본 포트폴리오 수익률이 아닙니다. 실행 중 차트·즐겨찾기를 바꿔도 이번 목록과 조건은 유지됩니다.</p><div class="bt-batch-progress"><progress id="btBatchProgress" max="1" value="0" aria-label="즐겨찾기 백테스트 진행률"></progress><p id="btBatchStatus" role="status">즐겨찾기의 코인들을 같은 설정으로 차례로 검토합니다.</p></div><div class="bt-batch-resultbar"><strong id="btBatchCount">결과 대기</strong><label>정렬<select id="btBatchSort"><option value="original">실행 순서</option><option value="netPnl">순손익 높은 순</option><option value="winRatePct">승률 높은 순</option><option value="profitFactor">수익계수 높은 순</option><option value="symbol">코인명</option></select></label><button type="button" id="btBatchCsv" disabled>전체 결과 CSV</button></div><p id="btBatchSnapshot" class="bt-batch-snapshot"></p><div id="btBatchResults"></div><div class="bt-batch-pagination"><button id="btBatchPrevious" type="button">이전</button><span id="btBatchPage">1페이지</span><button id="btBatchNext" type="button">다음</button></div><details class="bt-batch-method"><summary>속도·저장 공간·자료 범위</summary><p>동시에 한 코인만 처리하고 계산과 수집은 별도 작업에서 수행합니다. 일반 API 요청 간격은 최소 0.5초, Binance 정산 이력은 0.75초, BingX는 1.2초입니다. API 요청 제한이 계속되면 전체 작업을 멈추고 대기 시간을 표시합니다. 거래소 연결 실패가 계속되면 같은 거래소의 남은 코인은 조회 보류로 두어 반복 요청을 줄입니다.</p><p>캔들은 가격을 반올림하지 않는 숫자 배열로 압축 저장합니다. 과거 파일은 공식 SHA-256·ZIP CRC·봉 간격·행 수를 확인합니다. 파일이 없거나 검증이 실패한 구간은 같은 코인의 기존 API로 이어갑니다. 시장자료 캐시는 최대 32MiB이며 오래 사용하지 않은 페이지부터 비웁니다. 완료된 요약은 최근 3회까지 저장합니다. 중지·새로고침 후 완료 코인은 건너뛰고 이어서 실행하며, 진행 중이던 코인은 저장된 페이지를 재사용해 다시 계산합니다.</p><p>전체 과거 조회는 거래소가 제공하는 캔들과 실제 정산 기록까지 조회합니다. 상장일부터 모든 기록이 제공된다는 보장은 없습니다. 빠진 기간·조회 실패는 결과에서 따로 표시합니다. 메모리 보호 기준을 넘으면 일부 자료만 계산하지 않고 해당 코인의 실패 이유를 표시합니다.</p><span id="btBatchCacheInfo"></span><button type="button" id="btBatchCacheClear">저장한 시장자료 비우기</button></details>';
+  panel.innerHTML='<header class="bt-batch-heading"><div><span>WATCHLIST RESEARCH</span><h3>즐겨찾기 일괄 백테스트</h3></div><button type="button" id="btBatchManage">★ 즐겨찾기 편집</button></header><div class="bt-batch-setup"><label>테스트 주기<select id="btBatchFrame"><option value="">백테스팅 설정 주기</option><option value="all">⚡ 1분봉 ~ 월봉 전체 주기 (초고속 합성)</option>'+Object.entries(M.labels).map(([v,t])=>'<option value="'+v+'">'+t+'</option>').join('')+'</select></label><label>기간<select id="btBatchPeriod"><option value="settings">설정한 시작일 ~ 종료일 · 기본</option><option value="all">전체 과거 ~ 현재 · 직접 선택</option></select></label><label class="bt-batch-speed"><input id="btBatchArchive" type="checkbox" checked>공식 과거 파일로 빠르게 읽기 · Binance</label><button type="button" id="btBatchSettings">기간·전략 설정</button><button type="button" class="bt-primary" id="btBatchStart">새 일괄 테스트</button><button type="button" id="btBatchResume" hidden>이어서 실행</button><button type="button" id="btBatchPause" hidden>일시 중지</button></div><div class="bt-batch-range" id="btBatchRange" role="status"></div><p class="bt-batch-plan" id="btBatchPlan"></p><details class="bt-batch-estimates"><summary>1분봉 ~ 월봉 수집량 미리보기</summary><p>기존 API 기준 코인 1개당 예상 상한 · 공식 파일 사용 시 요청 감소 · RSI 예열 포함 · 실제 상장일·제공 범위·누락에 따라 줄어들 수 있습니다. 정산 이력 조회는 별도이며, 페이지 수는 API 응답 길이에 따라 달라집니다.</p><div id="btBatchEstimates"></div></details><p class="bt-batch-range-warning" id="btBatchRangeWarning" role="status" hidden></p><p class="bt-footnote">각 코인에 초기 자본을 각각 적용합니다. 공유 자본 포트폴리오 수익률이 아닙니다. 실행 중 차트·즐겨찾기를 바꿔도 이번 목록과 조건은 유지됩니다.</p><div class="bt-batch-progress"><progress id="btBatchProgress" max="1" value="0" aria-label="즐겨찾기 백테스트 진행률"></progress><p id="btBatchStatus" role="status">즐겨찾기의 코인들을 같은 설정으로 차례로 검토합니다.</p></div><div class="bt-batch-resultbar"><strong id="btBatchCount">결과 대기</strong><div class="bt-batch-sync-actions"><button type="button" id="btBatchExport" title="가게 ↔ 집 컴퓨터 이동용: 저장된 전체 1분봉 및 백테스트 시장자료 파일로 백업">💾 데이터 백업</button><button type="button" id="btBatchImport" title="다른 컴퓨터에서 백업한 시장자료 파일 복원">📂 데이터 복원</button><input type="file" id="btBatchImportFile" accept=".json,.dat" style="display:none"></div><label>정렬<select id="btBatchSort"><option value="original">실행 순서</option><option value="netPnl">순손익 높은 순</option><option value="winRatePct">승률 높은 순</option><option value="profitFactor">수익계수 높은 순</option><option value="symbol">코인명</option></select></label><button type="button" id="btBatchCsv" disabled>전체 결과 CSV</button></div><p id="btBatchSnapshot" class="bt-batch-snapshot"></p><div id="btBatchResults"></div><div class="bt-batch-pagination"><button id="btBatchPrevious" type="button">이전</button><span id="btBatchPage">1페이지</span><button id="btBatchNext" type="button">다음</button></div><details class="bt-batch-method"><summary>속도·저장 공간·자료 범위</summary><p>동시에 한 코인만 처리하고 계산과 수집은 별도 작업에서 수행합니다. 일반 API 요청 간격은 최소 0.5초, Binance 정산 이력은 0.75초, BingX는 1.2초입니다. API 요청 제한이 계속되면 전체 작업을 멈추고 대기 시간을 표시합니다. 거래소 연결 실패가 계속되면 같은 거래소의 남은 코인은 조회 보류로 두어 반복 요청을 줄입니다.</p><p>캔들은 가격을 반올림하지 않는 숫자 배열로 압축 저장합니다. 과거 파일은 공식 SHA-256·ZIP CRC·봉 간격·행 수를 확인합니다. 파일이 없거나 검증이 실패한 구간은 같은 코인의 기존 API로 이어갑니다. 시장자료 캐시는 최대 32MiB이며 오래 사용하지 않은 페이지부터 비웁니다. 완료된 요약은 최근 3회까지 저장합니다. 중지·새로고침 후 완료 코인은 건너뛰고 이어서 실행하며, 진행 중이던 코인은 저장된 페이지를 재사용해 다시 계산합니다.</p><p>전체 과거 조회는 거래소가 제공하는 캔들과 실제 정산 기록까지 조회합니다. 상장일부터 모든 기록이 제공된다는 보장은 없습니다. 빠진 기간·조회 실패는 결과에서 따로 표시합니다. 메모리 보호 기준을 넘으면 일부 자료만 계산하지 않고 해당 코인의 실패 이유를 표시합니다.</p><span id="btBatchCacheInfo"></span><button type="button" id="btBatchCacheClear">저장한 시장자료 비우기</button></details>';
   const $=id=>panel.querySelector('#'+id),fmt=(n,d=2)=>Number.isFinite(n)?new Intl.NumberFormat('ko-KR',{maximumFractionDigits:d}).format(n):'—',stamp=t=>new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).format(t*1000),escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   let runner,job=null,locked=false,ready=false,worker=null,serial=0,page=0,detailAbort=null,nextNetworkAt=0,archiveRetryAt=0;
   const wait=(ms,signal)=>new Promise((resolve,reject)=>{signal.throwIfAborted();const abort=()=>{clearTimeout(timer);reject(signal.reason);},timer=setTimeout(()=>{signal.removeEventListener('abort',abort);resolve();},ms);signal.addEventListener('abort',abort,{once:true});});
@@ -14,13 +14,13 @@
   function plan(c,allHistory=$('btBatchPeriod').value==='all'){
    const markets=F.store.snapshot().markets,exchanges=[...new Set(markets.map(m=>m.exchange))];if(!exchanges.length)exchanges.push('BINANCE');
    const startTime=allHistory?Date.UTC(2009,0,1)/1000:c.startTime,endTime=Math.min(allHistory?Date.now()/1000:c.endTime,Date.now()/1000);
-   const estimates=exchanges.map(exchange=>root.BacktestData.estimate({exchange,startTime,endTime,intervals:[c.timeframe],requireMinuteData:c.splitTrigger==='rsi_cross_up_1m',rsiPeriod:c.rsiPeriod}));
+   const intervals=c.timeframe==='all'?Object.keys(root.TimeframeEngine?.seconds||{'1m':60}):[c.timeframe];const estimates=exchanges.map(exchange=>root.BacktestData.estimate({exchange,startTime,endTime,intervals,requireMinuteData:c.timeframe==='all'||c.splitTrigger==='rsi_cross_up_1m',rsiPeriod:c.rsiPeriod}));
    return {startTime,endTime,estimates,allHistory};
   }
   function renderPlan(c){
    let p;try{p=plan(c);}catch(error){$('btBatchRange').textContent=error.message;return;}
-   const frame=p.estimates[0].frames[c.timeframe],extra=c.timeframe!=='1m'&&c.splitTrigger==='rsi_cross_up_1m',pages=p.estimates.map(e=>e.expectedPages),range=Math.min(...pages)===Math.max(...pages)?fmt(pages[0],0):fmt(Math.min(...pages),0)+' ~ '+fmt(Math.max(...pages),0);
-   $('btBatchRange').classList.toggle('bt-batch-all-history',p.allHistory);$('btBatchRange').textContent=(p.allHistory?'전체 과거 직접 선택':'설정 기간 사용')+' · '+stamp(p.startTime)+' ~ '+stamp(p.endTime)+' KST'+(p.allHistory?' · 백테스팅 설정의 날짜를 사용하지 않습니다.':'')+'\n코인당 '+M.labels[c.timeframe]+' 최대 '+fmt(frame.count,0)+'봉 + 예열 '+fmt(frame.warmup,0)+'봉'+(extra?' · 보조 1분봉 '+fmt(p.estimates[0].frames['1m'].totalCount,0)+'봉 추가':' · 보조 1분봉 추가 조회 없음')+' · 캔들 API 약 '+range+'페이지';
+   const frame=p.estimates[0].frames[c.timeframe]||p.estimates[0].frames['1m']||Object.values(p.estimates[0].frames)[0],extra=c.timeframe!=='1m'&&(c.timeframe==='all'||c.splitTrigger==='rsi_cross_up_1m'),pages=p.estimates.map(e=>e.expectedPages),range=Math.min(...pages)===Math.max(...pages)?fmt(pages[0],0):fmt(Math.min(...pages),0)+' ~ '+fmt(Math.max(...pages),0);
+   $('btBatchRange').classList.toggle('bt-batch-all-history',p.allHistory);$('btBatchRange').textContent=(p.allHistory?'전체 과거 직접 선택 · 코인별 최초 상장일 ~ 현재 전 기간 자동 수집':'설정 기간 사용 · '+stamp(p.startTime)+' ~ '+stamp(p.endTime)+' KST')+'\n코인당 '+(c.timeframe==='all'?'1분봉 1회 수집 후 전 주기(3m~월봉) 로컬 초고속 합성 · 최고 성과 주기 도출':(M.labels[c.timeframe]||c.timeframe)+(p.allHistory?' 상장 전 구간 수집 · Binance 공식 과거 파일 고속 로드':' 최대 '+fmt(frame.count,0)+'봉 + 예열 '+fmt(frame.warmup,0)+'봉'))+(extra&&c.timeframe!=='all'?' · 보조 1분봉 추가':'')+(p.allHistory?'':' · 캔들 API 약 '+range+'페이지');
    const entries=Object.entries(M.labels).map(([tf,label])=>{const sample={...c,timeframe:tf},e=plan(sample,p.allHistory).estimates,signal=e[0].frames[tf],counts=e.map(x=>x.expectedPages),pageRange=Math.min(...counts)===Math.max(...counts)?fmt(counts[0],0):fmt(Math.min(...counts),0)+' ~ '+fmt(Math.max(...counts),0);return '<tr'+(tf===c.timeframe?' class="bt-batch-selected-frame"':'')+'><td>'+label+'</td><td>'+fmt(signal.count,0)+'</td><td>'+fmt(signal.warmup,0)+'</td><td>'+(tf!=='1m'&&sample.splitTrigger==='rsi_cross_up_1m'?fmt(e[0].frames['1m'].totalCount,0):'—')+'</td><td>약 '+pageRange+'</td></tr>';});
    $('btBatchEstimates').innerHTML='<div class="bt-table-scroll"><table class="bt-table"><thead><tr><th>기준 주기</th><th>기간 안의 완성 봉</th><th>RSI 예열</th><th>보조 1분봉</th><th>코인당 캔들 API</th></tr></thead><tbody>'+entries.join('')+'</tbody></table></div>';
    const mismatch=job&&(job.allHistory!==p.allHistory||job.config.timeframe!==c.timeframe||(job.config.useBinanceArchive!==false)!==c.useBinanceArchive||job.config.startTime!==p.startTime||Math.abs(job.config.endTime-p.endTime)>60);
@@ -29,12 +29,12 @@
   async function cacheInfo(){const store=await storePromise,info=await store.info();$('btBatchCacheInfo').textContent=(info.persistent?'자동 저장 켜짐':'임시 저장 · 브라우저 저장을 사용할 수 없습니다.')+' · 시장자료 '+fmt(info.bytes/1048576,1)+' / '+fmt(info.maxBytes/1048576,0)+'MiB';}
   function execute(item,c,signal,onProgress,detail=false){
    return new Promise((resolve,reject)=>{
-    signal.throwIfAborted();const id=++serial,task=new Worker('backtest-batch-worker.js?v=20261031-archive-speed-1');worker=task;let settled=false;
+    signal.throwIfAborted();const id=++serial,task=new Worker('backtest-batch-worker.js?v=20261104-instant-resample-1');worker=task;let settled=false;
     const hosts={BINANCE:'fapi.binance.com',BYBIT:'api.bybit.com',BINGX:'open-api.bingx.com',BITGET:'api.bitget.com',MEXC:'api.mexc.com',OKX:'www.okx.com'},retry=event=>{if(event.detail.host===hosts[item.exchange])onProgress({phase:'wait',...event.detail});};
     const finish=(fn,value)=>{if(settled)return;settled=true;signal.removeEventListener('abort',abort);root.removeEventListener('market-api-wait',retry);task.terminate();if(worker===task)worker=null;fn(value);},abort=()=>finish(reject,signal.reason);signal.addEventListener('abort',abort,{once:true});root.addEventListener('market-api-wait',retry);
     task.onmessage=async event=>{
      if(event.data.id!==id||signal.aborted||settled)return;
-     if(event.data.archiveRequest){const q=event.data.archiveRequest;let response;try{const tf=new URL(q.url).pathname.split('/')[7];if(item.exchange!=='BINANCE'||!root.BacktestArchive?.allowedUrl(q.url,item.symbol,tf)||tf!==c.timeframe&&!(c.splitTrigger==='rsi_cross_up_1m'&&tf==='1m')||!['zip','checksum'].includes(q.kind)||q.url.endsWith('.CHECKSUM')!==(q.kind==='checksum'))throw Error('공식 과거 파일의 거래소·계약·주기가 일치하지 않습니다.');if(archiveRetryAt>Date.now())throw Object.assign(Error('공식 파일 연결 대기 · 기존 API로 확인합니다.'),{name:'ArchiveUnavailableError'});const data=await root.BacktestArchive.fetchAsset(q.url,q.kind,signal);response={requestId:q.requestId,data};}catch(error){if(!signal.aborted&&(error.name==='TypeError'||error.name==='TimeoutError'||[403,429].includes(error.status)||error.status>=500))archiveRetryAt=Date.now()+300000;response={requestId:q.requestId,error:{message:error.message,name:error.name,status:error.status}};}if(!settled&&!signal.aborted)task.postMessage({marketResponse:response},response.data instanceof ArrayBuffer?[response.data]:[]);return;}
+     if(event.data.archiveRequest){const q=event.data.archiveRequest;let response;try{const tf=new URL(q.url).pathname.split('/')[7];const allowedTf=tf===c.timeframe||tf==='1m';if(item.exchange!=='BINANCE'||!root.BacktestArchive?.allowedUrl(q.url,item.symbol,tf)||!allowedTf||!['zip','checksum'].includes(q.kind)||q.url.endsWith('.CHECKSUM')!==(q.kind==='checksum'))throw Error('공식 과거 파일의 거래소·계약·주기가 일치하지 않습니다.');if(archiveRetryAt>Date.now())throw Object.assign(Error('공식 파일 연결 대기 · 기존 API로 확인합니다.'),{name:'ArchiveUnavailableError'});const data=await root.BacktestArchive.fetchAsset(q.url,q.kind,signal);response={requestId:q.requestId,data};}catch(error){if(!signal.aborted&&(error.name==='TypeError'||error.name==='TimeoutError'||[403,429].includes(error.status)||error.status>=500))archiveRetryAt=Date.now()+300000;response={requestId:q.requestId,error:{message:error.message,name:error.name,status:error.status}};}if(!settled&&!signal.aborted)task.postMessage({marketResponse:response},response.data instanceof ArrayBuffer?[response.data]:[]);return;}
      if(event.data.marketRequest){const q=event.data.marketRequest;let response;try{const url=new URL(q.url);if(url.protocol!=='https:'||url.hostname!==hosts[item.exchange])throw Error('공식 거래소 요청 주소가 일치하지 않습니다.');const delay=nextNetworkAt-Date.now();if(delay>0)await wait(delay,signal);signal.throwIfAborted();nextNetworkAt=Date.now()+Math.max(500,item.exchange==='BINGX'?1200:0,item.exchange==='BINANCE'&&/^\/fapi\/v1\/funding(?:Rate|Info)$/.test(url.pathname)?750:0);const data=await root.MarketAPI.json(q.url,q.params,signal);response={requestId:q.requestId,data};}catch(error){response={requestId:q.requestId,error:{message:error.message,name:error.name,retryAt:error.retryAt}};}if(!settled&&!signal.aborted)task.postMessage({marketResponse:response});return;}
      if(event.data.progress){onProgress(event.data.progress);return;}if(event.data.error){const e=Object.assign(Error(event.data.error.message),event.data.error);finish(reject,e);}else finish(resolve,event.data.output);
     };
@@ -47,7 +47,7 @@
   }
   function renderRows(){const list=$('btBatchResults');if(!job){$('btBatchPrevious').disabled=true;$('btBatchNext').disabled=true;list.innerHTML='<div class="bt-empty">★ 즐겨찾기 '+F.store.snapshot().size+'개 · 새 일괄 테스트로 검토를 시작하세요.<br>결과에서 각 코인의 거래 내역과 날짜별 차트를 열 수 있습니다.</div>';return;}let items=job.items.map((value,index)=>({...value,index}));const sort=$('btBatchSort').value;if(sort==='symbol')items.sort((a,b)=>a.symbol.localeCompare(b.symbol)||a.exchange.localeCompare(b.exchange));else if(sort!=='original')items.sort((a,b)=>{const value=r=>r.status!=='done'?-Infinity:sort==='profitFactor'&&r.summary.profitFactorInfinite?Infinity:r.summary[sort]??-Infinity;return value(b)-value(a)||a.index-b.index;});const pages=Math.max(1,Math.ceil(items.length/100));page=Math.min(page,pages-1);
    const th=['코인 / 거래소','상태 · 실제 자료 범위','거래수','승률','수익계수 PF','평균 이익/손실 비','순손익 · USDT','최종 자본','MDD','거래·차트'];
-   list.innerHTML='<div class="bt-table-scroll"><table class="bt-table"><thead><tr>'+th.map(t=>'<th>'+t+'</th>').join('')+'</tr></thead><tbody>'+items.slice(page*100,page*100+100).map(item=>{const s=item.summary,cov=item.meta?.coverage[job.config.timeframe],issues=M.backtestCoverageIssues(item.meta),state=item.status==='done'?(issues.hasIssues?'자료 부족·간격 확인':'확보 자료 계산 완료'):({pending:'대기',running:'검토 중',error:'조회·계산 실패',deferred:'거래소 조회 보류'})[item.status],range=cov?.first?stamp(cov.first)+' ~ '+stamp(cov.last)+' KST':'';return '<tr data-batch-row="'+item.index+'"><td><strong>'+escape(item.symbol)+'</strong><small>'+escape(M.exchanges[item.exchange])+'</small></td><td class="bt-batch-coverage '+(issues.hasIssues||['error','deferred'].includes(item.status)?'bt-error':'')+'">'+escape(state)+'<small>'+escape(item.error||range)+'</small>'+(item.meta?.fundingCoverage?.first?'<small>정산 '+escape(stamp(item.meta.fundingCoverage.first))+' ~ '+escape(stamp(item.meta.fundingCoverage.last))+'</small>':'')+(item.meta?.archive?.files?'<small>공식 과거 '+fmt(item.meta.archive.files,0)+'파일 · API '+fmt(item.meta.archive.restPages,0)+'페이지'+(item.meta.archive.cachedFiles?' · 파일 '+fmt(item.meta.archive.cachedFiles,0)+'개 재사용':'')+'</small>':'')+'</td>'+(s?[s.totalTrades,fmt(s.winRatePct)+'%',s.profitFactorInfinite?'∞':fmt(s.profitFactor),fmt(s.riskRewardRatio),'<span class="'+(s.netPnl>=0?'bt-positive':'bt-negative')+'">'+fmt(s.netPnl)+'</span>',fmt(s.finalCapital),fmt(s.maxDrawdownPct)+'%'].map(v=>'<td>'+v+'</td>').join(''):'<td colspan="7">—</td>')+'<td>'+(item.status==='done'?'<button type="button" data-batch-detail="'+item.index+'" '+(locked?'disabled':'')+'>거래 보기</button>':'')+'</td></tr>';}).join('')+'</tbody></table></div>';$('btBatchPage').textContent=(page+1)+' / '+pages+'페이지';$('btBatchPrevious').disabled=!page;$('btBatchNext').disabled=page>=pages-1;
+   list.innerHTML='<div class="bt-table-scroll"><table class="bt-table"><thead><tr>'+th.map(t=>'<th>'+t+'</th>').join('')+'</tr></thead><tbody>'+items.slice(page*100,page*100+100).map(item=>{const s=item.summary,targetTf=job.config.timeframe==='all'?(s?.bestTimeframe||'1h'):job.config.timeframe,cov=item.meta?.coverage?.[targetTf]||Object.values(item.meta?.coverage||{})[0],issues=M.backtestCoverageIssues(item.meta),bestBadge=s?.bestTimeframe?(' [최고: '+(M.labels[s.bestTimeframe]||s.bestTimeframe)+']'):'',state=item.status==='done'?(issues.hasIssues?'자료 부족·간격 확인':'계산 완료'+bestBadge):({pending:'대기',running:'검토 중',error:'조회·계산 실패',deferred:'거래소 조회 보류'})[item.status],range=cov?.first?stamp(cov.first)+' ~ '+stamp(cov.last)+' KST':'';return '<tr data-batch-row="'+item.index+'"><td><strong>'+escape(item.symbol)+'</strong><small>'+escape(M.exchanges[item.exchange])+'</small></td><td class="bt-batch-coverage '+(issues.hasIssues||['error','deferred'].includes(item.status)?'bt-error':'')+'">'+escape(state)+'<small>'+escape(item.error||range)+'</small>'+(item.meta?.fundingCoverage?.first?'<small>정산 '+escape(stamp(item.meta.fundingCoverage.first))+' ~ '+escape(stamp(item.meta.fundingCoverage.last))+'</small>':'')+(item.meta?.archive?.files?'<small>공식 과거 '+fmt(item.meta.archive.files,0)+'파일 · API '+fmt(item.meta.archive.restPages,0)+'페이지'+(item.meta.archive.cachedFiles?' · 파일 '+fmt(item.meta.archive.cachedFiles,0)+'개 재사용':'')+'</small>':'')+'</td>'+(s?[s.totalTrades,fmt(s.winRatePct)+'%',s.profitFactorInfinite?'∞':fmt(s.profitFactor),fmt(s.riskRewardRatio),'<span class="'+(s.netPnl>=0?'bt-positive':'bt-negative')+'">'+fmt(s.netPnl)+'</span>',fmt(s.finalCapital),fmt(s.maxDrawdownPct)+'%'].map(v=>'<td>'+v+'</td>').join(''):'<td colspan="7">—</td>')+'<td>'+(item.status==='done'?'<button type="button" data-batch-detail="'+item.index+'" '+(locked?'disabled':'')+'>거래 보기</button>':'')+'</td></tr>';}).join('')+'</tbody></table></div>';$('btBatchPage').textContent=(page+1)+' / '+pages+'페이지';$('btBatchPrevious').disabled=!page;$('btBatchNext').disabled=page>=pages-1;
   }
   async function perform(start){if(locked||isBusy()||!ready)return;if(!start&&job?.retryAt>Date.now()){status('API 대기 중 · '+Math.ceil((job.retryAt-Date.now())/1000)+'초 후 이어서 실행하세요.',true);return;}let c,markets,allHistory;if(start){try{c=config();markets=F.store.snapshot().markets;}catch(error){status(error.message,true);return;}if(!markets.length)return;allHistory=$('btBatchPeriod').value==='all';let p;try{p=plan(c,allHistory);}catch(error){status(error.message,true);return;}const estimate=p.estimates[0],accepted=await root.CoinFavoritesUI.confirm({host,title:'즐겨찾기 일괄 백테스트',message:markets.length+'개 거래소·코인을 '+M.labels[c.timeframe]+' 설정으로 테스트하시겠습니까?',details:(allHistory?'전체 과거 · ':'설정 기간 · ')+stamp(p.startTime)+' ~ '+stamp(p.endTime)+' KST · 기준 '+fmt(estimate.frames[c.timeframe].count,0)+'봉/코인'+(c.splitTrigger==='rsi_cross_up_1m'&&c.timeframe!=='1m'?' + 보조 1분봉 '+fmt(estimate.frames['1m'].totalCount,0)+'봉/코인':'')+' · 각 코인에 '+fmt(c.initialCapital)+' USDT를 별도로 적용합니다. 완료된 결과는 저장되며 언제든 중지할 수 있습니다.',action:'테스트 시작'});if(!accepted||locked||isBusy())return;}
    setLocked(true);try{if(start){page=0;await runner.start(markets,c,{allHistory});}else await runner.resume({retryErrors:true});}catch(error){status(error.message,true);}finally{setLocked(false);renderRows();void cacheInfo();}
@@ -58,6 +58,108 @@
   $('btBatchResults').onclick=async event=>{const button=event.target.closest('button[data-batch-detail]');if(!button||locked||isBusy()||!job)return;const item=job.items[Number(button.dataset.batchDetail)];if(item?.status!=='done')return;setLocked(true);detailAbort=new AbortController();try{const output=await execute(item,job.config,detailAbort.signal,p=>progress(item,p),true);if(output.meta.market.symbol!==item.symbol||output.meta.market.ex!==item.exchange||output.meta.market.int!==job.config.timeframe)throw Error('거래 결과의 코인·주기가 일치하지 않습니다.');onResult(output);status(item.symbol+' 거래 내역을 열었습니다. 일괄 결과는 그대로 유지됩니다.');}catch(error){if(error.name!=='AbortError')status(error.message,true);else status('거래 상세 불러오기를 중지했습니다.');}finally{detailAbort=null;setLocked(false);renderRows();}};
   $('btBatchCsv').onclick=()=>{if(!job)return;const fields=['exchange','symbol','timeframe','status','initialCapital','finalCapital','netPnl','totalReturnPct','totalTrades','winRatePct','profitFactor','profitFactorInfinite','riskRewardRatio','maxDrawdownPct','totalFees','totalFundingEarned','candleFirst','candleLast','fundingFirst','fundingLast','incomplete','error'],values=job.items.map(i=>{const c=i.meta?.coverage[job.config.timeframe],f=i.meta?.fundingCoverage;return {...i,...i.summary,timeframe:job.config.timeframe,candleFirst:c?.first?stamp(c.first):'',candleLast:c?.last?stamp(c.last):'',fundingFirst:f?.first?stamp(f.first):'',fundingLast:f?.last?stamp(f.last):'',incomplete:i.meta?M.backtestCoverageIssues(i.meta).hasIssues:'',initialCapital:job.config.initialCapital};}),quote=v=>'"'+String(typeof v==='string'&&/^[=+\-@]/.test(v)?"'"+v:v??'').replace(/"/g,'""')+'"',csv='\uFEFF'+[fields,...values.map(i=>fields.map(k=>i[k]))].map(r=>r.map(quote).join(',')).join('\r\n'),url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})),a=doc.createElement('a');a.href=url;a.download=job.id+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
   $('btBatchCacheClear').onclick=async()=>{if(locked)return;if(await root.CoinFavoritesUI.confirm({host,title:'시장자료 캐시 비우기',message:'저장한 캔들·정산 페이지를 비우시겠습니까?',details:'즐겨찾기와 완료된 일괄 결과 요약은 유지합니다. 다음 실행에서는 시장자료를 다시 조회합니다.',action:'비우기',danger:true})){await(await storePromise).clearPages();void cacheInfo();}};
+  const exportBtn=$('btBatchExport'),importBtn=$('btBatchImport'),importFile=$('btBatchImportFile');
+  if(exportBtn){
+   exportBtn.onclick=async()=>{
+    if(locked)return;
+    try{
+     exportBtn.disabled=true;
+     const store=await storePromise;
+     const info=await store.info();
+     const sizeMB=info.bytes/1048576;
+     
+     status('데이터 백업 준비 중... ('+fmt(sizeMB,1)+'MB)');
+     
+     // 메모리 부족 방지: 데이터를 작은 청크로 나눠서 처리
+     const backup=await store.exportAll();
+     
+     if(!backup.pages.length&&!backup.jobs.length){
+       status('저장된 백테스트 자료가 없습니다. 먼저 테스트를 실행하세요.',true);
+       return;
+     }
+     
+     status('파일 생성 중... ('+backup.pages.length+'개 항목, '+fmt(sizeMB,1)+'MB)');
+     await new Promise(resolve=>setTimeout(resolve,100));
+     
+     // 메모리 문제 해결: 청크 단위로 JSON 문자열 생성
+     const chunkSize=100;
+     let jsonParts=['{"version":1,"app":"funding-chart-batch-v1","exportedAt":'+backup.exportedAt+',"pages":['];
+     
+     for(let i=0;i<backup.pages.length;i++){
+       if(i>0)jsonParts.push(',');
+       jsonParts.push(JSON.stringify(backup.pages[i]));
+       
+       // 100개마다 한 번씩 브라우저에 숨 쉴 시간 주기
+       if(i>0&&i%chunkSize===0){
+         status('파일 생성 중... ('+i+' / '+backup.pages.length+' 처리됨)');
+         await new Promise(resolve=>setTimeout(resolve,10));
+       }
+     }
+     
+     jsonParts.push('],"jobs":'+JSON.stringify(backup.jobs)+'}');
+     
+     status('저장 위치 선택 중...');
+     await new Promise(resolve=>setTimeout(resolve,100));
+     
+     const blob=new Blob(jsonParts,{type:'application/octet-stream'});
+     const dateStr=new Date().toISOString().slice(0,10);
+     const filename='funding-chart-backup-'+dateStr+'.dat';
+     
+     // File System Access API 지원 확인
+     if('showSaveFilePicker'in root){
+       try{
+         const handle=await root.showSaveFilePicker({
+           suggestedName:filename,
+           types:[{
+             description:'백테스팅 백업 파일',
+             accept:{'application/octet-stream':['.dat']}
+           }]
+         });
+         const writable=await handle.createWritable();
+         await writable.write(blob);
+         await writable.close();
+         const fileSizeMB=(blob.size/1048576).toFixed(1);
+         status('백업 완료! ('+backup.pages.length+'개 시장자료, '+fileSizeMB+'MB 저장됨) 선택한 위치에 저장되었습니다.');
+       }catch(err){
+         if(err.name==='AbortError'){
+           status('백업이 취소되었습니다.',true);
+         }else{
+           throw err;
+         }
+       }
+     }else{
+       // 구형 브라우저: 기존 방식 (다운로드 폴더)
+       const url=URL.createObjectURL(blob);
+       const a=doc.createElement('a');
+       a.href=url;
+       a.download=filename;
+       doc.body.appendChild(a);
+       a.click();
+       doc.body.removeChild(a);
+       setTimeout(()=>URL.revokeObjectURL(url),1000);
+       const fileSizeMB=(blob.size/1048576).toFixed(1);
+       status('백업 완료! ('+backup.pages.length+'개 시장자료, '+fileSizeMB+'MB 저장됨) 브라우저 설정에서 저장 위치를 변경하려면 edge://settings/downloads 참고');
+     }
+    }catch(err){
+      status('백업 파일 생성 실패: '+err.message,true);
+      console.error('백업 실패:', err);
+    }
+    finally{exportBtn.disabled=false;}
+   };
+  }
+  if(importBtn&&importFile){
+   importBtn.onclick=()=>{if(locked)return;importFile.value='';importFile.click();};
+   importFile.onchange=async()=>{
+    const file=importFile.files?.[0];if(!file)return;
+    try{
+     importBtn.disabled=true;status('백업 파일 복원 중...');
+     const text=await file.text(),payload=JSON.parse(text),store=await storePromise,result=await store.importAll(payload);
+     await runner.restore();void cacheInfo();
+     status('데이터 복원 완료! ('+result.importedPages+'개 시장자료 복원됨) 이제 1분봉부터 월봉까지 1초 만에 즉시 실행됩니다.');
+    }catch(err){status('복원 실패: '+err.message,true);}
+    finally{importBtn.disabled=false;importFile.value='';}
+   };
+  }
   F.store.subscribe(()=>{controls();if(!job)renderRows();});void(async()=>{const store=await storePromise;runner=root.BacktestBatch.create({store,execute,onUpdate:refresh,onProgress:({item,progress:p})=>progress(item,p)});await runner.restore();ready=true;controls();renderRows();void cacheInfo();})();
   const request=()=>{onOpen();};root.addEventListener('favorite-backtest-request',request);root.addEventListener('pagehide',()=>{runner?.pause();detailAbort?.abort();worker?.terminate();root.removeEventListener('favorite-backtest-request',request);},{once:true});
   return {render(){if(panel.parentElement!==report)report.replaceChildren(panel);controls();},cancel(){runner?.pause();detailAbort?.abort();},refresh:controls};

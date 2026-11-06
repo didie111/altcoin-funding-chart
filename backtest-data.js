@@ -23,7 +23,8 @@
   const candles=adapter.candlePage||candlePage,funding=adapter.fundingPage||fundingPage;
   async function loadBacktestDataset(symbol,options={}){
    const ex=options.exchange||'BINANCE',end=Math.min(options.endTime??Date.now()/1000,Date.now()/1000),start=options.startTime??end-7*86400,intervals=[...new Set([...(options.intervals||['5m']),...(options.requireMinuteData?['1m']:[])])],signal=options.signal||new AbortController().signal,onProgress=options.onProgress||(()=>{}),packed=options.packed===true,maxBars=options.maxBars??(packed?B.recommendedMaxBars():500000);
-   if(options.requireMinuteData){intervals.splice(intervals.indexOf('1m'),1);intervals.unshift('1m');}
+   const fastResample = Boolean(options.resampleFrom1m || options.fastResample || options.timeframe === 'all');
+   if(options.requireMinuteData || fastResample){if(!intervals.includes('1m'))intervals.unshift('1m'); else if(intervals.indexOf('1m')>0){intervals.splice(intervals.indexOf('1m'),1);intervals.unshift('1m');}}
    if(!Number.isFinite(start)||!Number.isFinite(end)||start>=end||start<0)throw Error('테스트 기간을 확인하세요.');symbol=String(symbol).trim().toUpperCase().replace(/[-_]/g,'').replace(/USDT$/,'')+'USDT';if(!/^[A-Z0-9]{1,28}USDT$/.test(symbol))throw Error('코인 심볼을 확인하세요.');
    for(const tf of intervals)T.plan(ex,tf);signal.throwIfAborted();const expected=estimate({...options,exchange:ex,intervals,startTime:start,endTime:end});
    const timeframeCandles={},coverage={},allFunding=new Map(),fundingStart=Math.max(0,start-Math.max(48*3600,Math.min(864000,Number(options.fundingWindowSeconds)||0))),fundingEnd=Math.min(Date.now()/1000,end+(options.fundingIntervalBasis==='chart'?48*3600:0));let totalCount=0,pages=0,cursor=ex==='BINANCE'?fundingStart*1000:Math.floor(fundingEnd*1000)-1,page=1;
@@ -38,6 +39,23 @@
    if(!allFunding.size)throw Error('선택 기간의 공식 정산 기록이 없어 진입 조건을 검증할 수 없습니다.');
    const gaps=[];let gapsCount=0,archiveFiles=0;
    for(const tf of intervals){try{
+    if(fastResample && tf !== '1m' && timeframeCandles['1m']){
+     const minuteRows = packed ? B.toArray(timeframeCandles['1m']) : timeframeCandles['1m'];
+     const warmupStart = Math.max(0, T.shift(T.start(start, tf), tf, -Math.max(80, (options.rsiPeriod || 14) * 3)));
+     const resampled = T.resample(minuteRows, tf, '1m').filter(b => b.time >= warmupStart && T.end(b.time, tf) <= end);
+     if(resampled.length){
+      const inside = resampled.filter(b => b.time >= start);
+      if(inside.length){
+       const firstInside = inside[0].time, lastInside = inside.at(-1).time;
+       const values = packed ? B.pack(resampled) : resampled;
+       timeframeCandles[tf] = values;
+       totalCount += resampled.length;
+       coverage[tf] = {first: firstInside, last: lastInside, count: inside.length, endMissing: T.end(lastInside, tf) < T.start(end, tf), warmup: resampled.length - inside.length, startMissing: firstInside > T.end(T.start(start, tf), tf)};
+       onProgress({phase: 'candles', timeframe: tf, pages: 0, count: resampled.length, exchange: ex, expectedCount: resampled.length, expectedPages: 0, archiveFiles: 0, restPages: 0, startTime: start, endTime: end, first: resampled[0].time, last: resampled.at(-1).time, synthesized: true});
+       continue;
+      }
+     }
+    }
     const warmupStart=Math.max(0,T.shift(T.start(start,tf),tf,-Math.max(80,(options.rsiPeriod||14)*3))),map=packed?null:new Map(),compact=packed?B.builder():null,localGaps=[];let localGapCount=0,edge=Math.floor(end*1000)-1,tfPages=0,firstInside=null,lastInside=null,insideCount=0,newer=null,oldestRetained=null,newestRetained=null,tfArchives=0,tfRest=0;
     for(;;){
      signal.throwIfAborted();const reply=await candles(ex,symbol,tf,edge,signal,false),archiveMeta=reply.archiveMeta,pageRows=T.sorted(reply),rows=pageRows.filter(b=>b.time*1000<=edge);signal.throwIfAborted();tfPages++;if(archiveMeta){tfArchives++;archiveFiles++;}else tfRest++;if(!rows.length&&pageRows.length)throw Error(tf+' 캔들 API의 과거 커서가 진행되지 않습니다.');

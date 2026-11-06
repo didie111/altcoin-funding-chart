@@ -63,6 +63,44 @@ const TimeframeEngine = (() => {
     }
     flush(); return result;
   }
+  function resample(rows, targetInterval, sourceInterval = '1m') {
+    if (!rows || !rows.length) return [];
+    if (targetInterval === sourceInterval) return sorted(rows);
+    if (!seconds[targetInterval]) throw Error('지원하지 않는 타임프레임입니다: ' + targetInterval);
+    const bars = sorted(rows);
+    const result = [];
+    let currentBucket = null;
+    let bOpen = 0, bHigh = -Infinity, bLow = Infinity, bClose = 0, bVolume = 0;
+    for (let i = 0; i < bars.length; i++) {
+      const bar = bars[i];
+      const bucket = start(bar.time, targetInterval);
+      if (currentBucket === null) {
+        currentBucket = bucket;
+        bOpen = bar.open;
+        bHigh = bar.high;
+        bLow = bar.low;
+        bClose = bar.close;
+        bVolume = bar.volume;
+      } else if (bucket === currentBucket) {
+        if (bar.high > bHigh) bHigh = bar.high;
+        if (bar.low < bLow) bLow = bar.low;
+        bClose = bar.close;
+        bVolume += bar.volume;
+      } else {
+        result.push({time: currentBucket, open: bOpen, high: bHigh, low: bLow, close: bClose, volume: bVolume});
+        currentBucket = bucket;
+        bOpen = bar.open;
+        bHigh = bar.high;
+        bLow = bar.low;
+        bClose = bar.close;
+        bVolume = bar.volume;
+      }
+    }
+    if (currentBucket !== null) {
+      result.push({time: currentBucket, open: bOpen, high: bHigh, low: bLow, close: bClose, volume: bVolume});
+    }
+    return result;
+  }
   function indexAt(bars, time, interval) {
     let low=0, high=bars.length;
     while (low<high) {const mid=Math.floor((low+high)/2); if (bars[mid].time<=time) low=mid+1; else high=mid;}
@@ -96,6 +134,7 @@ const TimeframeEngine = (() => {
     signal.throwIfAborted();
     return indexAt(bars,target,interval)<0 ? [] : bars;
   }
-  return {seconds, plan, sorted, aggregate, indexAt, kstFields, parseKst, dateWindow,start,end,shift,requestEnd,closedRange};
+  return {seconds, plan, sorted, aggregate, resample, indexAt, kstFields, parseKst, dateWindow,start,end,shift,requestEnd,closedRange};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports=TimeframeEngine;
+else if (typeof globalThis !== 'undefined') globalThis.TimeframeEngine=TimeframeEngine;
