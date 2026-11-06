@@ -83,3 +83,11 @@ test('HTTP file reader bounds response sizes and preserves status for safe fallb
  await assert.rejects(A.fetchAsset(spec().url,'zip',signal(),async()=>new Response('x',{headers:{'content-length':String(A.maxZip+1)}})),/크기/);
  const result=await A.fetchAsset(spec().url,'zip',signal(),async()=>new Response(new Uint8Array([1,2,3])));assert.deepEqual([...new Uint8Array(result)],[1,2,3]);
 });
+test('frequent reads do not postpone checksum revalidation or hide a corrected official file',async()=>{
+ let clock=now();const s=spec(),f=assets([s]),store=C.memory(),make=()=>A.create({store,now:()=>clock,loadAsset:f.load,candlePage:rest(jan,feb,'3m'),lower:()=>jan});
+ await make().candlePage('BINANCE','IOSTUSDT','3m',feb*1000-1,signal());clock+=12*3600000;await make().candlePage('BINANCE','IOSTUSDT','3m',feb*1000-1,signal());assert.equal(f.calls.length,2);
+ clock+=12*3600000+1;await make().candlePage('BINANCE','IOSTUSDT','3m',feb*1000-1,signal());assert.equal(f.calls.length,3);assert.equal(f.calls.at(-1).kind,'checksum');
+});
+test('partial listing-month files require a verified listing date and cannot turn a missing prefix into a listing',()=>{
+ const s=spec(),partial=bars(jan+86400,feb);assert.throws(()=>A.parseCsv(Buffer.from(csv(partial)),s),/비어/);assert.deepEqual(A.parseCsv(Buffer.from(csv(partial)),{...s,listedAt:jan+86400}),partial);
+});

@@ -63,6 +63,21 @@ const TimeframeEngine = (() => {
     }
     flush(); return result;
   }
+  function resample(rows,targetInterval,sourceInterval='1m',getRow){
+    if(!seconds[targetInterval]||!seconds[sourceInterval]||seconds[targetInterval]<seconds[sourceInterval])throw Error('합성 봉 주기를 확인하세요.');
+    if(!rows?.length)return [];
+    const bars=getRow?rows:sorted(rows),read=i=>getRow?getRow(bars,i,scratch):bars[i],scratch={},out=[];
+    if(targetInterval===sourceInterval)return Array.from({length:bars.length},(_,i)=>({...read(i)}));
+    let bucket=null,open,high,low,close,volume,count=0,previous=null,valid=true;
+    const flush=()=>{if(bucket!==null&&valid&&count===(end(bucket,targetInterval)-bucket)/seconds[sourceInterval]&&end(previous,sourceInterval)===end(bucket,targetInterval))out.push({time:bucket,open,high,low,close,volume});};
+    for(let i=0;i<bars.length;i++){
+      const r=read(i),next=start(r.time,targetInterval);
+      if(next!==bucket){flush();bucket=next;open=r.open;high=r.high;low=r.low;close=r.close;volume=0;count=0;previous=null;valid=r.time===bucket;}
+      if(start(r.time,sourceInterval)!==r.time||previous!==null&&end(previous,sourceInterval)!==r.time)valid=false;
+      high=Math.max(high,r.high);low=Math.min(low,r.low);close=r.close;volume+=r.volume;count++;previous=r.time;
+    }
+    flush();return out;
+  }
   function indexAt(bars, time, interval) {
     let low=0, high=bars.length;
     while (low<high) {const mid=Math.floor((low+high)/2); if (bars[mid].time<=time) low=mid+1; else high=mid;}
@@ -96,6 +111,7 @@ const TimeframeEngine = (() => {
     signal.throwIfAborted();
     return indexAt(bars,target,interval)<0 ? [] : bars;
   }
-  return {seconds, plan, sorted, aggregate, indexAt, kstFields, parseKst, dateWindow,start,end,shift,requestEnd,closedRange};
+  return {seconds, plan, sorted, aggregate, resample, indexAt, kstFields, parseKst, dateWindow,start,end,shift,requestEnd,closedRange};
 })();
 if (typeof module !== 'undefined' && module.exports) module.exports=TimeframeEngine;
+else if (typeof globalThis !== 'undefined') globalThis.TimeframeEngine=TimeframeEngine;

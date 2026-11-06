@@ -27,6 +27,18 @@
   const reverse=rows.length-1-index,block=rows.blocks[Math.floor(reverse/blockSize)],offset=(reverse%blockSize)*stride,r=out||{};if(!block||block.length<offset+stride)return undefined;
   r.time=block[offset];r.open=block[offset+1];r.high=block[offset+2];r.low=block[offset+3];r.close=block[offset+4];r.volume=block[offset+5];return r;
  }
+ function toArray(rows){
+  if(!isPacked(rows))return Array.isArray(rows)?rows:[];
+  const arr=new Array(rows.length),temp={};
+  for(let i=0;i<rows.length;i++){const r=get(rows,i,temp);arr[i]={time:r.time,open:r.open,high:r.high,low:r.low,close:r.close,volume:r.volume};}
+  return arr;
+ }
+ function pack(bars){
+  if(isPacked(bars))return bars;
+  const b=builder();
+  for(let i=bars.length-1;i>=0;i--)b.push(bars[i]);
+  return b.finish();
+ }
  function transferables(dataset){
   const buffers=[],seen=new Set();for(const rows of Object.values(dataset?.timeframeCandles||{}))if(isPacked(rows))for(const block of rows.blocks){const buffer=block?.buffer;if(buffer&&!seen.has(buffer)){seen.add(buffer);buffers.push(buffer);}}
   return buffers;
@@ -37,5 +49,5 @@
   const memory=Number(deviceMemory),mib=Number.isFinite(memory)&&memory>0?Math.max(256,Math.min(768,memory*128)):768;
   return Math.min(16000000,Math.floor(mib*1048576/(stride*8)));
  }
- return {builder,isPacked,time,get,transferables,recommendedMaxBars};
+ return {builder,isPacked,time,get,toArray,pack,transferables,recommendedMaxBars};
 });

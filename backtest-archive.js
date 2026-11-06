@@ -15,11 +15,11 @@
  function crc32(data){let crc=0xffffffff;for(const b of bytes(data))crc=crcTable[(crc^b)&255]^(crc>>>8);return (crc^0xffffffff)>>>0;}
  function specification(symbol,tf,edge,lower,now=Date.now()){
   if(!/^[A-Z0-9]{1,28}USDT$/.test(symbol)||!T.seconds[tf]||T.seconds[tf]>3600||!Number.isFinite(edge)||!Number.isFinite(lower))return null;
-  const time=Math.min(edge/1000,now/1000),month=T.start(time,'1M'),currentMonth=T.start(now/1000,'1M');let from=month,to=T.end(month,'1M'),kind='monthly';
+  const time=Math.min(edge/1000,now/1000),month=T.start(time,'1M'),currentMonth=T.start(now/1000,'1M');let from=month,to=T.end(month,'1M'),kind='monthly';if(from<1567296000)return null;
   if(to>currentMonth){if(tf!=='1m')return null;from=T.start(time,'1d');to=T.end(from,'1d');if(to>T.start(now/1000,'1d'))return null;kind='daily';}
   const first=Math.max(from,lower),last=Math.min(to,T.end(T.start(time,tf),tf));if(first>=last)return null;const count=T.closedRange(first,last,tf).count;if(count<500)return null;
   const date=new Date(from*1000).toISOString().slice(0,kind==='monthly'?7:10),filename=symbol+'-'+tf+'-'+date+'.zip',url=host+'/data/futures/um/'+kind+'/klines/'+symbol+'/'+tf+'/'+filename;
-  return {symbol,timeframe:tf,from,to,kind,date,filename,url,csv:filename.replace(/\.zip$/,'.csv')};
+  return {symbol,timeframe:tf,from,to,first,kind,date,filename,url,csv:filename.replace(/\.zip$/,'.csv')};
  }
  function allowedUrl(value,symbol,tf){try{const u=new URL(value),parts=u.pathname.split('/'),file=parts.at(-1),pattern=new RegExp('^'+symbol+'-'+tf+'-\\d{4}-\\d{2}'+(parts[4]==='daily'?'-\\d{2}':'')+'\\.zip(?:\\.CHECKSUM)?$');return u.origin===host&&!u.search&&!u.hash&&!u.username&&!u.password&&parts.length===9&&parts.slice(1,4).join('/')==='data/futures/um'&&['monthly','daily'].includes(parts[4])&&parts[5]==='klines'&&parts[6]===symbol&&parts[7]===tf&&pattern.test(file);}catch{return false;}}
  async function fetchAsset(url,kind,signal=new AbortController().signal,fetcher=globalThis.fetch){
@@ -39,24 +39,52 @@
  }
  function parseCsv(body,spec,signal=new AbortController().signal){
   const rows=[],lines=decoder.decode(body).replace(/^\uFEFF/,'').split('\n');let previous=null;for(let i=0;i<lines.length;i++){if(i%2048===0)signal.throwIfAborted();const line=lines[i].trim();if(!line)continue;const parts=line.split(',');if(!rows.length&&/^open[_ ]?time$/i.test(parts[0]))continue;if(parts.length<6||parts.slice(0,6).some(s=>!s.trim()||!Number.isFinite(Number(s))))throw Error('공식 CSV 캔들 값이 올바르지 않습니다.');const ms=Number(parts[0]),time=ms/1000,[open,high,low,close,volume]=parts.slice(1,6).map(Number);if(!Number.isSafeInteger(ms)||ms<1e11||ms>=1e14||!Number.isInteger(time)||time<spec.from||time>=spec.to||T.start(time,spec.timeframe)!==time||previous!==null&&T.end(previous,spec.timeframe)!==time||Math.min(open,high,low,close)<=0||volume<0||high<Math.max(open,close,low)||low>Math.min(open,close,high))throw Error('공식 CSV 범위·봉 간격·가격 검증에 실패했습니다.');rows.push({time,open,high,low,close,volume});previous=time;}
-  const expected=T.closedRange(spec.from,spec.to,spec.timeframe);if(rows.length!==expected.count||rows[0]?.time!==expected.first||rows.at(-1)?.time!==expected.last)throw Error('공식 CSV에 비어 있는 캔들 구간이 있어 API로 확인합니다.');return rows;
+  const expected=T.closedRange(spec.from,spec.to,spec.timeframe),first=rows[0]?.time;
+  const full=first===expected.first&&rows.length===expected.count;
+  const listed=Number.isFinite(spec.listedAt)&&first===spec.listedAt&&first>spec.from&&rows.length===T.closedRange(first,spec.to,spec.timeframe).count;
+  if((!full&&!listed)||rows.at(-1)?.time!==expected.last)throw Error('공식 CSV에 비어 있는 캔들 구간이 있어 API로 확인합니다.');
+  return rows;
  }
- function create({candlePage,store,loadAsset=fetchAsset,lower=()=>0,now=Date.now,onProgress=()=>{},onCache=()=>{}}){
+ function packRows(rows){const f64=new Float64Array(rows.length*6);for(let i=0;i<rows.length;i++){const r=rows[i],o=i*6;f64[o]=r.time;f64[o+1]=r.open;f64[o+2]=r.high;f64[o+3]=r.low;f64[o+4]=r.close;f64[o+5]=r.volume;}return f64;}
+ function unpackRows(value){const vals=ArrayBuffer.isView(value)?value:value?.values;if(!(vals instanceof Float64Array)||vals.length%6)throw Error('저장된 캔들 형식이 올바르지 않습니다.');const rows=new Array(vals.length/6);for(let i=0;i<rows.length;i++){const o=i*6;rows[i]={time:vals[o],open:vals[o+1],high:vals[o+2],low:vals[o+3],close:vals[o+4],volume:vals[o+5]};if(Object.values(rows[i]).some(n=>!Number.isFinite(n)))throw Error('저장된 캔들 값이 올바르지 않습니다.');}return rows;}
+ function create({candlePage,store,loadAsset=fetchAsset,lower=()=>0,resolveListing=null,now=Date.now,onProgress=()=>{},onCache=()=>{},prefetchCount=0}){
   const failed=new Set(),stats={files:0,cachedFiles:0,downloadBytes:0,restPages:0,fallbacks:0,reasons:[]};let disabled=false,lastDecoded=null;
+  const listingMap=new Map();
   try{new DecompressionStream('deflate-raw');}catch{disabled=true;}
   async function read(spec,signal){
-   if(lastDecoded?.url===spec.url)return {rows:lastDecoded.rows,cached:true};const key=JSON.stringify(['binance-official-zip-v1',spec.url]);let saved=await store.get(key,now()),cached=Boolean(saved),zip,checksum;
-   if(saved?.zip&&/^[a-f0-9]{64}$/.test(saved.checksum)){zip=bytes(saved.zip);checksum=saved.checksum;if(now()-saved.checkedAt>=86400000){const text=await loadAsset(spec.url+'.CHECKSUM','checksum',signal),m=text.trim().match(/^([a-f0-9]{64})\s+(.+)$/i);if(!m||m[2]!==spec.filename)throw Error('공식 체크섬 계약이 일치하지 않습니다.');if(m[1].toLowerCase()!==checksum){zip=null;cached=false;}else saved.checkedAt=now();}}
-   else zip=null;
-   if(!zip){const [buffer,text]=await Promise.all([loadAsset(spec.url,'zip',signal),loadAsset(spec.url+'.CHECKSUM','checksum',signal)]),m=text.trim().match(/^([a-f0-9]{64})\s+(.+)$/i);if(!m||m[2]!==spec.filename)throw Error('공식 체크섬 계약이 일치하지 않습니다.');checksum=m[1].toLowerCase();zip=bytes(buffer);stats.downloadBytes+=zip.byteLength;}
-   signal.throwIfAborted();if(await sha256(zip)!==checksum)throw Error('공식 파일 SHA-256 검증에 실패했습니다.');const rows=parseCsv(await unpack(zip,spec,{signal}),spec,signal);await store.put(key,{zip,checksum,checkedAt:now()},{expires:now()+30*86400000,bytes:zip.byteLength+key.length*2+256});if(cached){stats.cachedFiles++;onCache();}lastDecoded={url:spec.url,rows};return {rows,cached};
+   if(lastDecoded?.url===spec.url&&now()-lastDecoded.checkedAt<86400000){stats.cachedFiles++;onCache();return {rows:lastDecoded.rows,cached:true};}
+   const key=JSON.stringify(['binance-official-zip-v1',spec.url]),saved=await store.get(key,now()),checked=text=>{const m=text.trim().match(/^([a-f0-9]{64})\s+(.+)$/i);if(!m||m[2]!==spec.filename)throw Error('공식 체크섬 계약이 일치하지 않습니다.');return m[1].toLowerCase();};
+   let cached=Boolean(saved?.zip&&/^[a-f0-9]{64}$/.test(saved.checksum)),zip=cached?bytes(saved.zip):null,checksum=cached?saved.checksum:null,checkedAt=Number.isFinite(saved?.checkedAt)?saved.checkedAt:0,freshChecksum=null;
+   if(zip&&now()-checkedAt>=86400000){freshChecksum=checked(await loadAsset(spec.url+'.CHECKSUM','checksum',signal));checkedAt=now();if(freshChecksum!==checksum){zip=null;cached=false;checksum=freshChecksum;}}
+   if(!zip){if(freshChecksum)zip=bytes(await loadAsset(spec.url,'zip',signal));else{const [buffer,text]=await Promise.all([loadAsset(spec.url,'zip',signal),loadAsset(spec.url+'.CHECKSUM','checksum',signal)]);checksum=checked(text);zip=bytes(buffer);}checkedAt=now();stats.downloadBytes+=zip.byteLength;}
+   signal.throwIfAborted();let rows;try{if(await sha256(zip)!==checksum)throw Error('공식 파일 SHA-256 검증에 실패했습니다.');rows=parseCsv(await unpack(zip,spec,{signal}),spec,signal);}catch(error){if(saved&&store.deletePage)await store.deletePage(key);throw error;}
+   // Keep one decoded file, and account for every persisted byte. Cache reads do not renew checksum deadlines.
+   await store.put(key,{zip,checksum,checkedAt},{expires:now()+30*86400000,bytes:zip.byteLength+key.length*2+256});if(cached){stats.cachedFiles++;onCache();}lastDecoded={url:spec.url,rows,checkedAt};return {rows,cached};
   }
   return {info:()=>({...stats,reasons:stats.reasons.slice()}),async candlePage(ex,symbol,tf,edge,signal){
-   const spec=!disabled&&ex==='BINANCE'?specification(symbol,tf,edge,lower(tf),now()):null;
-   if(spec&&!failed.has(spec.url)){try{onProgress({phase:'archive',timeframe:tf,kind:spec.kind,from:spec.from,to:spec.to});const result=await read(spec,signal),rows=result.rows.filter(r=>r.time*1000<=edge);if(rows.length){stats.files++;Object.defineProperty(rows,'archiveMeta',{value:{kind:spec.kind,cached:result.cached,url:spec.url}});return rows;}}
+   signal.throwIfAborted();if(ex==='BINANCE'&&!listingMap.has(symbol)){
+    const savedListing=await store.get(JSON.stringify(['listing-time-v1',symbol]),now()).catch(()=>null);
+    if(Number.isFinite(savedListing)&&savedListing>0)listingMap.set(symbol,savedListing);
+    else if(typeof resolveListing==='function'){
+     try{
+      const detected=await resolveListing(symbol,signal);
+      if(Number.isFinite(detected)&&detected>0){
+       listingMap.set(symbol,detected);
+       store.put(JSON.stringify(['listing-time-v1',symbol]),detected,{expires:now()+365*86400000}).catch(()=>{});
+      }
+     }catch(error){signal.throwIfAborted();if(error.name==='RateLimitError')throw error;}
+    }
+   }
+   const knownListing=listingMap.get(symbol)||0;
+   if(knownListing>0&&edge<knownListing*1000)return [];
+   const lowerBound=Math.max(Number(lower(tf,symbol))||0,knownListing);
+   const spec=!disabled&&ex==='BINANCE'?specification(symbol,tf,edge,lowerBound,now()):null;
+   if(spec&&!failed.has(spec.url)){
+    spec.listedAt=knownListing||null;
+    try{onProgress({phase:'archive',timeframe:tf,kind:spec.kind,from:spec.from,to:spec.to});const result=await read(spec,signal),rows=result.rows.filter(r=>r.time*1000<=edge);if(rows.length){stats.files++;Object.defineProperty(rows,'archiveMeta',{value:{kind:spec.kind,cached:result.cached,url:spec.url},configurable:true,writable:true});return rows;}}
     catch(error){signal.throwIfAborted();failed.add(spec.url);stats.fallbacks++;if(stats.reasons.length<5)stats.reasons.push(error.message);if(error.name==='TypeError'||error.name==='TimeoutError'||error.name==='ArchiveUnavailableError'||[403,429].includes(error.status)||error.status>=500)disabled=true;onProgress({phase:'archive-fallback',timeframe:tf,message:error.message});}}
    stats.restPages++;return candlePage(ex,symbol,tf,edge,signal);
   }};
  }
- return {maxZip,maxRaw,sha256,crc32,specification,allowedUrl,fetchAsset,unpack,parseCsv,create};
+ return {maxZip,maxRaw,sha256,crc32,specification,allowedUrl,fetchAsset,unpack,parseCsv,packRows,unpackRows,create};
 });
