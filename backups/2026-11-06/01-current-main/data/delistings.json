@@ -1,0 +1,228 @@
+{
+  "collectedAt": 1792835931558,
+  "description": "Official announcement metadata verified on 2026-10-24. Dates are publication dates; effectiveAt is included only when explicitly confirmed in the original notice. This is a fallback snapshot, not a complete live archive.",
+  "items": [
+    {
+      "exchange": "BINANCE",
+      "dateOnly": false,
+      "title": "Binance Alpha Will Remove PTB, AA, OWL, DORA, ELIZAOS, MEMES, 哭哭马 (2026-10-23)",
+      "url": "https://www.binance.com/en/support/announcement/detail/ab3a0eac9e614819b7b6fa0c03504b1f",
+      "publishedAt": 1792747808273,
+      "checkedAt": 1792835931558,
+      "symbols": [],
+      "scope": "alpha",
+      "change": false
+    },
+    {
+      "exchange": "BINANCE",
+      "dateOnly": false,
+      "title": "Binance Futures Will Delist PTBUSDT and MITOUSDT USDⓈ-M Perpetual Contracts (2026-10-23)",
+      "url": "https://www.binance.com/en/support/announcement/detail/c30e6891afa54651ba950f8af144f861",
+      "publishedAt": 1792575001882,
+      "checkedAt": 1792835931558,
+      "symbols": [
+        "PTB",
+        "MITO"
+      ],
+      "scope": "futures",
+      "change": false
+    },
+    {
+      "exchange": "BINANCE",
+      "dateOnly": false,
+      "title": "Notice of Removal of Spot Trading Pairs - 2026-10-23",
+      "url": "https://www.binance.com/en/support/announcement/detail/ad54863d7b0446ebae48bbf3b868ee20",
+      "publishedAt": 1792485000000,
+      "checkedAt": 1792835931558,
+      "symbols": [],
+      "scope": "spot",
+      "change": false
+    },
+    {
+      "exchange": "BINANCE",
+      "dateOnly": false,
+      "title": "Binance Will Delist EPIC, QUICK on 2026-10-28",
+      "url": "https://www.binance.com/en/support/announcement/detail/290a660c0b2e4e888c582cd29ecf9ecc",
+      "publishedAt": 1791957608049,
+      "checkedAt": 1792835931558,
+      "symbols": [
+        "EPIC",
+        "QUICK"
+      ],
+      "scope": "spot",
+      "change": false
+    },
+    {
+      "exchange": "BITGET",
+      "dateOnly": true,
+      "title": "Notice of Delisting 3 Spot Trading Pairs on October 30, 2026",
+      "url": "https://www.bitget.com/support/articles/12560603898559",
+      "publishedAt": 1792713600000,
+      "checkedAt": 1792835931558,
+      "symbols": [
+        "ZENT",
+        "MOODENG",
+        "HEI"
+      ],
+      "scope": "spot",
+      "change": false,
+      "effectiveAt": 1793354400000
+    },
+    {
+      "exchange": "BITGET",
+      "dateOnly": true,
+      "title": "Notice of Delisting 8 Spot Trading Pairs on October 23, 2026",
+      "url": "https://www.bitget.com/support/articles/12560603897809",
+      "publishedAt": 1792108800000,
+      "checkedAt": 1792835931558,
+      "symbols": [
+        "DRIFT",
+        "RVV",
+        "DOG",
+        "SWEAT",
+        "ICX",
+        "PUMPBTC",
+        "GAIB",
+        "RTX"
+      ],
+      "scope": "spot",
+      "change": false
+    },
+    {
+      "exchange": "BITGET",
+      "dateOnly": true,
+      "title": "[Important] Bitget to delist EPICUSDT futures and related services",
+      "url": "https://www.bitget.com/support/articles/12560603897724",
+      "publishedAt": 1792022400000,
+      "checkedAt": 1792835931558,
+      "symbols": [
+        "EPIC"
+      ],
+      "scope": "futures",
+      "change": false
+    },
+    {
+      "exchange": "MEXC",
+      "dateOnly": false,
+      "title": "Delisting of ZCUSDT Perpetual Futures Pair [Oct 25, 2026, 13:00 (UTC)]",
+      "url": "https://www.mexc.com/announcements/article/delisting-of-zcusdt-perpetual-futures-pair-oct-25-2026-13-17827791539282",
+      "publishedAt": 1792673324000,
+      "checkedAt": 1792835931558,
+      "symbols": [
+        "ZC"
+      ],
+      "scope": "futures",
+      "change": false,
+      "effectiveAt": 1792933200000
+    },
+    {
+      "exchange": "MEXC",
+      "dateOnly": false,
+      "title": "Delisting of VELODROMEUSDT Perpetual Futures Pair [Oct 28, 2026, 07:00 (UTC)]",
+      "url": "https://www.mexc.com/announcements/article/delisting-of-velodromeusdt-perpetual-futures-pair-oct-28-2026-07-17827791539252",
+      "publishedAt": 1792579489000,
+      "checkedAt": 1792835931558,
+      "symbols": [
+        "VELODROME"
+      ],
+      "scope": "futures",
+      "change": false,
+      "effectiveAt": 1793170800000
+    },
+    {
+      "exchange": "BYBIT",
+      "title": "Delisting of VELODROMEUSDT Perpetual Contract",
+      "url": "https://announcements.bybit.com/en/article/delisting-of-velodromeusdt-perpetual-contract--artb784434995a7/",
+      "publishedAt": 1792540800000,
+      "dateOnly": true,
+      "symbols": [
+        "VELODROME"
+      ],
+      "scope": "futures",
+      "effectiveAt": 1793091600000,
+      "checkedAt": 1792835931558
+    },
+    {
+      "exchange": "BYBIT",
+      "title": "Bybit to Delist 1 Token(s) on Oct 28, 2026",
+      "url": "https://announcements.bybit.com/en/article/bybit-to-delist-1-token-s-on-oct-28-2026--art0d9083316016/",
+      "publishedAt": 1792540800000,
+      "dateOnly": true,
+      "symbols": [
+        "HFT"
+      ],
+      "scope": "spot",
+      "effectiveAt": 1793174400000,
+      "checkedAt": 1792835931558
+    },
+    {
+      "exchange": "BYBIT",
+      "title": "Delisting of PROMPTUSDT Perpetual Contract",
+      "url": "https://announcements.bybit.com/en/article/delisting-of-promptusdt-perpetual-contract--art5b9259bb85bc/",
+      "publishedAt": 1791936000000,
+      "dateOnly": true,
+      "symbols": [
+        "PROMPT"
+      ],
+      "scope": "futures",
+      "effectiveAt": 1792141200000,
+      "checkedAt": 1792835931558
+    },
+    {
+      "exchange": "BINGX",
+      "title": "BingX Delists BASECATUSDT and APMUSDT for Perpetual Futures",
+      "url": "https://bingx.com/en/support/articles/18065754906895",
+      "publishedAt": 1792454400000,
+      "dateOnly": true,
+      "symbols": [
+        "BASECAT",
+        "APM"
+      ],
+      "scope": "futures",
+      "effectiveAt": 1792810800000,
+      "checkedAt": 1792835931558
+    },
+    {
+      "exchange": "BINGX",
+      "title": "BingX Delists GLXYUSDT and HONAUSDT for Perpetual Futures",
+      "url": "https://bingx.com/en/support/articles/18066119832335",
+      "publishedAt": null,
+      "symbols": [
+        "GLXY",
+        "HONA"
+      ],
+      "scope": "futures",
+      "effectiveAt": 1792638000000,
+      "checkedAt": 1792835931558
+    },
+    {
+      "exchange": "OKX",
+      "title": "OKX to delist DORA, ICX, STORJ, ZEUS and ELF spot trading pairs",
+      "url": "https://www.okx.com/help/okx-to-delist-dora-icx-storj-zeus-and-elf-spot-trading-pairs",
+      "publishedAt": 1790121600000,
+      "dateOnly": true,
+      "symbols": [
+        "DORA",
+        "ICX",
+        "STORJ",
+        "ZEUS",
+        "ELF"
+      ],
+      "scope": "spot",
+      "checkedAt": 1792835931558
+    },
+    {
+      "exchange": "OKX",
+      "title": "OKX to postpone the delisting of ONEUSDT perpetual futures",
+      "url": "https://www.okx.com/help/okx-to-postpone-the-delisting-of-oneusdt-perpetual-futures",
+      "publishedAt": 1789689600000,
+      "dateOnly": true,
+      "symbols": [
+        "ONE"
+      ],
+      "scope": "futures",
+      "change": true,
+      "checkedAt": 1792835931558
+    }
+  ]
+}
