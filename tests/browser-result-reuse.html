@@ -17,7 +17,7 @@ $('qaSeed').onclick=async()=>{
    const bars=tf==='1m'?minute:BacktestBars.pack(TimeframeEngine.resample(minute,tf,'1m',BacktestBars.get)),c={...config,timeframe:tf},result=BacktestEngine.runBacktest(bars,funding,c,{equityMaxPoints:BacktestResults.equityPoints});assert(result.success,tf+' 결과 계산 실패');
    for(const [index,m]of markets.entries()){
     const meta={market:{ex:m.exchange,symbol:m.symbol,int:tf},coverage:{[tf]:{first:BacktestBars.time(bars,0),last:BacktestBars.time(bars,bars.length-1),count:bars.length}},fundingCoverage:{first:funding[0].time,last:funding.at(-1).time,count:funding.length},startTime:start,endTime:end,gaps:0,source:'generated-browser-fixture',config:result.config,preparedTimeframes:BacktestResults.frames};
-    assert(await store.save(m,c,result,meta),'예제 저장 한도 초과');if(tf==='1m')items.push({...m,status:'done',summary:result.summary,meta});if(index%25===0){$('qaResult').textContent=tf+' 예제 결과 저장 · '+(index+1)+' / 139';await yieldPaint();}
+    assert(await store.save(m,config,result,meta),'예제 저장 한도 초과');if(tf==='1m')items.push({...m,status:'done',summary:result.summary,meta});if(index%25===0){$('qaResult').textContent=tf+' 예제 결과 저장 · '+(index+1)+' / 139';await yieldPaint();}
    }
   }
   // Open a new real IndexedDB connection; no in-memory reference to computed results is used for the timed checks.

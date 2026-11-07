@@ -84,7 +84,7 @@
    if(!packed)for(const [tf,rows]of Object.entries(timeframeCandles))for(let i=1;i<rows.length;i++)if(T.end(rows[i-1].time,tf)<rows[i].time){gapsCount++;gaps.push({timeframe:tf,from:T.end(rows[i-1].time,tf),to:rows[i].time});}
    const available=Object.entries(coverage).filter(([,v])=>Number.isFinite(v.first)&&Number.isFinite(v.last)),priceStart=Math.max(start,Math.min(...available.map(([,v])=>v.first))),priceEnd=Math.min(end,Math.max(...available.map(([tf,v])=>T.end(v.last,tf)))),first=fundingRecords[0].time,last=fundingRecords.at(-1).time;let longGaps=0;
    for(let i=1;i<fundingRecords.length;i++)if(fundingRecords[i].time-fundingRecords[i-1].time>86400+60&&fundingRecords[i].time>priceStart&&fundingRecords[i-1].time<priceEnd)longGaps++;
-   return {symbol,exchange:ex,startTime:start,endTime:end,fundingRecords,timeframeCandles,coverage,gaps,gapsCount,source:archiveFiles?'official-exchange-api+binance-public-archive':'official-exchange-api',fundingCoverage:{first,last,count:fundingRecords.length,startMissing:first>priceStart+2*86400,endMissing:last<priceEnd-2*86400,longGaps}};
+   return {symbol,exchange:ex,startTime:start,endTime:end,fundingRecords,timeframeCandles,coverage,gaps,gapsCount,source:archiveFiles||seed?.source?.includes('binance-public-archive')?'official-exchange-api+binance-public-archive':'official-exchange-api',fundingCoverage:{first,last,count:fundingRecords.length,startMissing:first>priceStart+2*86400,endMissing:last<priceEnd-2*86400,longGaps}};
   }
   return {loadBacktestDataset};
  }

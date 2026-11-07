@@ -41,3 +41,8 @@ test('a minute captured before its close never reappears as a completed cached c
  const edge=base*1000+59000;let clock=edge,calls=0;const store=C.memory(),adapter=C.adapter({store,now:()=>clock,wait:async()=>{},candlePage:async()=>{calls++;const forming={...rows[0],volume:calls===1?1:100};if(calls===1)clock+=2000;return [{...rows[0],time:base-60},forming];}}),signal=new AbortController().signal;
  await adapter.candlePage(market.exchange,market.symbol,'1m',edge,signal);const complete=await adapter.candlePage(market.exchange,market.symbol,'1m',clock,signal);assert.equal(calls,2);assert.equal(complete.at(-1).volume,100);
 });
+test('under storage pressure the requested one minute detail is kept ahead of automatically prepared frames',async()=>{
+ const first=computed(),derived=computed(config,'3m'),probe=R.memory();await probe.save(market,config,first.result,first.meta);await probe.save(market,config,derived.result,derived.meta);const limit=(await probe.info()).bytes+1000,store=R.memory({limit});await store.save(market,config,first.result,first.meta);
+ for(let i=0;i<5;i++)await store.save({...market,symbol:'DEMO'+i+'USDT'},config,derived.result,derived.meta);
+ assert.ok(await store.find(market,config));assert.equal(await store.find({...market,symbol:'DEMO0USDT'},{...config,timeframe:'3m'}),null);assert.ok(await store.find({...market,symbol:'DEMO4USDT'},{...config,timeframe:'3m'}));assert.ok((await store.info()).bytes<=limit);
+});
