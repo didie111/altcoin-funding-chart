@@ -18,13 +18,14 @@
   content.append(options,...Array.from(panel.children));panel.append(monitor,content);
   const numbers=new Map(),dateFormat=new Intl.DateTimeFormat('ko-KR',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
   const $=id=>panel.querySelector('#'+id),fmt=(n,d=2)=>{if(!Number.isFinite(n))return '—';if(!numbers.has(d))numbers.set(d,new Intl.NumberFormat('ko-KR',{maximumFractionDigits:d}));return numbers.get(d).format(n);},stamp=t=>dateFormat.format(t*1000),escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  let runner,job=null,locked=false,ready=false,worker=null,workerTimer=0,serial=0,page=0,detailAbort=null,nextNetworkAt=0,archiveRetryAt=0,ioBusy=false,researchUI=null,lastRowsAt=0;
+  let runner,job=null,locked=false,ready=false,worker=null,workerTimer=0,serial=0,page=0,detailAbort=null,nextNetworkAt=0,archiveRetryAt=0,ioBusy=false,planning=false,researchUI=null,lastRowsAt=0;
+  const working=()=>!ready||locked||ioBusy||planning||isBusy();
   const wait=(ms,signal)=>new Promise((resolve,reject)=>{signal.throwIfAborted();const abort=()=>{clearTimeout(timer);reject(signal.reason);},timer=setTimeout(()=>{signal.removeEventListener('abort',abort);resolve();},ms);signal.addEventListener('abort',abort,{once:true});});
   function setLocked(value){locked=value;onBusy(value);controls();}
   function status(text,error=false){$('btBatchStatus').textContent=text;$('btBatchActivity').textContent=text;$('btBatchActivity').title=text;$('btBatchStatus').classList.toggle('bt-error',error);monitor.classList.toggle('bt-monitor-error',error);}
   const frameLabel=tf=>tf==='all'?'전체 주기':M.labels[tf]||tf;
   function config(){const c=$('btBatchPeriod').value==='saved'&&job?job.config:getConfig(),tf=$('btBatchFrame').value||c.timeframe;return {...root.BacktestEngine.normalizeConfig({...c,timeframe:tf==='all'?'1m':tf}),timeframe:tf,useBinanceArchive:$('btBatchArchive').checked,reuseCompleted:$('btBatchReuse').checked,precomputeTimeframes:$('btBatchPrepare').checked,researchOnly:$('btBatchResearchOnly').checked};}
-  function controls(updatePlan=true){const size=F.store.snapshot().size;$('btBatchStart').disabled=!ready||locked||ioBusy||isBusy()||!size;$('btBatchResume').disabled=locked||ioBusy||isBusy();$('btBatchResume').textContent=job?.allHistory?'전체 과거 이어서':'이전 기간 이어서';$('btBatchResume').hidden=!job||!job.items.some(i=>['pending','error','deferred'].includes(i.status));$('btBatchPause').hidden=!locked;for(const b of panel.querySelectorAll('[data-batch-detail]'))b.disabled=locked||ioBusy||isBusy();for(const id of ['btBatchFrame','btBatchPeriod','btBatchSavedJob','btBatchCacheClear','btBatchSettings','btBatchArchive','btBatchReuse','btBatchPrepare','btBatchResearchOnly','btBatchExport','btBatchImport'])$(id).disabled=locked||ioBusy;researchUI?.controls();if(!updatePlan)return;let c;try{c=config();}catch{return;}$('btBatchPlan').textContent=size+'개 거래소·코인 · '+frameLabel(c.timeframe)+' · 각 초기 자본 '+fmt(c.initialCapital)+' USDT · '+(Math.max(1,c.splitCount)===1?'1회 진입':'최대 '+c.splitCount+'회 분할')+' · RSI '+c.rsiOversold+' · TP '+fmt(c.takeProfitPct)+'% / SL '+fmt(c.stopLossPct)+'% · 펀딩 '+(c.fundingIntervalHours?c.fundingIntervalHours+'시간':'전체 주기')+' / '+c.minFundingRate+'% 이하 · 수수료 '+c.feePct+'% / 슬리피지 '+c.slippagePct+'% (각 체결)';renderPlan(c);}
+  function controls(updatePlan=true){const size=F.store.snapshot().size;$('btBatchStart').disabled=!ready||locked||ioBusy||planning||isBusy()||!size;$('btBatchResume').disabled=!ready||locked||ioBusy||planning||isBusy();$('btBatchResume').textContent=job?.allHistory?'전체 과거 이어서':'이전 기간 이어서';$('btBatchResume').hidden=!job||!job.items.some(i=>['pending','error','deferred'].includes(i.status));$('btBatchPause').hidden=!locked;for(const b of panel.querySelectorAll('[data-batch-detail]'))b.disabled=working();for(const id of ['btBatchFrame','btBatchPeriod','btBatchSavedJob','btBatchCacheClear','btBatchSettings','btBatchArchive','btBatchReuse','btBatchPrepare','btBatchResearchOnly','btBatchExport','btBatchImport'])$(id).disabled=!ready||locked||ioBusy||planning;researchUI?.controls();if(!updatePlan)return;let c;try{c=config();}catch{return;}$('btBatchPlan').textContent=size+'개 거래소·코인 · '+frameLabel(c.timeframe)+' · 각 초기 자본 '+fmt(c.initialCapital)+' USDT · '+(Math.max(1,c.splitCount)===1?'1회 진입':'최대 '+c.splitCount+'회 분할')+' · RSI '+c.rsiOversold+' · TP '+fmt(c.takeProfitPct)+'% / SL '+fmt(c.stopLossPct)+'% · 펀딩 '+(c.fundingIntervalHours?c.fundingIntervalHours+'시간':'전체 주기')+' / '+c.minFundingRate+'% 이하 · 수수료 '+c.feePct+'% / 슬리피지 '+c.slippagePct+'% (각 체결)';renderPlan(c);}
   function plan(c){
    const markets=F.store.snapshot().markets,exchanges=[...new Set(markets.map(m=>m.exchange))];if(!exchanges.length)exchanges.push('BINANCE');
    const {allHistory,fixedRange}=root.BacktestBatch.rangeFor($('btBatchPeriod').value,c,job,root.BacktestResults?.sameStrategy);
@@ -36,7 +37,7 @@
    let p;try{p=plan(c);}catch(error){$('btBatchRange').textContent=error.message;return;}
    const frame=p.estimates[0].frames[c.timeframe]||p.estimates[0].frames['1m']||Object.values(p.estimates[0].frames)[0],extra=c.timeframe!=='1m'&&(c.timeframe==='all'||c.splitTrigger==='rsi_cross_up_1m'),pages=p.estimates.map(e=>e.expectedPages),range=Math.min(...pages)===Math.max(...pages)?fmt(pages[0],0):fmt(Math.min(...pages),0)+' ~ '+fmt(Math.max(...pages),0);
    panel.querySelector('.bt-batch-estimates').hidden=Boolean(c.researchOnly);
-   if(c.researchOnly){$('btBatchRange').textContent='보관 원본만 사용 · '+frameLabel(c.timeframe)+' · 요청 기간과 코인별 보관 종료 시점까지 · 거래소 재조회 없음';}
+   if(c.researchOnly){$('btBatchRange').textContent='보관 원본만 사용 · '+frameLabel(c.timeframe)+' · 요청 기간과 코인별 보관 종료 시점까지 · 거래소 재조회 없음. 저장 결과만 있는 경우 먼저 원본 수집·이어서를 실행하세요.';}
    else{   $('btBatchRange').classList.toggle('bt-batch-all-history',p.allHistory);$('btBatchRange').textContent=(p.fixedRange?($('btBatchPeriod').value==='saved'?'보관한 실행 기간·전략':'전체 과거 · 기존 자료 시점 재사용')+' · '+stamp(p.startTime)+' ~ '+stamp(p.endTime)+' KST':p.allHistory?'전체 과거 직접 선택 · 코인별 거래소 제공 최초 기록 ~ 현재 자동 수집':'설정 기간 사용 · '+stamp(p.startTime)+' ~ '+stamp(p.endTime)+' KST')+(c.researchOnly?' · 보관 원본만 사용 (보관 종료 시점까지)':'')+'\n코인당 '+(c.timeframe==='all'?'실제 1분봉 수집 후 3분봉~월봉 집계 · 주기별 예열 추가 · 성과 비교':(frameLabel(c.timeframe)||c.timeframe)+(p.allHistory?' 거래소 제공 전체 과거 수집':' 최대 '+fmt(frame.count,0)+'봉 + 예열 '+fmt(frame.warmup,0)+'봉'))+(extra&&c.timeframe!=='all'?' · 보조 1분봉 추가':'')+(p.allHistory?'':' · 캔들 API 약 '+range+'페이지');
    const entries=Object.entries(M.labels).map(([tf,label])=>{const sample={...c,timeframe:tf},e=plan(sample).estimates,signal=e[0].frames[tf],counts=e.map(x=>x.expectedPages),pageRange=Math.min(...counts)===Math.max(...counts)?fmt(counts[0],0):fmt(Math.min(...counts),0)+' ~ '+fmt(Math.max(...counts),0);return '<tr'+(tf===c.timeframe?' class="bt-batch-selected-frame"':'')+'><td>'+label+'</td><td>'+fmt(signal.count,0)+'</td><td>'+fmt(signal.warmup,0)+'</td><td>'+(tf!=='1m'&&sample.splitTrigger==='rsi_cross_up_1m'?fmt(e[0].frames['1m'].totalCount,0):'—')+'</td><td>약 '+pageRange+'</td></tr>';});
    $('btBatchEstimates').innerHTML='<div class="bt-table-scroll"><table class="bt-table"><thead><tr><th>기준 주기</th><th>기간 안의 완성 봉</th><th>RSI 예열</th><th>보조 1분봉</th><th>코인당 캔들 API</th></tr></thead><tbody>'+entries.join('')+'</tbody></table></div>';}
@@ -48,7 +49,7 @@
   async function execute(item,c,signal,onProgress,detail=false,strictSnapshot=false,purpose='backtest'){
    if(purpose==='backtest'&&!c.researchOnly&&root.BacktestResults&&(strictSnapshot&&detail||c.reuseCompleted!==false)){signal.throwIfAborted();const store=await resultsPromise,heads=await store.find(item,c,{snapshot:!strictSnapshot}),output=(detail&&heads||root.BacktestResults.readyFor(heads,c,strictSnapshot))?await root.BacktestResults.fromHeads(store,heads,c,{detail}):null;signal.throwIfAborted();if(output){onProgress({phase:'reuse',text:'저장된 완료 결과 · 원본 재조회 0회 · 재계산 없음'});return output;}}
    return new Promise((resolve,reject)=>{
-    signal.throwIfAborted();clearTimeout(workerTimer);const id=++serial,task=worker??=new Worker('backtest-batch-worker.js?v=20261107-research-1');let settled=false;
+    signal.throwIfAborted();clearTimeout(workerTimer);const id=++serial,task=worker??=new Worker('backtest-batch-worker.js?v=20261107-research-preflight-1');let settled=false;
     const hosts={BINANCE:'fapi.binance.com',BYBIT:'api.bybit.com',BINGX:'open-api.bingx.com',BITGET:'api.bitget.com',MEXC:'api.mexc.com',OKX:'www.okx.com'},retry=event=>{if(event.detail.host===hosts[item.exchange])onProgress({phase:'wait',...event.detail});};
     const finish=(fn,value)=>{if(settled)return;settled=true;signal.removeEventListener('abort',abort);root.removeEventListener('market-api-wait',retry);task.onmessage=null;task.onerror=null;if(fn===resolve)workerTimer=setTimeout(stopWorker,25000);else stopWorker();fn(value);},abort=()=>finish(reject,signal.reason);signal.addEventListener('abort',abort,{once:true});root.addEventListener('market-api-wait',retry);
     task.onmessage=async event=>{
@@ -61,7 +62,7 @@
    });
   }
   async function savedJobs(){const store=await storePromise;return store.listJobs?store.listJobs():job?[job]:[];}
-  async function refreshHistory(){const rows=await savedJobs(),select=$('btBatchSavedJob');select.replaceChildren(...(rows.length?rows.map(j=>{const option=node('option',frameLabel(j.config.timeframe)+' · '+j.items.filter(i=>i.status==='done').length+'/'+j.items.length+' 완료'+(Number.isFinite(j.config.endTime)?' · '+stamp(j.config.endTime):''));option.value=j.id;return option;}):[node('option','보관 기록 없음')]));if(job)select.value=job.id;select.disabled=locked||ioBusy||!rows.length;}
+  async function refreshHistory(){const rows=await savedJobs(),select=$('btBatchSavedJob');select.replaceChildren(...(rows.length?rows.map(j=>{const option=node('option',frameLabel(j.config.timeframe)+' · '+j.items.filter(i=>i.status==='done').length+'/'+j.items.length+' 완료'+(Number.isFinite(j.config.endTime)?' · '+stamp(j.config.endTime):''));option.value=j.id;return option;}):[node('option','보관 기록 없음')]));if(job)select.value=job.id;select.disabled=!ready||locked||ioBusy||planning||!rows.length;}
   function restoreForm(){if(!job)return;const range=$('btBatchPeriod');range.querySelector('[value=saved]').disabled=false;range.value=job.allHistory?'all':'settings';$('btBatchFrame').value=job.config.timeframe;controls();}
   async function openIndividual(item,c,signal,onProgress){const result=await root.BacktestResults?.openIndividual(await resultsPromise,item,c,{listJobs:savedJobs,signal});if(result)onProgress({phase:'reuse',text:'저장된 일괄 결과 확인 · 재조회 없음'});return result;}
   function progress(item,p){const index=job?.items.findIndex(i=>i.exchange===item.exchange&&i.symbol===item.symbol)??0,m={ex:item.exchange,symbol:item.symbol,int:job?.config.timeframe||config().timeframe};status((job?(index+1)+' / '+job.items.length+'번째 · ':'')+(p.phase==='wait'?item.symbol+' · '+Math.ceil(p.delay/1000)+'초 API 대기 후 재시도':M.backtestProgress(m,'single',p)+(p.cached?' · 저장 자료 '+p.cached+'묶음 재사용':'')));}
@@ -79,15 +80,54 @@
    const th=['코인 / 거래소','상태 · 실제 자료 범위','거래수','승률','수익계수 PF','평균 이익/손실 비','순손익 · USDT','최종 자본','MDD','거래·차트'];
    list.innerHTML='<div class="bt-table-scroll"><table class="bt-table"><thead><tr>'+th.map(t=>'<th>'+t+'</th>').join('')+'</tr></thead><tbody>'+items.slice(page*100,page*100+100).map(item=>{const s=item.summary,targetTf=job.config.timeframe==='all'?(s?.bestTimeframe||'1h'):job.config.timeframe,cov=item.meta?.coverage?.[targetTf]||Object.values(item.meta?.coverage||{})[0],issues=M.backtestCoverageIssues(item.meta),bestBadge=s?.bestTimeframe?(' [최고: '+(M.labels[s.bestTimeframe]||s.bestTimeframe)+']'):'',state=item.status==='done'?(item.meta?.reuse?'저장 결과 · 재계산 없음':item.meta?.research?'보관 원본으로 계산':issues.hasIssues?'자료 부족·간격 확인':'계산 완료'+bestBadge):({pending:'대기',running:'검토 중',error:'조회·계산 실패',deferred:'거래소 조회 보류'})[item.status],range=cov?.first?stamp(cov.first)+' ~ '+stamp(cov.last)+' KST':'';return '<tr data-batch-row="'+item.index+'"><td><strong>'+escape(item.symbol)+'</strong><small>'+escape(M.exchanges[item.exchange])+'</small></td><td class="bt-batch-coverage '+(issues.hasIssues||['error','deferred'].includes(item.status)?'bt-error':'')+'">'+escape(state)+'<small>'+escape(item.error||range)+'</small>'+(item.meta?.research?.cutoffDiffers?'<small>보관 종료 시점까지 · 거래소 재조회 없음</small>':'')+(item.meta?.reuse?'<small>자료 시점 '+escape(stamp(item.meta.reuse.snapshotEnd))+' KST</small>':'')+(item.meta?.preparedTimeframes?'<small>주기 '+item.meta.preparedTimeframes.length+'개 결과 미리 준비</small>':'')+(item.meta?.preparationWarning?'<small>다른 주기 준비 보류 · '+escape(item.meta.preparationWarning)+'</small>':'')+(item.meta?.fundingCoverage?.first?'<small>정산 '+escape(stamp(item.meta.fundingCoverage.first))+' ~ '+escape(stamp(item.meta.fundingCoverage.last))+'</small>':'')+(item.meta?.archive?.files?'<small>공식 과거 '+fmt(item.meta.archive.files,0)+'파일 · API '+fmt(item.meta.archive.restPages,0)+'페이지'+(item.meta.archive.cachedFiles?' · 파일 '+fmt(item.meta.archive.cachedFiles,0)+'개 재사용':'')+'</small>':'')+'</td>'+(s?[s.totalTrades,fmt(s.winRatePct)+'%',s.profitFactorInfinite?'∞':fmt(s.profitFactor),fmt(s.riskRewardRatio),'<span class="'+(s.netPnl>=0?'bt-positive':'bt-negative')+'">'+fmt(s.netPnl)+'</span>',fmt(s.finalCapital),fmt(s.maxDrawdownPct)+'%'].map(v=>'<td>'+v+'</td>').join(''):'<td colspan="7">—</td>')+'<td>'+inspectionControls(item)+'</td></tr>';}).join('')+'</tbody></table></div>';for(const tr of list.querySelectorAll('tbody>tr'))for(let i=0;i<tr.cells.length;i++)tr.cells[i].setAttribute('data-label',th[i]||'결과');$('btBatchPage').textContent=(page+1)+' / '+pages+'페이지';$('btBatchPrevious').disabled=!page;$('btBatchNext').disabled=page>=pages-1;
   }
-  async function perform(start){if(locked||ioBusy||isBusy()||!ready)return;if(!start&&job?.retryAt>Date.now()){status('API 대기 중 · '+Math.ceil((job.retryAt-Date.now())/1000)+'초 후 이어서 실행하세요.',true);return;}let c,markets,allHistory,fixedRange;if(start){try{c=config();markets=F.store.snapshot().markets;}catch(error){status(error.message,true);return;}if(!markets.length)return;allHistory=$('btBatchPeriod').value==='all';let p;try{p=plan(c,allHistory);allHistory=p.allHistory;fixedRange=p.fixedRange;}catch(error){status(error.message,true);return;}const estimate=p.estimates[0],accepted=await root.CoinFavoritesUI.confirm({host,title:'즐겨찾기 일괄 백테스트',message:markets.length+'개 거래소·코인을 '+frameLabel(c.timeframe)+' 설정으로 테스트하시겠습니까?',details:(allHistory?'전체 과거 · ':'설정 기간 · ')+stamp(p.startTime)+' ~ '+stamp(p.endTime)+' KST · 기준 '+fmt((estimate.frames[c.timeframe]||estimate.frames['1m']).count,0)+'봉/코인'+(c.splitTrigger==='rsi_cross_up_1m'&&c.timeframe!=='1m'?' + 보조 1분봉 '+fmt(estimate.frames['1m'].totalCount,0)+'봉/코인':'')+' · 각 코인에 '+fmt(c.initialCapital)+' USDT를 별도로 적용합니다.'+' · 진입 '+Math.max(1,c.splitCount)+'회 / RSI '+c.rsiOversold+' · '+($('btBatchPeriod').value==='saved'?'보관한 전략':'현재 설정 전략')+'.'+(c.researchOnly?' 보관 원본만 사용합니다.':c.reuseCompleted?' 동일 완료 결과는 저장 시점을 유지합니다.':' 최신 자료로 계산합니다.')+' 언제든 중지할 수 있습니다.',action:'테스트 시작'});if(!accepted||locked||ioBusy||isBusy())return;}
-   setLocked(true);try{if(start){page=0;await runner.start(markets,c,{allHistory,fixedRange});}else await runner.resume({retryErrors:true});}catch(error){status(error.message,true);}finally{setLocked(false);void cacheInfo();}
+  async function checkResearch(markets,c){
+   planning=true;controls(false);
+   try{return root.BacktestResearch.checkBatch(markets,await (await root.BacktestResearchStore.getDefault()).states(),c);}
+   finally{planning=false;controls(false);}
+  }
+  function sourceNotice(check,resume=false){
+   const absent=check.missing.filter(m=>m.reason==='source').length,outside=check.missing.length-absent;
+   return '요청한 기간에 원본 '+check.ready.length+' / '+check.total+'개 준비'+(absent?' · 원본 미수집 '+absent+'개':'')+(outside?' · 기간·주기 범위 부족 '+outside+'개':'')+'. '+(resume?'이어서 실행하기 전에 부족한 원본을 채워 주세요. ':'')+'저장된 결과는 그대로 있습니다. 새 계산은 원본 수집·이어서를 실행하거나 보관 범위의 기간을 선택하세요.';
+  }
+  function showSourceNotice(check,resume=false){
+   const message=sourceNotice(check,resume);if(researchUI)researchUI.reveal(message);else status(message);
+  }
+  async function perform(start){
+   if(working())return;
+   if(!start&&job?.retryAt>Date.now()){status('API 대기 중 · '+Math.ceil((job.retryAt-Date.now())/1000)+'초 후 이어서 실행하세요.',true);return;}
+   let c,markets,p;
+   try{
+    if(start){
+     c=config();markets=F.store.snapshot().markets;if(!markets.length)return;p=plan(c);
+     const originally=markets.length;let partial=false;
+     if(c.researchOnly){
+      const check=await checkResearch(markets,{...c,startTime:p.startTime,endTime:p.endTime});if(working())return;
+      if(!check.ready.length){showSourceNotice(check);return;}
+      if(check.missing.length){partial=true;markets=check.ready;showSourceNotice(check);}
+     }
+     const estimate=p.estimates[0],period=$('btBatchPeriod').value==='saved'?'보관한 전략':'현재 설정 전략';
+     const rangeText=c.researchOnly?'거래소 조회 없이 요청 기간과 코인별 보관 종료 시점까지 계산합니다.':(p.allHistory?'전체 과거 · ':'설정 기간 · ')+stamp(p.startTime)+' ~ '+stamp(p.endTime)+' KST · 기준 '+fmt((estimate.frames[c.timeframe]||estimate.frames['1m']).count,0)+'봉/코인'+(c.splitTrigger==='rsi_cross_up_1m'&&c.timeframe!=='1m'?' + 보조 1분봉 '+fmt(estimate.frames['1m'].totalCount,0)+'봉/코인':'')+(c.reuseCompleted?' · 동일 완료 결과는 저장 시점을 유지합니다.':'');
+     const accepted=await root.CoinFavoritesUI.confirm({
+      host,title:partial?'일부 코인의 원본만 준비됨':'즐겨찾기 일괄 백테스트',
+      message:partial?originally+'개 중 원본이 준비된 '+markets.length+'개만 '+frameLabel(c.timeframe)+'으로 실행할까요?':markets.length+'개 거래소·코인을 '+frameLabel(c.timeframe)+' 설정으로 테스트하시겠습니까?',
+      details:(partial?'원본이 부족한 '+(originally-markets.length)+'개는 이번 실행에서 제외합니다. 전체를 테스트하려면 원본을 먼저 수집하세요. ':'')+rangeText+' · 각 코인에 '+fmt(c.initialCapital)+' USDT · 진입 '+Math.max(1,c.splitCount)+'회 / RSI '+c.rsiOversold+' · '+period+'. 언제든 중지할 수 있습니다.',
+      action:partial?'준비된 '+markets.length+'개 실행':'테스트 시작'
+     });
+     if(!accepted||working())return;
+    }else if(job?.config.researchOnly){
+     const pending=job.items.filter(i=>['pending','error','deferred','running'].includes(i.status));if(!pending.length)return;
+     const check=await checkResearch(pending,job.config);if(working())return;
+     if(check.missing.length){showSourceNotice(check,true);return;}
+    }
+   }catch(error){status(error.message,true);return;}
+   setLocked(true);try{if(start){page=0;await runner.start(markets,c,{allHistory:p.allHistory,fixedRange:p.fixedRange});}else await runner.resume({retryErrors:true});}catch(error){status(error.message,true);}finally{setLocked(false);void cacheInfo();}
   }
   $('btBatchOptionsToggle').onclick=()=>{options.open=!options.open;if(options.open){content.scrollTop=0;summary.focus();}};options.ontoggle=()=>{$('btBatchOptionsToggle').setAttribute('aria-expanded',String(options.open));};
-  $('btBatchSavedJob').onchange=async()=>{if(locked||ioBusy||isBusy())return;const id=$('btBatchSavedJob').value,store=await storePromise;if(await store.selectJob?.(id)){await runner.restore(id);await refreshHistory();}};
+  $('btBatchSavedJob').onchange=async()=>{if(working())return;const id=$('btBatchSavedJob').value,store=await storePromise;if(await store.selectJob?.(id)){await runner.restore(id);await refreshHistory();}};
   $('btBatchSettings').onclick=()=>{$('btBatchPeriod').value='settings';controls();onSettings?.();};$('btBatchStart').onclick=()=>void perform(true);$('btBatchResume').onclick=()=>void perform(false);$('btBatchPause').onclick=()=>{runner?.pause();detailAbort?.abort();};$('btBatchFrame').onchange=controls;$('btBatchPeriod').onchange=controls;$('btBatchArchive').onchange=controls;$('btBatchReuse').onchange=controls;$('btBatchPrepare').onchange=controls;
   $('btBatchManage').onclick=()=>{root.ChartWorkspace?.openPicker();};
   $('btBatchSort').onchange=()=>{page=0;renderRows();};$('btBatchPrevious').onclick=()=>{page--;renderRows();};$('btBatchNext').onclick=()=>{page++;renderRows();};
-  $('btBatchResults').onclick=async event=>{const button=event.target.closest('button[data-batch-detail]');if(!button||locked||ioBusy||isBusy()||!job)return;const item=job.items[Number(button.dataset.batchDetail)];if(item?.status!=='done')return;
+  $('btBatchResults').onclick=async event=>{const button=event.target.closest('button[data-batch-detail]');if(!button||working()||!job)return;const item=job.items[Number(button.dataset.batchDetail)];if(item?.status!=='done')return;
    const tf=job.config.timeframe==='all'?$('btBatchResults').querySelector('[data-batch-frame="'+item.index+'"]')?.value||item.summary.bestTimeframe||'1m':job.config.timeframe,row=root.BacktestResults?.batchCandidate(job,item,tf);if(!row){status('저장된 결과의 종목·주기를 확인할 수 없습니다.',true);return;}setLocked(true);detailAbort=new AbortController();
    try{const output=await root.BacktestResults.openBatchResult(await resultsPromise,row);detailAbort.signal.throwIfAborted();if(!output)throw Error('선택한 주기의 저장 결과가 없습니다.');onResult(output);status(item.symbol+(output.summaryOnly?' · 저장한 요약 표시 · 상세는 따로 만들 수 있습니다.':' · 저장된 거래 내역을 열었습니다.'));
    }catch(error){if(error.name!=='AbortError')status(error.message,true);else status('거래 상세 불러오기를 중지했습니다.');}finally{detailAbort=null;setLocked(false);}};
@@ -100,12 +140,12 @@
   if(root.BacktestResearchUI){
    $('btBatchResearchChoice').hidden=false;try{researchChoice.checked=root.localStorage.getItem('funding-chart-bt-research-only-v1')==='true';}catch{}
    researchChoice.onchange=()=>researchMode(researchChoice.checked);
-   researchUI=root.BacktestResearchUI.bind({host,panel:content,getMarkets:()=>F.store.snapshot().markets,collect:(item,c,signal,onProgress)=>execute(item,c,signal,onProgress,false,false,'collect-research'),readResults:()=>readBackup(false),setBusy:setTransferBusy,isBusy:()=>locked||ioBusy||isBusy(),onReady:()=>researchMode(true),officialFiles:()=>$('btBatchArchive').checked,fmt,stamp,batchStatus:status});
+   researchUI=root.BacktestResearchUI.bind({host,panel:content,getMarkets:()=>F.store.snapshot().markets,collect:(item,c,signal,onProgress)=>execute(item,c,signal,onProgress,false,false,'collect-research'),readResults:()=>readBackup(false),setBusy:setTransferBusy,isBusy:working,onReady:()=>researchMode(true),officialFiles:()=>$('btBatchArchive').checked,fmt,stamp,batchStatus:status});
   }
   const exportBtn=$('btBatchExport'),importBtn=$('btBatchImport'),importFile=$('btBatchImportFile');
   if(exportBtn){
    exportBtn.onclick=async()=>{
-    if(locked||ioBusy||isBusy())return;
+    if(working())return;
     try{
      setTransferBusy(true);
      const result=await root.BacktestBackup.save({environment:root,document:doc,onProgress:status,readBackup});
@@ -115,9 +155,9 @@
    };
   }
   if(importBtn&&importFile){
-   importBtn.onclick=()=>{if(locked||ioBusy||isBusy())return;importFile.value='';importFile.click();};
+   importBtn.onclick=()=>{if(working())return;importFile.value='';importFile.click();};
    importFile.onchange=async()=>{
-    const file=importFile.files?.[0];if(!file)return;
+    const file=importFile.files?.[0];if(!file)return;if(working()){importFile.value='';return;}
     try{
      setTransferBusy(true);status('백업 파일 복원 중…');let archive,payload,migrated,sourceError;
      if(root.BacktestResearchFile&&await root.BacktestResearchFile.isResearch(file)){

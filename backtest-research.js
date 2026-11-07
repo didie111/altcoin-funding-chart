@@ -145,6 +145,16 @@
   const cacheRangeEnd=['raw-v1',period.signature,period.checkedFrom,period.fundFrom,period.fundTo,period.to].join(':');
   return {period,config:{...config,endTime:period.to,cacheRangeEnd,cacheMaxEnd:period.to,researchRequestedEnd:config.researchRequestedEnd??config.endTime,precomputeTimeframes:false}};
  }
+ function checkBatch(items,states,config){
+  const byId=new Map(states.map(state=>[state.id,state])),ready=[],missing=[];
+  for(const item of items){
+   const state=byId.get(S.market(item).id),period=scope(state,config,{localOnly:true});
+   const from=Math.max(period?.start??Infinity,state?.candles.first??Infinity),to=period?.to??-Infinity,tf=config.timeframe==='all'?'1m':config.timeframe;
+   if(period&&state.candles.count>0&&state.funding.count>0&&from<to&&T.closedRange(from,to,tf).count>0)ready.push(item);
+   else missing.push({item,reason:state?.completed?'period':'source'});
+  }
+  return {ready,missing,total:items.length};
+ }
  function candleSink(tf,from,to,onBar){
   let bucket=null,next=0,last=-Infinity,count=0,bar={};
   const flush=()=>{if(bucket!==null&&last===next-60&&count===(next-bucket)/60&&bucket>=from&&next<=to)onBar(bar);};
@@ -198,5 +208,5 @@
   for(let i=1;i<records.length;i++)if(records[i].time-records[i-1].time>day+60&&records[i].time>priceStart&&records[i-1].time<priceEnd)longGaps++;
   return {symbol:m.symbol,exchange:m.exchange,startTime:start,endTime:to,timeframeCandles,coverage,gaps,gapsCount,fundingRecords:records,source:'verified-local-minute-and-funding',fundingCoverage:{first,last,count:records.length,startMissing:first>priceStart+2*day,endMissing:last<priceEnd-2*day,longGaps},research:{through:to,storedThrough:stored.completed.to,checkedFrom:p.checkedFrom,sourceRows,cutoffDiffers:p.cutoffDiffers}};
  }
- return {earliest,carryLegacy,cacheEntries,collect,scope,profile,dataset};
+ return {earliest,carryLegacy,cacheEntries,collect,scope,profile,checkBatch,dataset};
 });

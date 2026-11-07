@@ -114,3 +114,14 @@ test('a detail file with a 10-entry body under a 1-entry result key is not accep
  const backup=await store.exportAll(),a=backup.entries.find(e=>e.head.meta.config.splitCount===1),b=backup.entries.find(e=>e.head.meta.config.splitCount===10);a.payload=b.payload;
  const target=R.memory(),restored=await target.importAll(backup);assert.equal(restored.imported,1);assert.equal(restored.skipped,1);assert.equal(await target.find(m,one),null);assert.ok(await target.find(m,ten));
 });
+
+test('a restored fragment is not ready for a new raw-only batch, and an out-of-range period is distinguished',async()=>{
+ const archive=S.memory(),end=start+day,fragment={...m,symbol:'FRAGMENTUSDT'},ready={...m,symbol:'READYUSDT'},absent={...m,symbol:'ABSENTUSDT'};
+ const bars=candles(start,end),records=funding(start-2*day,end);
+ await archive.put(fragment,'candles',bars.slice(-30),{checked:[[end-30*60,end]]});await archive.put(fragment,'funding',records.slice(-1));
+ await seed(archive,ready,start,end,{bars,records});
+ const states=await archive.states(),c={...base,timeframe:'all',endTime:end};
+ const checked=H.checkBatch([fragment,ready,absent],states,c);assert.deepEqual(checked.ready,[ready]);assert.deepEqual(checked.missing,[{item:fragment,reason:'source'},{item:absent,reason:'source'}]);
+ const wrongPeriod=H.checkBatch([ready],states,{...c,startTime:end+60,endTime:end+3600});assert.deepEqual(wrongPeriod.missing,[{item:ready,reason:'period'}]);
+ const noMonth=H.checkBatch([ready],states,{...c,timeframe:'1M'});assert.deepEqual(noMonth.missing,[{item:ready,reason:'period'}]);
+});
