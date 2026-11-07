@@ -4,6 +4,7 @@
  const equityPoints=512,version=1,maxBytes=64*1048576,maxRawBytes=64*1048576,frames=Object.keys(T.seconds),decoder=new TextDecoder(),encoder=new TextEncoder();
  const strategyFields=Object.keys(E.defaultStrategyConfig).sort();
  function strategyValues(c,tf){const normalized=E.normalizeConfig({...c,timeframe:tf});return strategyFields.map(k=>[k,normalized[k]]);}
+ function sameStrategy(a,b,tf=a?.timeframe){if(!a||!b)return false;const frame=tf==='all'?'1m':tf;try{return JSON.stringify(strategyValues(a,frame))===JSON.stringify(strategyValues(b,frame));}catch{return false;}}
  function identity(m,c,tf=c.timeframe){return [version,m.exchange||m.ex,m.symbol,strategyValues(c,tf),c.startTime,c.cacheRangeEnd??c.endTime];}
  const requestKey=(m,c,tf)=>JSON.stringify(identity(m,c,tf));
  const scopeKey=parts=>JSON.stringify([parts[0],...parts.slice(3)]);
@@ -16,6 +17,10 @@
  const unbase64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
  const clone=value=>structuredClone(value);
  function valid(head){return head?.version===version&&typeof head.key==='string'&&typeof head.requestKey==='string'&&frames.includes(head.timeframe)&&Number.isFinite(head.snapshotEnd)&&head.meta?.market?.symbol&&head.meta.market.ex&&head.meta.market.int===head.timeframe&&head.meta.config?.timeframe===head.timeframe&&Number.isFinite(head.meta.config.startTime)&&Number.isFinite(head.meta.config.endTime);}
+ function matchesResult(head,result){
+  if(result.config?.timeframe!==head.timeframe||result.config.startTime!==head.meta.config.startTime||result.config.endTime!==head.meta.config.endTime||!sameStrategy(head.meta.config,result.config,head.timeframe)||!Array.isArray(result.trades)||!Array.isArray(result.signals))return false;
+  const entries=Math.max(1,E.normalizeConfig(result.config).splitCount);return result.trades.every(t=>t&&(!Number.isFinite(t.splitTarget)||t.splitTarget===entries)&&(!Number.isFinite(t.dcaSteps)||t.dcaSteps<=entries)&&(!Array.isArray(t.entries)||t.entries.length<=entries));
+ }
  function storageBytes(head,payload){const {bytes:_,touched:__,...fields}=head;return payload.data.byteLength+encoder.encode(JSON.stringify(fields)).byteLength+256;}
  function restorePlan(previous,entries,limit){
   const imported=new Map(entries.map(row=>[row.head.key,row])),heads=new Map(previous.map(head=>[head.key,head]));for(const {head} of imported.values())heads.set(head.key,head);
@@ -31,11 +36,12 @@
   }
   return {
    findMany,async find(m,c,options){return (await findMany([m],c,options))[0];},
-   async save(m,c,result,meta){const payload=await encode(result);if(!payload)return false;const tf=result.config.timeframe,identityParts=identity(m,c,tf),head={scope:scopeKey(identityParts),version,priority:c.timeframe===tf||c.timeframe==='all'?1:0,key:key(m,{...c,endTime:meta.endTime},tf),requestKey:requestKey(m,c,tf),timeframe:tf,snapshotEnd:meta.endTime,created:Date.now(),success:result.success,reason:result.reason,summary:clone(result.summary),meta:clone({...meta,market:{ex:m.exchange||m.ex,symbol:m.symbol,int:tf},config:result.config})};head.bytes=storageBytes(head,payload);return backend.put(head,payload);},
-   async read(head){if(!valid(head))throw Error('완료 결과의 거래소·종목·주기를 확인하세요.');const payload=await backend.read(head.key);if(!payload)return null;const result=await decode(payload);if(result.config?.timeframe!==head.timeframe||result.config?.startTime!==head.meta.config.startTime||result.config?.endTime!==head.meta.config.endTime||!Array.isArray(result.trades)||!Array.isArray(result.signals))throw Error('완료 결과와 실행 조건이 일치하지 않습니다.');return {result,summary:result.summary,meta:{...clone(head.meta),reuse:{kind:'completed-result',snapshotEnd:head.snapshotEnd,networkRequests:0,recalculated:false}}};},
+   async findConfigured(pairs){const queries=[],groups=pairs.map(p=>{const at=queries.length;if(p){const {market,config}=p;for(const tf of config.timeframe==='all'?frames:[config.timeframe]){const parts=identity(market,config,tf);queries.push({request:JSON.stringify(parts),key:JSON.stringify([...parts,T.start(config.endTime,tf)]),scope:scopeKey(parts)});}}return [at,queries.length];});const found=queries.length?await backend.find(queries,false,Infinity):[];return groups.map(([a,b])=>{const hits=found.slice(a,b);return hits.length&&hits.every(Boolean)?hits:null;});},
+   async save(m,c,result,meta){if(!sameStrategy(c,result.config,result.config.timeframe))return false;const payload=await encode(result);if(!payload)return false;const tf=result.config.timeframe,identityParts=identity(m,c,tf),head={scope:scopeKey(identityParts),version,priority:c.timeframe===tf||c.timeframe==='all'?1:0,key:key(m,{...c,endTime:meta.endTime},tf),requestKey:requestKey(m,c,tf),timeframe:tf,snapshotEnd:meta.endTime,created:Date.now(),success:result.success,reason:result.reason,summary:clone(result.summary),meta:clone({...meta,market:{ex:m.exchange||m.ex,symbol:m.symbol,int:tf},config:result.config})};head.bytes=storageBytes(head,payload);return backend.put(head,payload);},
+   async read(head){if(!valid(head))throw Error('완료 결과의 거래소·종목·주기를 확인하세요.');const payload=await backend.read(head.key);if(!payload)return null;const result=await decode(payload);if(!matchesResult(head,result))throw Error('완료 결과와 실행 조건이 일치하지 않습니다.');return {result,summary:result.summary,meta:{...clone(head.meta),reuse:{kind:'completed-result',snapshotEnd:head.snapshotEnd,networkRequests:0,recalculated:false}}};},
    info:()=>backend.info(),clear:()=>backend.clear(),
    async exportAll(){const entries=[];for(const head of await backend.all()){const payload=await backend.read(head.key);if(payload)entries.push({head,payload:{encoding:payload.encoding,b64:base64(payload.data)}});}return {version,entries};},
-   async importAll(value){if(!value)return {imported:0,skipped:0};if(value.version!==version||!Array.isArray(value.entries))throw Error('완료 결과 백업 형식이 올바르지 않습니다.');const rows=[];for(const entry of value.entries){if(!valid(entry.head)||entry.head.key!==key(entry.head.meta.market,entry.head.meta.config,entry.head.timeframe)||entry.head.requestKey!==requestKey(entry.head.meta.market,entry.head.meta.config,entry.head.timeframe)||!['gzip','json'].includes(entry.payload?.encoding)||typeof entry.payload.b64!=='string')throw Error('완료 결과 백업 항목을 확인하세요.');const payload={encoding:entry.payload.encoding,data:unbase64(entry.payload.b64)},result=await decode(payload);if(result.config?.timeframe!==entry.head.timeframe||result.config.startTime!==entry.head.meta.config.startTime||result.config.endTime!==entry.head.meta.config.endTime||!Array.isArray(result.trades)||!Array.isArray(result.signals))throw Error('완료 결과 백업이 손상됐습니다.');const head={...entry.head,scope:scopeKey(JSON.parse(entry.head.requestKey)),priority:entry.head.priority===1?1:0};head.bytes=storageBytes(head,payload);rows.push({head,payload});}return rows.length?backend.restore(rows):{imported:0,skipped:0};}
+   async importAll(value){if(!value)return {imported:0,skipped:0};if(value.version!==version||!Array.isArray(value.entries))throw Error('완료 결과 백업 형식이 올바르지 않습니다.');const rows=[];let rejected=0;for(const entry of value.entries){if(!valid(entry.head)||entry.head.key!==key(entry.head.meta.market,entry.head.meta.config,entry.head.timeframe)||entry.head.requestKey!==requestKey(entry.head.meta.market,entry.head.meta.config,entry.head.timeframe)||!['gzip','json'].includes(entry.payload?.encoding)||typeof entry.payload.b64!=='string')throw Error('완료 결과 백업 항목을 확인하세요.');const payload={encoding:entry.payload.encoding,data:unbase64(entry.payload.b64)},result=await decode(payload);if(!matchesResult(entry.head,result)){rejected++;continue;}const head={...entry.head,scope:scopeKey(JSON.parse(entry.head.requestKey)),priority:entry.head.priority===1?1:0};head.bytes=storageBytes(head,payload);rows.push({head,payload});}const restored=rows.length?await backend.restore(rows):{imported:0,skipped:0};return {...restored,skipped:restored.skipped+rejected};}
   };
  }
  function memory({limit=maxBytes}={}){const rows=new Map();let size=0;return wrap({
@@ -71,9 +77,10 @@
   const market={ex:item.exchange,symbol:item.symbol,int:tf},previous=item.meta?.market;
   if(previous&&(previous.ex!==market.ex||previous.symbol!==market.symbol))return null;
   const endTime=item.meta?.snapshotByTimeframe?.[tf]??item.comparison?.find(r=>r.timeframe===tf)?.snapshotEnd??item.meta?.endTime??job.config.endTime;
-  const config={...job.config,...item.meta?.config,timeframe:tf,endTime,cacheRangeEnd:item.meta?.config?.cacheRangeEnd??job.config.cacheRangeEnd??job.config.endTime};
+  const config={...job.config,...item.meta?.config,timeframe:tf,endTime,cacheRangeEnd:item.meta?.config?.cacheRangeEnd??job.config.cacheRangeEnd??(job.allHistory?'latest':job.config.endTime)};
   if(!Number.isFinite(config.startTime)||!Number.isFinite(endTime)||endTime<=config.startTime)return null;
-  const summary=job.config.timeframe===tf?item.summary:job.config.timeframe==='all'?item.comparison?.find(r=>r.timeframe===tf):null;
+  let summary=job.config.timeframe===tf?item.summary:job.config.timeframe==='all'?item.comparison?.find(r=>r.timeframe===tf):null;
+  if(tf==='all'&&job.config.timeframe==='all'&&!usableSummary(summary)&&Array.isArray(item.comparison)){const valid=item.comparison.filter(usableSummary),best=valid.find(r=>r.timeframe===summary?.bestTimeframe)||valid.slice().sort((a,b)=>(b.totalReturnPct??b.netPnl)-(a.totalReturnPct??a.netPnl))[0];if(best)summary={...best,timeframe:'all',bestTimeframe:best.timeframe};}
   const meta={...item.meta,market,config,startTime:item.meta?.startTime??config.startTime,endTime,coverage:item.meta?.coverage||{},fundingCoverage:item.meta?.fundingCoverage||{},gaps:item.meta?.gaps||0};
   return {market,config,meta,summary,comparison:tf==='all'?item.comparison:undefined};
  }
@@ -82,13 +89,15 @@
   for(const job of jobs||[]){
    const item=job.items?.find(i=>i.exchange===(market.exchange||market.ex)&&i.symbol===market.symbol&&i.status==='done'),row=batchCandidate(job,item,c.timeframe);if(!row)continue;
    try{if(JSON.stringify(strategyValues(row.config,tf))!==signature)continue;}catch{continue;}
-   const rangeMatches=row.config.startTime===c.startTime&&row.config.cacheRangeEnd===(c.cacheRangeEnd??c.endTime);
+   const requestEnd=c.cacheRangeEnd??c.endTime,originalEnd=job.config.cacheRangeEnd??(job.allHistory?'latest':job.config.endTime);
+   const rangeMatches=row.config.startTime===c.startTime&&row.config.cacheRangeEnd===requestEnd||c.researchOnly!==true&&job.config.startTime===c.startTime&&originalEnd===requestEnd;
    if((!sameRange||rangeMatches)&&row.config.endTime<=(c.cacheMaxEnd??Infinity))rows.push({...row,rangeMatches});
   }
   return rows.sort((a,b)=>Number(b.rangeMatches)-Number(a.rangeMatches));
  }
+ const usableSummary=value=>Number.isSafeInteger(value?.totalTrades)&&Number.isFinite(value.netPnl);
  function savedSummary(row){
-  if(!Number.isSafeInteger(row?.summary?.totalTrades)||!Number.isFinite(row.summary.netPnl))return null;
+  if(!usableSummary(row?.summary))return null;
   return {summary:row.summary,comparison:row.comparison,summaryOnly:true,detailRequest:{market:row.market,config:row.config},meta:{...row.meta,reuse:{kind:'batch-summary',snapshotEnd:row.meta.endTime,rangeDiffers:row.rangeMatches===false,networkRequests:0,recalculated:false}}};
  }
  async function readDetail(store,market,c,snapshot=true){
@@ -107,5 +116,5 @@
   for(const row of candidates){const output=await openBatchResult(store,row);signal?.throwIfAborted();if(output&&!output.summaryOnly)return output;summary??=output;}
   return summary;
  }
- let shared;return {readyFor,equityPoints,version,maxBytes,frames,key,requestKey,memory,open,output,compare,fromHeads,batchCandidate,batchCandidates,savedSummary,openBatchResult,openIndividual,getDefault:()=>shared??=open()};
+ let shared;return {readyFor,equityPoints,version,maxBytes,frames,key,requestKey,sameStrategy,memory,open,output,compare,fromHeads,batchCandidate,batchCandidates,savedSummary,openBatchResult,openIndividual,getDefault:()=>shared??=open()};
 });

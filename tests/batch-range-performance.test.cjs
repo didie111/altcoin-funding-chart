@@ -37,7 +37,7 @@ test('a 139-coin full-history job keeps every contract rather than capping the w
  await runner.start(markets,{timeframe:'3m',startTime:start,endTime:end},{allHistory:true});assert.equal(runner.snapshot().status,'done');assert.deepEqual(seen,markets.map(m=>m.symbol));assert.equal(runner.snapshot().items.length,139);
 });
 test('the displayed plan matches configured dates and exposes auxiliary minute collection separately',()=>{
- const source=fs.readFileSync(require.resolve('../backtest-batch-ui.js'),'utf8'),scope={$:()=>({value:'settings'}),F:{store:{snapshot:()=>({markets:[{exchange:'BINANCE'},{exchange:'MEXC'}]})}},root:{BacktestData:D},Date};vm.createContext(scope);vm.runInContext(source.slice(source.indexOf('function plan('),source.indexOf('  function renderPlan(')),scope);
+ const source=fs.readFileSync(require.resolve('../backtest-batch-ui.js'),'utf8'),scope={$:()=>({value:'settings'}),F:{store:{snapshot:()=>({markets:[{exchange:'BINANCE'},{exchange:'MEXC'}]})}},root:{BacktestData:D,BacktestBatch:Batch},job:null,Date};vm.createContext(scope);vm.runInContext(source.slice(source.indexOf('function plan('),source.indexOf('  function renderPlan(')),scope);
  const p=scope.plan({startTime:start,endTime:end,timeframe:'3m',splitTrigger:'step_pct'});assert.equal(p.startTime,start);assert.equal(p.endTime,end);assert.equal(p.allHistory,false);assert.equal(p.estimates[0].totalCount,145520);assert.equal(p.estimates[1].frames['3m'].nativeTimeframe,'1m');
  const fixed=scope.plan({startTime:start,endTime:end,timeframe:'3m',splitTrigger:'rsi_cross_up_1m'});assert.equal(fixed.estimates[0].totalCount,581920);
 });
