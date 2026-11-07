@@ -1,6 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict');
 const Backup=require('../backtest-backup.js'),Cache=require('../backtest-cache.js'),Favorites=require('../coin-favorites.js');
+const Batch=require('../backtest-batch.js');
 const payload=()=>({version:1,app:'funding-chart-batch-v1',exportedAt:1,pages:[],jobs:[],favorites:['BINANCE:AKEUSDT','BYBIT:BTCUSDT']});
 function downloadEnvironment(picker){
  const calls=[],links=[],env={
@@ -37,4 +38,23 @@ test('backup restores favorites, fixed strategy and progress with exact Float64 
 test('old backups without favorites remain readable; malformed favorites or market pages cannot modify existing data',async()=>{
  const store=Cache.memory(),favorites=Favorites.create();favorites.change(['BINANCE:AKEUSDT'],true);const options={store,favorites,parseKey:Favorites.parseKey},old={...payload()};delete old.favorites;await Backup.restore(old,options);
  await assert.rejects(Backup.restore({...payload(),favorites:['WRONG:BTCUSDT']},options),/즐겨찾기/);await assert.rejects(Backup.restore({...payload(),pages:[{key:'x',data:{kind:'ohlcv-page-v2',count:2,values:[]}}]},options),/캔들/);assert.deepEqual(favorites.snapshot().keys,['BINANCE:AKEUSDT']);assert.deepEqual(await store.keys(),[]);
+});
+
+test('reimporting a 139-coin completed backup opens that run ahead of newer empty or partial attempts',async()=>{
+ const store=Cache.memory(),favorites=Favorites.create(),options={store,favorites,parseKey:Favorites.parseKey},config={timeframe:'1m',startTime:100,endTime:200,cacheRangeEnd:'latest',minFundingRate:-.6};
+ const markets=Array.from({length:139},(_,i)=>({exchange:'BINANCE',symbol:'DEMO'+i+'USDT'})),items=markets.map((m,i)=>({...m,status:'done',summary:{totalTrades:7+i,netPnl:i-4}}));
+ const completed={id:'saved-full',updated:1,status:'done',allHistory:true,config,items},legacy={...payload(),jobs:[completed],favorites:markets.map(m=>m.exchange+':'+m.symbol)},runner=Batch.create({store,execute:()=>{throw Error('restoring must not execute');}});
+ await store.saveJob({...completed,id:'new-blank',updated:9,status:'paused',config:{...config,timeframe:'3m'},items:markets.map(m=>({...m,status:'pending'}))});
+ assert.equal((await Backup.restore(legacy,options)).restoredJobId,completed.id);assert.deepEqual(await runner.restore(),completed);assert.equal(favorites.snapshot().size,139);
+ for(let i=10;i<14;i++)await store.saveJob({...completed,id:'attempt-'+i,updated:i,status:'paused',config:{...config,timeframe:i%2?'3m':'1m'},items:markets.map((m,j)=>({...m,status:j===0?'done':'pending'}))});
+ assert.equal((await runner.restore()).id,'attempt-13');assert.deepEqual(await runner.restore(completed.id),completed);
+ const stale={...completed,updated:20,status:'paused',items:items.slice(0,70).concat(markets.slice(70).map(m=>({...m,status:'pending'})))};
+ await Backup.restore({...legacy,jobs:[stale]},options);assert.deepEqual(await runner.restore(),completed);
+ const restored=await Backup.restore(legacy,options);assert.equal(restored.restoredJobId,completed.id);assert.deepEqual(await runner.restore(),completed);assert.equal((await store.exportAll()).activeJobId,completed.id);
+});
+
+test('a new backup remembers the selected completed run even when another completed run is newer',async()=>{
+ const store=Cache.memory(),config={timeframe:'1m',startTime:100,endTime:200},item={exchange:'BYBIT',symbol:'BTCUSDT',status:'done',summary:{totalTrades:1,netPnl:2}};
+ const first={id:'first',updated:1,status:'done',config,items:[item]};await store.saveJob(first);await store.saveJob({...first,id:'later',updated:2,config:{...config,timeframe:'3m'}});await store.selectJob(first.id);
+ const target=Cache.memory(),data=JSON.parse(await (await Backup.blob(await store.exportAll())).text());assert.equal((await target.importAll(data)).restoredJobId,first.id);assert.deepEqual(await target.activeJob(),first);
 });
