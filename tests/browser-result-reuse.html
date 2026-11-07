@@ -1,6 +1,6 @@
 <!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>저장 결과 재사용 검증</title>
 <link rel="stylesheet" href="../backtest.css"><link rel="stylesheet" href="../coin-favorites.css"><style>*{box-sizing:border-box}body{margin:0;background:#101a2a;color:#dfedff;font:14px/1.65 system-ui}header.qa{padding:16px 20px;background:#172942}h1{font-size:22px;margin:0 0 4px}.qa p{margin:4px 0 12px;color:#aac4e4}.qa-actions{display:flex;gap:8px;flex-wrap:wrap}.qa-actions button{font:inherit;border-radius:5px;border:1px solid #55759b;background:#294872;color:white;padding:8px 12px;cursor:pointer}.qa-actions button:disabled{opacity:.45}#qaResult{white-space:pre-wrap;margin:12px 20px;color:#9fe4c2}#qaDetail{margin:12px 20px;color:#c7dcf5}#qaReport{height:min(56vh,590px);margin:12px 20px;border:1px solid #3a5576;border-radius:8px;background:#142236}.bt-batch-monitor{padding-top:10px}</style>
-<header class="qa"><h1>저장한 백테스트 결과 속도 검증</h1><p>개발 검증 전용 · 생성 예제 139개 · 1년 분량의 1분봉 · 실제 시세나 투자 성과가 아닙니다.</p><div class="qa-actions"><button id="qaSeed">격리 저장소에 예제 결과 준비</button><button id="qaTrade" disabled>거래 보기 시간 측정</button><button id="qaThree" disabled>139개 · 3분봉 재실행</button><button id="qaMonth" disabled>139개 · 월봉 재실행</button><button id="qaAll" disabled>11개 주기 전체 속도 검증</button><button id="qaBackup" disabled>상세 결과 백업 복원 검증</button></div></header>
+<header class="qa"><h1>저장한 백테스트 결과 속도 검증</h1><p>개발 검증 전용 · 생성 예제 139개 · 1년 분량의 1분봉 · 실제 시세나 투자 성과가 아닙니다.</p><div class="qa-actions"><button id="qaSeed">격리 저장소에 예제 결과 준비</button><button id="qaReopen">준비된 예제 저장소 다시 열기</button><button id="qaTrade" disabled>거래 보기 시간 측정</button><button id="qaThree" disabled>139개 · 3분봉 재실행</button><button id="qaMonth" disabled>139개 · 월봉 재실행</button><button id="qaAll" disabled>11개 주기 전체 속도 검증</button><button id="qaBackup" disabled>상세 결과 백업 복원 검증</button></div></header>
 <pre id="qaResult" role="status">준비 대기</pre><div id="qaDetail"></div><main id="qaHost"><div id="qaReport" class="bt-report"></div></main>
 <script src="../timeframes.js"></script><script src="../funding.js"></script><script src="../indicators.js"></script><script src="../backtest-bars.js"></script><script src="../backtest-engine.js"></script><script src="../relay-config.js"></script><script src="../market-shared.js"></script><script src="../market-api.js"></script><script src="../backtest-data.js"></script><script src="../dashboard-model.js"></script><script src="../coin-favorites.js"></script><script src="../coin-favorites-ui.js"></script><script src="../backtest-cache.js"></script><script src="../backtest-results.js"></script><script src="../backtest-batch.js"></script><script src="../backtest-batch-ui.js"></script><script>
 'use strict';
@@ -20,17 +20,22 @@ $('qaSeed').onclick=async()=>{
     assert(await store.save(m,config,result,meta),'예제 저장 한도 초과');if(tf==='1m')items.push({...m,status:'done',summary:result.summary,meta});if(index%25===0){$('qaResult').textContent=tf+' 예제 결과 저장 · '+(index+1)+' / 139';await yieldPaint();}
    }
   }
+  await mount(name,items,jobStore);
+ }catch(e){add('실패 · '+e.stack);}
+};
+async function mount(name,items,jobStore=BacktestCache.memory()){
   // Open a new real IndexedDB connection; no in-memory reference to computed results is used for the timed checks.
   results=await BacktestResults.open({name});const info=await results.info();assert(info.persistent,'실제 IndexedDB 사용 불가');
+  if(!items){const found=await results.findMany(markets,config);assert(found.every(Boolean),'준비한 예제139개를 확인할 수 없습니다.');items=found.map((h,i)=>({...markets[i],status:'done',summary:h[0].summary,meta:h[0].meta}));}
   await jobStore.saveJob({id:'generated-139',updated:Date.now(),status:'done',config,items,allHistory:false});BacktestCache.open=async()=>jobStore;BacktestResults.getDefault=async()=>results;
   CoinFavorites.store=CoinFavorites.create();CoinFavorites.store.change(markets.map(m=>m.exchange+':'+m.symbol),true);
   window.Worker=function(){workers++;throw Error('저장된 결과를 여는 동안 작업이 재시작됐습니다.');};MarketAPI.json=async()=>{network++;throw Error('예제에서 네트워크 요청이 발생했습니다.');};
-  const view=BacktestBatchUI.bind({host:$('qaHost'),report:$('qaReport'),getConfig:()=>config,isBusy:()=>false,onBusy:()=>{},onResult:output=>{assert(output.meta.reuse&&output.result.config.timeframe==='1m','원래 1분봉 상세 결과 불일치');$('qaDetail').textContent=output.meta.market.symbol+' · 저장한 1분봉 거래 '+output.result.trades.length+'건 · 첫 거래 '+(output.result.trades[0]?.netPnl?.toFixed(4)??'없음')+' USDT';detailTime=now()-started;add('거래 보기: '+detailTime.toFixed(1)+'ms · 원본 재조회 '+network+'회 · 새 Worker '+workers+'회');},onOpen:()=>{},onSettings:()=>{}});view.render();
+  const view=BacktestBatchUI.bind({host:$('qaHost'),report:$('qaReport'),getConfig:()=>config,isBusy:()=>false,onBusy:()=>{},onResult:output=>{assert(output.meta.reuse&&output.result.config.timeframe===output.meta.market.int,'원래 주기의 상세 결과 불일치');$('qaDetail').textContent=output.meta.market.symbol+' · 저장한 '+DashboardModel.labels[output.meta.market.int]+' 거래 '+output.result.trades.length+'건 · 첫 거래 '+(output.result.trades[0]?.netPnl?.toFixed(4)??'없음')+' USDT';detailTime=now()-started;add('거래 보기: '+detailTime.toFixed(1)+'ms · 원본 재조회 '+network+'회 · 새 Worker '+workers+'회');},onOpen:()=>{},onSettings:()=>{}});view.render();
   $('qaResult').textContent='준비 완료 · 139개 × 11개 주기 · '+(info.bytes/1048576).toFixed(2)+'MiB · 실제 IndexedDB';seeded=true;
   for(const id of ['qaTrade','qaThree','qaMonth','qaAll','qaBackup'])$(id).disabled=false;
- }catch(e){add('실패 · '+e.stack);}
-};
-$('qaTrade').onclick=()=>{started=now();const btn=$('btBatchResults').querySelector('[data-batch-detail]');assert(btn,'거래 보기 버튼을 찾지 못했습니다.');btn.click();};
+}
+$('qaReopen').onclick=async()=>{try{assert(!seeded,'새 탭에서 다시 열어 주세요.');const names=(await indexedDB.databases()).map(d=>d.name).filter(n=>n?.startsWith('qa-completed-results-')).sort();assert(names.length,'먼저 예제 결과를 준비하세요.');await mount(names.at(-1));$('qaSeed').disabled=true;}catch(e){add('실패 · '+e.message);}};
+$('qaTrade').onclick=()=>{started=now();const btn=$('btBatchResults').querySelector('[data-batch-detail]');assert(btn&&!btn.disabled,'거래 보기 버튼이 사용할 수 없는 상태입니다.');btn.click();};
 async function batch(tf){
  const select=$('btBatchFrame');select.value=tf;select.dispatchEvent(new Event('change'));$('btBatchStart').click();const accept=[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='테스트 시작');assert(accept,'실행 확인창을 찾지 못했습니다.');
  const began=now();await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{observer.disconnect();reject(Error('139개 저장 결과를 불러오지 못했습니다.'));},6000),observer=new MutationObserver(()=>{if($('btBatchStatus').textContent.includes('139개 저장 결과 재사용')){observer.disconnect();clearTimeout(timer);resolve();}});observer.observe($('btBatchStatus'),{childList:true,subtree:true});accept.click();});
