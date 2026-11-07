@@ -1,0 +1,3 @@
+# Keep source snapshots in GitHub without copying them to the live site.
+exclude:
+  - backups
