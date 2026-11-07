@@ -46,3 +46,34 @@ test('under storage pressure the requested one minute detail is kept ahead of au
  for(let i=0;i<5;i++)await store.save({...market,symbol:'DEMO'+i+'USDT'},config,derived.result,derived.meta);
  assert.ok(await store.find(market,config));assert.equal(await store.find({...market,symbol:'DEMO0USDT'},{...config,timeframe:'3m'}),null);assert.ok(await store.find({...market,symbol:'DEMO4USDT'},{...config,timeframe:'3m'}));assert.ok((await store.info()).bytes<=limit);
 });
+
+const history={...config,startTime:Date.UTC(2009,0,1)/1000,cacheRangeEnd:'latest'};
+function historicalJob(o){return {id:'saved-1m',status:'done',allHistory:true,config:history,items:[{...market,status:'done',summary:o.result.summary,meta:o.meta}]};}
+test('individual execution can open a completed whole-history batch detail with a different date preset and no other-frame marker',async()=>{
+ const store=R.memory(),o=computed(history),job=historicalJob(o),request={...config,precomputeTimeframes:true},listJobs=async()=>[job];
+ assert.ok(o.result.trades.length>0);await store.save(market,history,o.result,o.meta);
+ const saved=await R.openIndividual(store,market,request,{listJobs});assert.deepEqual(saved.result,o.result);assert.equal(saved.meta.reuse.snapshotEnd,history.endTime);assert.equal(saved.meta.reuse.rangeDiffers,true);
+ for(const [m,c] of [[{...market,exchange:'BINANCE'},request],[{...market,symbol:'ETHUSDT'},request],[market,{...request,feePct:.12}],[market,{...request,rsiPeriod:20}],[market,{...request,timeframe:'3m'}],[market,{...request,reuseCompleted:false}]])assert.equal(await R.openIndividual(store,m,c,{listJobs}),null);
+ const exact=computed(config);await store.save(market,config,exact.result,exact.meta);assert.deepEqual((await R.openIndividual(store,market,request,{listJobs})).result,exact.result);
+});
+test('older backups open the real summary immediately and never substitute 1m statistics for 3m trades',async()=>{
+ const store=R.memory(),o=computed(history),job=historicalJob(o),c={...config,timeframe:'3m'},listJobs=async()=>[job];
+ const row=R.batchCandidate(job,job.items[0],'1m'),saved=await R.openBatchResult(store,row);assert.equal(saved.summaryOnly,true);assert.equal(saved.result,undefined);assert.deepEqual(saved.summary,o.result.summary);assert.equal(saved.detailRequest.config.cacheRangeEnd,'latest');assert.equal(saved.detailRequest.config.endTime,history.endTime);
+ assert.equal((await R.openIndividual(store,market,config,{listJobs})).summaryOnly,true);assert.equal(await R.openIndividual(store,market,c,{listJobs}),null);
+ const derived=computed(history,'3m');await store.save(market,history,derived.result,derived.meta);const opened=await R.openIndividual(store,market,c,{listJobs});assert.deepEqual(opened.result,derived.result);assert.equal(opened.meta.market.int,'3m');
+});
+test('starting a different timeframe from a restored range reuses the original snapshot instead of a later run',async()=>{
+ const resultStore=R.memory(),jobStore=C.memory(),o=computed(history),job=historicalJob(o),derived=computed(history,'3m'),after={...history,timeframe:'3m',endTime:history.endTime+86400},newer=computed(after);
+ await resultStore.save(market,history,derived.result,derived.meta);await resultStore.save(market,after,newer.result,newer.meta);
+ assert.equal((await resultStore.find(market,after))[0].snapshotEnd,after.endTime);
+ await jobStore.importAll({app:'funding-chart-batch-v1',version:1,pages:[],jobs:[job]});let calls=0;
+ const batch=Batch.create({store:jobStore,execute:()=>{calls++;throw Error('unexpected collection');},lookup:async(markets,c)=>Promise.all((await resultStore.findMany(markets,c)).map(h=>R.fromHeads(resultStore,h,c)))});
+ await batch.restore();await batch.start([market],{...config,timeframe:'3m'},{allHistory:true,fixedRange:history});
+ const saved=batch.snapshot();assert.equal(saved.config.startTime,history.startTime);assert.equal(saved.config.endTime,history.endTime);assert.equal(saved.config.cacheRangeEnd,'latest');assert.equal(saved.items[0].meta.reuse.snapshotEnd,history.endTime);assert.deepEqual(saved.items[0].summary,derived.result.summary);assert.equal(calls,0);assert.deepEqual(await jobStore.getJob(job.id),job);
+});
+test('a portable backup that fits restores prepared frames even when the destination has a full cache',async()=>{
+ const source=R.memory(),o=computed(history),derived=computed(history,'3m');await source.save(market,history,o.result,o.meta);await source.save(market,history,derived.result,derived.meta);
+ const limit=(await source.info()).bytes,restored=R.memory({limit});for(let i=0;i<8;i++)await restored.save({...market,symbol:'OTHER'+i+'USDT'},history,o.result,o.meta);
+ assert.deepEqual(await restored.importAll(await source.exportAll()),{imported:2,skipped:0});assert.equal((await restored.info()).bytes,limit);
+ const head=(await restored.find(market,{...history,timeframe:'3m'}))[0];assert.deepEqual((await restored.read(head)).result,derived.result);
+});

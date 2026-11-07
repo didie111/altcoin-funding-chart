@@ -1,5 +1,5 @@
 'use strict';
-importScripts('relay-config.js?v=20261013-relay-1','market-shared.js?v=20261025-mtf-1','market-api.js?v=20261026-context-data-ruler-1','funding.js?v=20261027-funding-cursor-1','timeframes.js?v=20261107-result-reuse-1','indicators.js?v=20261025-backtest-1','backtest-bars.js?v=20261107-responsive-backup-1','backtest-engine.js?v=20261107-responsive-backup-1','backtest-data.js?v=20261107-result-reuse-1','backtest-cache.js?v=20261107-result-reuse-1','backtest-archive.js?v=20261107-responsive-backup-1','dashboard-model.js?v=20261107-result-reuse-1','backtest-results.js?v=20261107-result-reuse-1');
+importScripts('relay-config.js?v=20261013-relay-1','market-shared.js?v=20261025-mtf-1','market-api.js?v=20261026-context-data-ruler-1','funding.js?v=20261027-funding-cursor-1','timeframes.js?v=20261107-result-reuse-1','indicators.js?v=20261025-backtest-1','backtest-bars.js?v=20261107-responsive-backup-1','backtest-engine.js?v=20261107-responsive-backup-1','backtest-data.js?v=20261107-result-reuse-1','backtest-cache.js?v=20261107-individual-restore-1','backtest-archive.js?v=20261107-responsive-backup-1','dashboard-model.js?v=20261107-result-reuse-1','backtest-results.js?v=20261107-individual-restore-1');
 let active=false,requestNumber=0;const pendingRequests=new Map();
 onmessage=async event=>{
  if(event.data.marketResponse){const response=event.data.marketResponse,pending=pendingRequests.get(response.requestId);if(pending){pendingRequests.delete(response.requestId);response.error?pending.reject(Object.assign(Error(response.error.message),response.error)):pending.resolve(response.data);}return;}
@@ -12,7 +12,7 @@ onmessage=async event=>{
   const store=await BacktestCache.open(),adapter=BacktestCache.adapter({candlePage:BacktestData.candlePage,fundingPage:BacktestData.fundingPage,store,onCache:()=>cached++}),m={ex:market.exchange,symbol:market.symbol,int:config.timeframe};
   MarketAPI.json=(url,params={})=>new Promise((resolve,reject)=>{const requestId=++requestNumber;pendingRequests.set(requestId,{resolve,reject});postMessage({id,marketRequest:{requestId,url,params}});});
   const results=typeof BacktestResults!=='undefined'?await BacktestResults.getDefault():null;
-  if(results&&(strictSnapshot&&detail||config.reuseCompleted!==false)){const heads=await results.find(market,config,{snapshot:!strictSnapshot});const saved=BacktestResults.readyFor(heads,config,strictSnapshot)?await BacktestResults.fromHeads(results,heads,config,{detail}):null;if(saved){progress({phase:'reuse',text:'저장된 완료 결과 · 원본 재조회 0회 · 재계산 없음'});postMessage({id,output:saved});return;}}
+  if(results&&(strictSnapshot&&detail||config.reuseCompleted!==false)){const heads=await results.find(market,config,{snapshot:!strictSnapshot});const saved=(detail&&heads||BacktestResults.readyFor(heads,config,strictSnapshot))?await BacktestResults.fromHeads(results,heads,config,{detail}):null;if(saved){progress({phase:'reuse',text:'저장된 완료 결과 · 원본 재조회 0회 · 재계산 없음'});postMessage({id,output:saved});return;}}
   let effectiveStartTime=config.startTime,knownListingTime=null;
   if(m.ex==='BINANCE'&&config.startTime<1567296000){
    try{
