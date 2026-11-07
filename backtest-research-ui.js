@@ -3,7 +3,7 @@
  function bind({host,panel,getMarkets,collect,readResults,setBusy,isBusy,onReady,officialFiles,fmt,stamp,batchStatus}){
   const doc=host.ownerDocument,storage=()=>root.BacktestResearchStore.getDefault(),H=root.BacktestResearch;
   const element=doc.createElement('details');element.className='bt-research';element.id='btResearchPanel';
-  element.innerHTML='<summary>원본 보관 · 저장 자료로 연구 <span id="btResearchBadge">원본 확인 중</span></summary><p>즐겨찾기의 실제 1분봉과 공식 펀딩 정산을 모읍니다. 이미 보관한 기간은 건너뛰고, 기존 일괄 결과와는 따로 저장합니다.</p><div class="bt-research-actions"><button id="btResearchCollect" type="button">원본 수집·이어서</button><button id="btResearchExport" type="button">원본 포함 백업</button><button id="btResearchStop" type="button" hidden>원본 작업 중지</button></div><progress id="btResearchProgress" max="1" value="0" aria-label="원본 수집 또는 백업 진행률" hidden></progress><p id="btResearchStatus" role="status" aria-live="polite">수집한 뒤 개별 실행의 원본 계산 또는 일괄 설정의 보관 원본만 사용을 선택하세요.</p><p id="btResearchSpace"></p><details><summary>코인별 보관 범위</summary><ul id="btResearchMarkets"></ul></details>';
+  element.innerHTML='<summary>원본 보관 · 저장 자료로 연구 <span id="btResearchBadge">원본 확인 중</span></summary><p>즐겨찾기의 실제 1분봉과 공식 펀딩 정산을 모읍니다. 이미 보관한 기간은 건너뜁니다. 일반 백업의 완료 결과와 새 계산에 필요한 원본은 별개입니다.</p><div class="bt-research-actions"><button id="btResearchCollect" type="button">원본 수집·이어서</button><button id="btResearchExport" type="button">원본 포함 백업</button><button id="btResearchStop" type="button" hidden>원본 작업 중지</button></div><progress id="btResearchProgress" max="1" value="0" aria-label="원본 수집 또는 백업 진행률" hidden></progress><p id="btResearchStatus" role="status" aria-live="polite">수집한 뒤 개별 실행의 원본 계산 또는 일괄 설정의 보관 원본만 사용을 선택하세요.</p><p id="btResearchSpace"></p><details><summary>코인별 보관 범위</summary><ul id="btResearchMarkets"></ul></details>';
   panel.prepend(element);const $=id=>element.querySelector('#'+id);
   let controller=null,busy=false,hasData=false,refreshId=0,retryAt=0;
   function controls(){
@@ -72,7 +72,7 @@
    finally{controller=null;setActive(false);}
   };
   void refresh();
-  return {refresh,controls,fileProgress,cancel:()=>$('btResearchStop').onclick()};
+  return {refresh,controls,fileProgress,reveal(message){element.open=true;status(message);element.scrollIntoView({block:'nearest'});},cancel:()=>$('btResearchStop').onclick()};
  }
  root.BacktestResearchUI={bind};
 })(globalThis);
