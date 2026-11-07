@@ -39,7 +39,7 @@ function row(index){return $('btBatchResults').querySelector('[data-batch-detail
 async function importFile(file){
  showBatch();const input=$('btBatchImportFile'),data=new DataTransfer();data.items.add(file);input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}));
  await waitFor(()=>!$('btBatchImport').disabled&&$('btBatchStatus').textContent.startsWith('데이터 복원 완료'),'백업 복원');
- assert($('btBatchSavedJob').value===batchId&&$('btBatchCount').textContent==='139 / 139'&&$('btBatchFrame').value==='1m'&&$('btBatchPeriod').value==='saved','파일의 1분봉 139개를 열지 않았습니다.');
+ assert($('btBatchSavedJob').value===batchId&&$('btBatchCount').textContent==='139 / 139'&&$('btBatchFrame').value==='1m'&&$('btBatchPeriod').value==='all','파일의 1분봉 139개를 열지 않았습니다.');
 }
 async function rerun(tf){
  showBatch();const previous=$('btBatchSavedJob').value,label=DashboardModel.labels[tf];select('btBatchFrame',tf);$('btBatchStart').click();const accept=[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='테스트 시작');assert(accept,'실행 확인창 없음');

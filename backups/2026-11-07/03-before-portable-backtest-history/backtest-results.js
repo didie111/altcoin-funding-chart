@@ -1,0 +1,111 @@
+(function(root,factory){'use strict';const api=factory(root,typeof module==='object'&&module.exports?require('./timeframes.js'):root.TimeframeEngine,typeof module==='object'&&module.exports?require('./backtest-engine.js'):root.BacktestEngine);if(typeof module==='object'&&module.exports)module.exports=api;else root.BacktestResults=api;})(globalThis,function(root,T,E){
+ 'use strict';
+ // Bump this whenever data interpretation or the trading engine changes.
+ const equityPoints=512,version=1,maxBytes=64*1048576,maxRawBytes=64*1048576,frames=Object.keys(T.seconds),decoder=new TextDecoder(),encoder=new TextEncoder();
+ const strategyFields=Object.keys(E.defaultStrategyConfig).sort();
+ function strategyValues(c,tf){const normalized=E.normalizeConfig({...c,timeframe:tf});return strategyFields.map(k=>[k,normalized[k]]);}
+ function identity(m,c,tf=c.timeframe){return [version,m.exchange||m.ex,m.symbol,strategyValues(c,tf),c.startTime,c.cacheRangeEnd??c.endTime];}
+ const requestKey=(m,c,tf)=>JSON.stringify(identity(m,c,tf));
+ const scopeKey=parts=>JSON.stringify([parts[0],...parts.slice(3)]);
+ function byRequest(heads,maxEnd=Infinity){const found=new Map();for(const h of heads)if(h.snapshotEnd<=maxEnd&&(!found.has(h.requestKey)||found.get(h.requestKey).snapshotEnd<h.snapshotEnd))found.set(h.requestKey,h);return found;}
+ const key=(m,c,tf=c.timeframe)=>JSON.stringify([...identity(m,c,tf),T.start(c.endTime,tf)]);
+ async function bytes(stream,limit){const reader=stream.getReader(),parts=[];let size=0;try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>limit)throw Error('완료 결과가 보관 한도를 초과합니다.');parts.push(value);}}catch(e){await reader.cancel().catch(()=>{});throw e;}const out=new Uint8Array(size);let offset=0;for(const part of parts){out.set(part,offset);offset+=part.length;}return out;}
+ async function encode(result){const data=encoder.encode(JSON.stringify(result));if(data.length>maxRawBytes)return null;if(typeof root.CompressionStream==='function')return {encoding:'gzip',data:await bytes(new Blob([data]).stream().pipeThrough(new root.CompressionStream('gzip')),maxRawBytes)};return {encoding:'json',data};}
+ async function decode(payload){if(!payload||!['gzip','json'].includes(payload.encoding)||!(payload.data instanceof Uint8Array))throw Error('저장된 완료 결과 형식이 올바르지 않습니다.');const data=payload.encoding==='gzip'?await bytes(new Blob([payload.data]).stream().pipeThrough(new root.DecompressionStream('gzip')),maxRawBytes):payload.data;if(data.length>maxRawBytes)throw Error('완료 결과 크기를 확인하세요.');return JSON.parse(decoder.decode(data));}
+ const base64=data=>{let s='';for(let i=0;i<data.length;i+=32768)s+=String.fromCharCode(...data.subarray(i,i+32768));return btoa(s);};
+ const unbase64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+ const clone=value=>structuredClone(value);
+ function valid(head){return head?.version===version&&typeof head.key==='string'&&typeof head.requestKey==='string'&&frames.includes(head.timeframe)&&Number.isFinite(head.snapshotEnd)&&head.meta?.market?.symbol&&head.meta.market.ex&&head.meta.market.int===head.timeframe&&head.meta.config?.timeframe===head.timeframe&&Number.isFinite(head.meta.config.startTime)&&Number.isFinite(head.meta.config.endTime);}
+ function storageBytes(head,payload){const {bytes:_,touched:__,...fields}=head;return payload.data.byteLength+encoder.encode(JSON.stringify(fields)).byteLength+256;}
+ function restorePlan(previous,entries,limit){
+  const imported=new Map(entries.map(row=>[row.head.key,row])),heads=new Map(previous.map(head=>[head.key,head]));for(const {head} of imported.values())heads.set(head.key,head);
+  // A portable backup that fits must be recoverable even if this browser already has a full cache.
+  const order=[...heads.values()].reverse().sort((a,b)=>Number(imported.has(b.key))-Number(imported.has(a.key))||(b.priority||0)-(a.priority||0)||(b.touched||0)-(a.touched||0));
+  const kept=new Set();let total=0;for(const head of order)if(total+head.bytes<=limit){total+=head.bytes;kept.add(head.key);}
+  const writes=[...imported.values()].filter(row=>kept.has(row.head.key));return {kept,writes,total,imported:writes.length,skipped:imported.size-writes.length};
+ }
+ function wrap(backend){
+  async function findMany(markets,c,{snapshot=true,maxEnd=c.cacheMaxEnd??Infinity}={}){
+   const wanted=c.timeframe==='all'?frames:[c.timeframe],profiles=wanted.map(tf=>{const parts=identity({},c,tf);return {parts:parts.slice(3),scope:scopeKey(parts),end:T.start(c.endTime,tf)};}),queries=markets.flatMap(m=>profiles.map(p=>{const parts=[version,m.exchange||m.ex,m.symbol,...p.parts];return {request:JSON.stringify(parts),key:JSON.stringify([...parts,p.end]),scope:p.scope};})),groups=await backend.find(queries,snapshot,maxEnd);
+   return markets.map((m,i)=>{const rows=groups.slice(i*wanted.length,(i+1)*wanted.length);return rows.every(Boolean)?rows:null;});
+  }
+  return {
+   findMany,async find(m,c,options){return (await findMany([m],c,options))[0];},
+   async save(m,c,result,meta){const payload=await encode(result);if(!payload)return false;const tf=result.config.timeframe,identityParts=identity(m,c,tf),head={scope:scopeKey(identityParts),version,priority:c.timeframe===tf||c.timeframe==='all'?1:0,key:key(m,{...c,endTime:meta.endTime},tf),requestKey:requestKey(m,c,tf),timeframe:tf,snapshotEnd:meta.endTime,created:Date.now(),success:result.success,reason:result.reason,summary:clone(result.summary),meta:clone({...meta,market:{ex:m.exchange||m.ex,symbol:m.symbol,int:tf},config:result.config})};head.bytes=storageBytes(head,payload);return backend.put(head,payload);},
+   async read(head){if(!valid(head))throw Error('완료 결과의 거래소·종목·주기를 확인하세요.');const payload=await backend.read(head.key);if(!payload)return null;const result=await decode(payload);if(result.config?.timeframe!==head.timeframe||result.config?.startTime!==head.meta.config.startTime||result.config?.endTime!==head.meta.config.endTime||!Array.isArray(result.trades)||!Array.isArray(result.signals))throw Error('완료 결과와 실행 조건이 일치하지 않습니다.');return {result,summary:result.summary,meta:{...clone(head.meta),reuse:{kind:'completed-result',snapshotEnd:head.snapshotEnd,networkRequests:0,recalculated:false}}};},
+   info:()=>backend.info(),clear:()=>backend.clear(),
+   async exportAll(){const entries=[];for(const head of await backend.all()){const payload=await backend.read(head.key);if(payload)entries.push({head,payload:{encoding:payload.encoding,b64:base64(payload.data)}});}return {version,entries};},
+   async importAll(value){if(!value)return {imported:0,skipped:0};if(value.version!==version||!Array.isArray(value.entries))throw Error('완료 결과 백업 형식이 올바르지 않습니다.');const rows=[];for(const entry of value.entries){if(!valid(entry.head)||entry.head.key!==key(entry.head.meta.market,entry.head.meta.config,entry.head.timeframe)||entry.head.requestKey!==requestKey(entry.head.meta.market,entry.head.meta.config,entry.head.timeframe)||!['gzip','json'].includes(entry.payload?.encoding)||typeof entry.payload.b64!=='string')throw Error('완료 결과 백업 항목을 확인하세요.');const payload={encoding:entry.payload.encoding,data:unbase64(entry.payload.b64)},result=await decode(payload);if(result.config?.timeframe!==entry.head.timeframe||result.config.startTime!==entry.head.meta.config.startTime||result.config.endTime!==entry.head.meta.config.endTime||!Array.isArray(result.trades)||!Array.isArray(result.signals))throw Error('완료 결과 백업이 손상됐습니다.');const head={...entry.head,scope:scopeKey(JSON.parse(entry.head.requestKey)),priority:entry.head.priority===1?1:0};head.bytes=storageBytes(head,payload);rows.push({head,payload});}return rows.length?backend.restore(rows):{imported:0,skipped:0};}
+  };
+ }
+ function memory({limit=maxBytes}={}){const rows=new Map();let size=0;return wrap({
+  async find(queries,snapshot,maxEnd){const index=snapshot?byRequest([...rows.values()].map(r=>r.head),maxEnd):null;return queries.map(q=>{const h=snapshot?index.get(q.request):rows.get(q.key)?.head;return h&&h.snapshotEnd<=maxEnd?clone(h):null;});},
+  async put(head,payload){if(head.bytes>limit)return false;size-=rows.get(head.key)?.head.bytes||0;rows.delete(head.key);rows.set(head.key,{head:clone(head),payload:clone(payload)});size+=head.bytes;if(size>limit)for(const [k,r]of [...rows].sort((a,b)=>(a[1].head.priority||0)-(b[1].head.priority||0))){if(size<=limit)break;rows.delete(k);size-=r.head.bytes;}return rows.has(head.key);},
+  async restore(entries){const {kept,writes,total,imported,skipped}=restorePlan([...rows.values()].map(r=>r.head),entries,limit);for(const key of rows.keys())if(!kept.has(key))rows.delete(key);for(const r of writes){rows.delete(r.head.key);rows.set(r.head.key,clone(r));}size=total;return {imported,skipped};},
+  async read(k){const row=rows.get(k);if(row){rows.delete(k);rows.set(k,row);}return row?clone(row.payload):null;},async all(){return [...rows.values()].map(r=>clone(r.head));},async info(){return {bytes:size,maxBytes:limit,persistent:false};},async clear(){rows.clear();size=0;}
+ });}
+ const request=r=>new Promise((resolve,reject)=>{r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});
+ const complete=tx=>{const p=new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onerror=tx.onabort=()=>reject(tx.error||Error('완료 결과 보관 실패'));});p.catch(()=>{});return p;};
+ async function open({indexedDB=root.indexedDB,name='funding-chart-results-v1',limit=maxBytes}={}){
+  if(!indexedDB)return memory({limit});let db;try{const r=indexedDB.open(name,2);r.onupgradeneeded=event=>{const d=r.result,h=event.oldVersion<1?d.createObjectStore('heads',{keyPath:'key'}):r.transaction.objectStore('heads');if(event.oldVersion<1){h.createIndex('requestKey','requestKey');d.createObjectStore('payloads');d.createObjectStore('meta');}if(!h.indexNames.contains('retention'))h.createIndex('retention',['priority','touched']);h.createIndex('scope','scope');if(event.oldVersion>0){const cursor=h.openCursor();cursor.onsuccess=()=>{const row=cursor.result;if(!row)return;const old=row.value;row.update({...old,scope:scopeKey(JSON.parse(old.requestKey)),priority:old.priority===1?1:0});row.continue();};}};db=await request(r);}catch{return memory({limit});}db.onversionchange=()=>db.close();const fallback=memory({limit});let persistent=true;
+  async function protect(fn,other){if(!persistent)return other();try{return await fn();}catch{persistent=false;return other();}}
+  return wrap({
+   find(queries,snapshot,maxEnd){return protect(async()=>{const tx=db.transaction('heads','readonly'),done=complete(tx),h=tx.objectStore('heads');
+    if(snapshot&&queries.length>16){const scopes=[...new Set(queries.map(q=>q.scope))],rows=await Promise.all(scopes.map(s=>request(h.index('scope').getAll(s))));await done;const index=byRequest(rows.flat(),maxEnd);return queries.map(q=>index.get(q.request)||null);}
+    const groups=await Promise.all(queries.map(q=>request(snapshot?h.index('requestKey').getAll(q.request):h.get(q.key))));await done;return groups.map(g=>snapshot?(g.filter(h=>h.snapshotEnd<=maxEnd).sort((a,b)=>b.snapshotEnd-a.snapshotEnd)[0]||null):(g&&g.snapshotEnd<=maxEnd?g:null));
+   },async()=>{const all=(await fallback.exportAll()).entries.map(e=>e.head),index=snapshot?byRequest(all,maxEnd):new Map(all.map(h=>[h.key,h]));return queries.map(q=>{const h=index.get(snapshot?q.request:q.key);return h&&h.snapshotEnd<=maxEnd?h:null;});});},
+   put(head,payload){if(head.bytes>limit)return Promise.resolve(false);return protect(async()=>{const tx=db.transaction(['heads','payloads','meta'],'readwrite'),done=complete(tx),h=tx.objectStore('heads'),p=tx.objectStore('payloads'),m=tx.objectStore('meta'),[old,size]=await Promise.all([request(h.get(head.key)),request(m.get('bytes'))]);let total=(size||0)-(old?.bytes||0)+head.bytes,retained=true;h.put({...head,scope:head.scope||scopeKey(JSON.parse(head.requestKey)),priority:head.priority===1?1:0,touched:Date.now()});p.put(payload,head.key);if(total>limit)await new Promise((resolve,reject)=>{const q=h.index('retention').openCursor();q.onerror=()=>reject(q.error);q.onsuccess=()=>{const row=q.result;if(!row||total<=limit){resolve();return;}total-=row.value.bytes;if(row.value.key===head.key)retained=false;p.delete(row.value.key);row.delete();row.continue();};});m.put(total,'bytes');await done;return retained;},async()=>{const data={version,entries:[{head,payload:{encoding:payload.encoding,b64:base64(payload.data)}}]};return (await fallback.importAll(data)).imported===1;});},
+   restore(entries){return protect(async()=>{const tx=db.transaction(['heads','payloads','meta'],'readwrite'),done=complete(tx),h=tx.objectStore('heads'),p=tx.objectStore('payloads'),previous=await request(h.getAll()),{kept,writes,total,imported,skipped}=restorePlan(previous,entries,limit),touched=Date.now();for(const old of previous)if(!kept.has(old.key)){h.delete(old.key);p.delete(old.key);}for(const {head,payload} of writes){h.put({...head,touched});p.put(payload,head.key);}tx.objectStore('meta').put(total,'bytes');await done;return {imported,skipped};},()=>fallback.importAll({version,entries:entries.map(({head,payload})=>({head,payload:{encoding:payload.encoding,b64:base64(payload.data)}}))}));},
+   read(k){return protect(async()=>{const tx=db.transaction(['heads','payloads'],'readwrite'),done=complete(tx),h=tx.objectStore('heads'),[head,payload]=await Promise.all([request(h.get(k)),request(tx.objectStore('payloads').get(k))]);if(head)h.put({...head,touched:Date.now()});await done;return payload||null;},async()=>{const all=await fallback.exportAll(),entry=all.entries.find(e=>e.head.key===k);return entry?{encoding:entry.payload.encoding,data:unbase64(entry.payload.b64)}:null;});},
+   all(){return protect(()=>request(db.transaction('heads','readonly').objectStore('heads').getAll()),async()=>(await fallback.exportAll()).entries.map(e=>e.head));},
+   info(){return protect(async()=>({bytes:await request(db.transaction('meta','readonly').objectStore('meta').get('bytes'))||0,maxBytes:limit,persistent}),()=>fallback.info());},
+   clear(){return protect(async()=>{const tx=db.transaction(['heads','payloads','meta'],'readwrite'),done=complete(tx);for(const s of ['heads','payloads','meta'])tx.objectStore(s).clear();await done;},()=>fallback.clear());}
+  });
+ }
+ function output(head){return {summary:clone(head.summary),meta:{...clone(head.meta),reuse:{kind:'completed-result',snapshotEnd:head.snapshotEnd,networkRequests:0,recalculated:false}}};}
+ function compare(heads){const comparison=heads.filter(h=>h.summary).map(h=>({timeframe:h.timeframe,...h.summary,trades:h.summary.totalTrades,fundingEarned:h.summary.totalFundingEarned,...(h.snapshotEnd?{snapshotEnd:h.snapshotEnd}:{})})),best=k=>[...comparison].filter(r=>r.totalTrades>0).sort((a,b)=>(b[k]??Infinity)-(a[k]??Infinity))[0]||null;return {comparison,bestByWinRate:best('winRatePct'),bestByProfitFactor:best('profitFactor'),bestByTotalReturn:best('totalReturnPct')};}
+ async function fromHeads(store,heads,c,{detail=false}={}){if(!heads)return null;if(c.timeframe!=='all'){const h=heads[0];if(!h.success)throw Error(h.reason);return detail?store.read(h):output(h);}const comparisonResult=compare(heads),best=comparisonResult.bestByTotalReturn||comparisonResult.bestByWinRate||comparisonResult.comparison[0],first=output(heads.find(h=>h.timeframe===best.timeframe)||heads[0]);return {...first,summary:{...best,timeframe:'all',bestTimeframe:best.timeframe},meta:{...first.meta,market:{...first.meta.market,int:'all'},config:{...first.meta.config,timeframe:'all'},coverage:Object.assign({},...heads.map(h=>h.meta.coverage)),snapshotByTimeframe:Object.fromEntries(heads.map(h=>[h.timeframe,h.snapshotEnd]))},comparison:comparisonResult.comparison,comparisonResult:detail?comparisonResult:undefined};}
+ const readyFor=(heads,c,strict=false)=>Boolean(heads&&(strict||c.timeframe!=='1m'||c.precomputeTimeframes!==true||heads[0].meta.preparedTimeframes?.length));
+ function batchCandidate(job,item,tf){
+  if(!job?.config||item?.status!=='done')return null;
+  const market={ex:item.exchange,symbol:item.symbol,int:tf},previous=item.meta?.market;
+  if(previous&&(previous.ex!==market.ex||previous.symbol!==market.symbol))return null;
+  const endTime=item.meta?.snapshotByTimeframe?.[tf]??item.comparison?.find(r=>r.timeframe===tf)?.snapshotEnd??item.meta?.endTime??job.config.endTime;
+  const config={...job.config,...item.meta?.config,timeframe:tf,endTime,cacheRangeEnd:item.meta?.config?.cacheRangeEnd??job.config.cacheRangeEnd??job.config.endTime};
+  if(!Number.isFinite(config.startTime)||!Number.isFinite(endTime)||endTime<=config.startTime)return null;
+  const summary=job.config.timeframe===tf?item.summary:job.config.timeframe==='all'?item.comparison?.find(r=>r.timeframe===tf):null;
+  const meta={...item.meta,market,config,startTime:item.meta?.startTime??config.startTime,endTime,coverage:item.meta?.coverage||{},fundingCoverage:item.meta?.fundingCoverage||{},gaps:item.meta?.gaps||0};
+  return {market,config,meta,summary,comparison:tf==='all'?item.comparison:undefined};
+ }
+ function batchCandidates(jobs,market,c,{sameRange=false}={}){
+  const tf=c.timeframe==='all'?'1m':c.timeframe,signature=JSON.stringify(strategyValues(c,tf)),rows=[];
+  for(const job of jobs||[]){
+   const item=job.items?.find(i=>i.exchange===(market.exchange||market.ex)&&i.symbol===market.symbol&&i.status==='done'),row=batchCandidate(job,item,c.timeframe);if(!row)continue;
+   try{if(JSON.stringify(strategyValues(row.config,tf))!==signature)continue;}catch{continue;}
+   const rangeMatches=row.config.startTime===c.startTime&&row.config.cacheRangeEnd===(c.cacheRangeEnd??c.endTime);
+   if((!sameRange||rangeMatches)&&row.config.endTime<=(c.cacheMaxEnd??Infinity))rows.push({...row,rangeMatches});
+  }
+  return rows.sort((a,b)=>Number(b.rangeMatches)-Number(a.rangeMatches));
+ }
+ function savedSummary(row){
+  if(!Number.isSafeInteger(row?.summary?.totalTrades)||!Number.isFinite(row.summary.netPnl))return null;
+  return {summary:row.summary,comparison:row.comparison,summaryOnly:true,detailRequest:{market:row.market,config:row.config},meta:{...row.meta,reuse:{kind:'batch-summary',snapshotEnd:row.meta.endTime,rangeDiffers:row.rangeMatches===false,networkRequests:0,recalculated:false}}};
+ }
+ async function readDetail(store,market,c,snapshot=true){
+  if(!store)return null;
+  try{const h=(await store.find(market,c,{snapshot,maxEnd:snapshot?c.cacheMaxEnd:c.endTime}))?.[0];return h?.success&& (snapshot||h.snapshotEnd===c.endTime)?await store.read(h):null;}catch{return null;}
+ }
+ async function openBatchResult(store,row){
+  const saved=await readDetail(store,row.market,row.config,false);
+  if(!saved)return savedSummary(row);
+  return {...saved,meta:{...saved.meta,reuse:{...saved.meta.reuse,kind:'batch-completed-result',rangeDiffers:row.rangeMatches===false}}};
+ }
+ async function openIndividual(store,market,c,{listJobs=async()=>[],signal}={}){
+  if(c.reuseCompleted===false||c.timeframe==='all')return null;
+  signal?.throwIfAborted();const exact=await readDetail(store,market,c);signal?.throwIfAborted();if(exact)return exact;
+  const candidates=batchCandidates(await listJobs(),market,c);signal?.throwIfAborted();let summary=null;
+  for(const row of candidates){const output=await openBatchResult(store,row);signal?.throwIfAborted();if(output&&!output.summaryOnly)return output;summary??=output;}
+  return summary;
+ }
+ let shared;return {readyFor,equityPoints,version,maxBytes,frames,key,requestKey,memory,open,output,compare,fromHeads,batchCandidate,batchCandidates,savedSummary,openBatchResult,openIndividual,getDefault:()=>shared??=open()};
+});
