@@ -27,8 +27,9 @@
    if(options.requireMinuteData || fastResample){if(!intervals.includes('1m'))intervals.unshift('1m'); else if(intervals.indexOf('1m')>0){intervals.splice(intervals.indexOf('1m'),1);intervals.unshift('1m');}}
    if(!Number.isFinite(start)||!Number.isFinite(end)||start>=end||start<0)throw Error('테스트 기간을 확인하세요.');symbol=String(symbol).trim().toUpperCase().replace(/[-_]/g,'').replace(/USDT$/,'')+'USDT';if(!/^[A-Z0-9]{1,28}USDT$/.test(symbol))throw Error('코인 심볼을 확인하세요.');
    for(const tf of intervals)T.plan(ex,tf);signal.throwIfAborted();const expected=estimate({...options,exchange:ex,intervals,startTime:start,endTime:end});
-   const timeframeCandles={},coverage={},allFunding=new Map(),fundingStart=Math.max(0,start-Math.max(48*3600,Math.min(864000,Number(options.fundingWindowSeconds)||0))),fundingEnd=Math.min(Date.now()/1000,end+(options.fundingIntervalBasis==='chart'?48*3600:0));let totalCount=0,pages=0,cursor=ex==='BINANCE'?fundingStart*1000:Math.floor(fundingEnd*1000)-1,page=1;
-   for(;;){
+   const seed=options.seedDataset;if(seed&&(seed.exchange!==ex||seed.symbol!==symbol||seed.startTime!==start||seed.endTime!==end))throw Error('재사용할 원본의 종목·기간이 다릅니다.');
+   const timeframeCandles={},coverage={},allFunding=new Map((seed?.fundingRecords||[]).map(r=>[r.time,r])),fundingStart=Math.max(0,start-Math.max(48*3600,Math.min(864000,Number(options.fundingWindowSeconds)||0))),fundingEnd=Math.min(Date.now()/1000,end+(options.fundingIntervalBasis==='chart'?48*3600:0));let totalCount=0,pages=0,cursor=ex==='BINANCE'?fundingStart*1000:Math.floor(fundingEnd*1000)-1,page=1;
+   if(!seed)for(;;){
     signal.throwIfAborted();const rows=F.merge(await funding(ex,symbol,cursor,page,signal));signal.throwIfAborted();pages++;
     for(const r of rows)if(r.time>=fundingStart&&r.time<fundingEnd)allFunding.set(r.time,r);
     onProgress({phase:'funding',pages,count:allFunding.size,exchange:ex});
@@ -37,13 +38,14 @@
     else{if(rows[0].time<=fundingStart)break;const next=F.nextHistoryCursor(ex,rows);if(next>=cursor&&!['BITGET','MEXC'].includes(ex))throw Error('펀딩비 API의 과거 페이지가 진행되지 않습니다.');if(['BITGET','MEXC'].includes(ex)&&page>1&&rows.every(r=>r.time>=cursor/1000))throw Error('펀딩비 API가 같은 페이지를 반복했습니다.');cursor=next;page++;}
    }
    if(!allFunding.size)throw Error('선택 기간의 공식 정산 기록이 없어 진입 조건을 검증할 수 없습니다.');
-   const gaps=[];let gapsCount=0,archiveFiles=0;
+   const gaps=packed&&seed?[...seed.gaps]:[];let gapsCount=packed&&seed?seed.gapsCount:0,archiveFiles=0;
    for(const tf of intervals){try{
+    if(tf==='1m'&&seed?.timeframeCandles['1m']){timeframeCandles[tf]=seed.timeframeCandles[tf];coverage[tf]={...seed.coverage[tf]};totalCount+=timeframeCandles[tf].length;continue;}
     if(fastResample&&tf!=='1m'&&timeframeCandles['1m']){
      const minute=timeframeCandles['1m'],warmupStart=Math.max(0,T.shift(T.start(start,tf),tf,-Math.max(80,(options.rsiPeriod||14)*3))),resampled=T.resample(minute,tf,'1m',B.isPacked(minute)?B.get:undefined).filter(b=>b.time>=warmupStart&&T.end(b.time,tf)<=end);
      if(resampled.length){
       const first=resampled[0].time,earlier=new Map();let edge=first*1000-1,warmupPages=0;
-      while(edge/1000>=warmupStart){
+      while(edge/1000>=warmupStart&&(!options.knownListingTime||edge/1000>=options.knownListingTime)){
        signal.throwIfAborted();const raw=await candles(ex,symbol,tf,edge,signal,false),all=T.sorted(raw),rows=all.filter(b=>b.time*1000<=edge);if(!rows.length){if(all.length)throw Error(tf+' 캔들 API의 과거 커서가 진행되지 않습니다.');break;}
        warmupPages++;for(const r of rows)if(r.time>=warmupStart&&r.time<first&&T.end(r.time,tf)<=end)earlier.set(r.time,r);
        if(rows[0].time<=warmupStart)break;const next=rows[0].time*1000-1;if(next>=edge)throw Error(tf+' 캔들 API의 과거 커서가 진행되지 않습니다.');edge=next;
@@ -82,7 +84,7 @@
    if(!packed)for(const [tf,rows]of Object.entries(timeframeCandles))for(let i=1;i<rows.length;i++)if(T.end(rows[i-1].time,tf)<rows[i].time){gapsCount++;gaps.push({timeframe:tf,from:T.end(rows[i-1].time,tf),to:rows[i].time});}
    const available=Object.entries(coverage).filter(([,v])=>Number.isFinite(v.first)&&Number.isFinite(v.last)),priceStart=Math.max(start,Math.min(...available.map(([,v])=>v.first))),priceEnd=Math.min(end,Math.max(...available.map(([tf,v])=>T.end(v.last,tf)))),first=fundingRecords[0].time,last=fundingRecords.at(-1).time;let longGaps=0;
    for(let i=1;i<fundingRecords.length;i++)if(fundingRecords[i].time-fundingRecords[i-1].time>86400+60&&fundingRecords[i].time>priceStart&&fundingRecords[i-1].time<priceEnd)longGaps++;
-   return {symbol,exchange:ex,startTime:start,endTime:end,fundingRecords,timeframeCandles,coverage,gaps,gapsCount,source:archiveFiles?'official-exchange-api+binance-public-archive':'official-exchange-api',fundingCoverage:{first,last,count:fundingRecords.length,startMissing:first>priceStart+2*86400,endMissing:last<priceEnd-2*86400,longGaps}};
+   return {symbol,exchange:ex,startTime:start,endTime:end,fundingRecords,timeframeCandles,coverage,gaps,gapsCount,source:archiveFiles||seed?.source?.includes('binance-public-archive')?'official-exchange-api+binance-public-archive':'official-exchange-api',fundingCoverage:{first,last,count:fundingRecords.length,startMissing:first>priceStart+2*86400,endMissing:last<priceEnd-2*86400,longGaps}};
   }
   return {loadBacktestDataset};
  }

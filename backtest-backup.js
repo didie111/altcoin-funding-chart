@@ -21,7 +21,7 @@
    const url=environment.URL.createObjectURL(file),link=document.createElement('a');link.href=url;link.download=name;document.body.appendChild(link);
    try{link.click();}finally{link.remove();environment.setTimeout(()=>environment.URL.revokeObjectURL(url),60000);}
   }
-  return {method:chosen?.handle?'file':'download',bytes:file.size,pages:payload.pages.length,jobs:payload.jobs.length,favorites:payload.favorites?.length||0};
+  return {method:chosen?.handle?'file':'download',bytes:file.size,pages:payload.pages.length,jobs:payload.jobs.length,favorites:payload.favorites?.length||0,completedResults:payload.completedResults?.entries?.length||0};
  }
  async function restore(payload,{store,favorites,parseKey}={}){
   const keys=payload.favorites===undefined?[]:payload.favorites;

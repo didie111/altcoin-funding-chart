@@ -68,19 +68,19 @@
    if(!store.keys)return null;const last=T.start(end/1000,tf),prefix=JSON.stringify(['candles-v3',ex,symbol,tf]).slice(0,-1)+',',candidates=[];
    for(const key of await store.keys())if(key.startsWith(prefix)){try{const k=JSON.parse(key);if(k[4]<=last&&k[5]>=last)candidates.push({key,first:k[4]});}catch{}}
    candidates.sort((a,b)=>b.first-a.first);
-   for(const c of candidates){signal.throwIfAborted();const page=await store.get(c.key,now()),all=unpackCandles(page);if(!all)continue;const rows=all.filter(r=>r.time*1000<=end);if(rows.at(-1)?.time===last&&rows.every((r,i)=>T.start(r.time,tf)===r.time&&(!i||T.end(rows[i-1].time,tf)===r.time)))return rows;}
+   for(const c of candidates){signal.throwIfAborted();const page=await store.get(c.key,now()),all=page?.closedVerified||end<now()-2*86400000?unpackCandles(page):null;if(!all)continue;const rows=all.filter(r=>r.time*1000<=end);if(rows.at(-1)?.time===last&&rows.every((r,i)=>T.start(r.time,tf)===r.time&&(!i||T.end(rows[i-1].time,tf)===r.time)))return rows;}
    return null;
   }
   async function page(kind,args,producer){
    const signal=args.at(-1),candle=kind==='candles',key=JSON.stringify([candle?'page-v2':'page-v1',kind,...args.slice(0,-1)]);signal.throwIfAborted();const saved=await store.get(key,now());signal.throwIfAborted();
    if(saved!==null){const rows=candle?unpackCandles(saved):saved;if(rows!==null){onCache();return rows;}}
    if(candle){
-    const [ex,symbol,tf,end]=args,reqKey=JSON.stringify(['req',ex,symbol,tf,end]);if(store.getRequestIndex){const hit=await store.getRequestIndex(reqKey);if(hit){const p=await store.get(hit,now()),rows=p?.timeframe===tf?unpackCandles(p):null;if(rows){onCache();return rows;}}}const shared=await cachedRange(ex,symbol,tf,end,signal);if(shared){onCache();return shared;}
+    const [ex,symbol,tf,end]=args,reqKey=JSON.stringify(['req',ex,symbol,tf,end]);if(store.getRequestIndex){const hit=await store.getRequestIndex(reqKey);if(hit){const p=await store.get(hit,now()),rows=p?.timeframe===tf&&(p.closedVerified||end<now()-2*86400000)?unpackCandles(p):null;if(rows){onCache();return rows;}}}const shared=await cachedRange(ex,symbol,tf,end,signal);if(shared){onCache();return shared;}
     const legacyKey=JSON.stringify(['page-v1',kind,...args.slice(0,-1)]),legacy=await store.get(legacyKey,now());signal.throwIfAborted();
     if(Array.isArray(legacy)){const packed=packCandles(legacy),expires=now()+(end<now()-2*86400000&&legacy.length?30*86400000:60000);await store.put(key,packed,{expires,bytes:estimateBytes(packed,key)});if(store.deletePage)await store.deletePage(legacyKey);onCache();return legacy;}
    }
-   const rows=await paced(args[0],signal,producer,kind);signal.throwIfAborted();const edge=Number(candle?args[3]:args[2]),expires=now()+(edge<now()-2*86400000&&rows.length?30*86400000:60000);
-   if(candle&&rows.length){const contentKey=JSON.stringify(['candles-v3',args[0],args[1],args[2],rows[0].time,rows.at(-1).time]),packed={...packCandles(rows),timeframe:args[2]};await store.put(contentKey,packed,{expires,bytes:estimateBytes(packed,contentKey)});if(store.putRequestIndex)await store.putRequestIndex(JSON.stringify(['req',args[0],args[1],args[2],args[3]]),contentKey);}
+   const fetchBegan=now(),rows=await paced(args[0],signal,producer,kind);signal.throwIfAborted();const edge=Number(candle?args[3]:args[2]),expires=now()+(edge<now()-2*86400000&&rows.length?30*86400000:60000);
+   if(candle&&rows.length){const closed=rows.filter(r=>T.end(r.time,args[2])<=fetchBegan/1000);if(closed.length){const contentKey=JSON.stringify(['candles-v3',args[0],args[1],args[2],closed[0].time,closed.at(-1).time]),packed={...packCandles(closed),timeframe:args[2],closedVerified:true};await store.put(contentKey,packed,{expires,bytes:estimateBytes(packed,contentKey)});if(store.putRequestIndex)await store.putRequestIndex(JSON.stringify(['req',args[0],args[1],args[2],args[3]]),contentKey);}}
    else if(!candle||!rows.length)await store.put(key,candle?packCandles(rows):rows,{expires});
    signal.throwIfAborted();return rows;
   }
