@@ -77,3 +77,5 @@
  .bt-batch-content .bt-table td:first-child:before{display:none}.bt-batch-content .bt-table td:last-child button{min-height:36px}.bt-batch-content .bt-table tbody tr:hover td:first-child{background:none}.bt-batch-sync-actions button{min-height:36px}
 }
 @media(pointer:coarse){.bt-batch-monitor button{min-height:42px}}
+
+.bt-batch-setup>small{flex-basis:100%;color:#a9c2e0;font-size:11px;line-height:1.65}

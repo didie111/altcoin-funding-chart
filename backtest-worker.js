@@ -1,5 +1,5 @@
 'use strict';
-importScripts('funding.js?v=20261027-funding-cursor-1','timeframes.js?v=20261107-responsive-backup-1','indicators.js?v=20261025-backtest-1','backtest-bars.js?v=20261107-responsive-backup-1','backtest-engine.js?v=20261107-responsive-backup-1');
+importScripts('funding.js?v=20261027-funding-cursor-1','timeframes.js?v=20261107-result-reuse-1','indicators.js?v=20261025-backtest-1','backtest-bars.js?v=20261107-responsive-backup-1','backtest-engine.js?v=20261107-responsive-backup-1');
 onmessage=event=>{
  const {id,mode,dataset,config}=event.data;
  try{

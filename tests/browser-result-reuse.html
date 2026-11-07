@@ -1,0 +1,43 @@
+<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>저장 결과 재사용 검증</title>
+<link rel="stylesheet" href="../backtest.css"><link rel="stylesheet" href="../coin-favorites.css"><style>*{box-sizing:border-box}body{margin:0;background:#101a2a;color:#dfedff;font:14px/1.65 system-ui}header.qa{padding:16px 20px;background:#172942}h1{font-size:22px;margin:0 0 4px}.qa p{margin:4px 0 12px;color:#aac4e4}.qa-actions{display:flex;gap:8px;flex-wrap:wrap}.qa-actions button{font:inherit;border-radius:5px;border:1px solid #55759b;background:#294872;color:white;padding:8px 12px;cursor:pointer}.qa-actions button:disabled{opacity:.45}#qaResult{white-space:pre-wrap;margin:12px 20px;color:#9fe4c2}#qaDetail{margin:12px 20px;color:#c7dcf5}#qaReport{height:min(56vh,590px);margin:12px 20px;border:1px solid #3a5576;border-radius:8px;background:#142236}.bt-batch-monitor{padding-top:10px}</style>
+<header class="qa"><h1>저장한 백테스트 결과 속도 검증</h1><p>개발 검증 전용 · 생성 예제 139개 · 1년 분량의 1분봉 · 실제 시세나 투자 성과가 아닙니다.</p><div class="qa-actions"><button id="qaSeed">격리 저장소에 예제 결과 준비</button><button id="qaTrade" disabled>거래 보기 시간 측정</button><button id="qaThree" disabled>139개 · 3분봉 재실행</button><button id="qaMonth" disabled>139개 · 월봉 재실행</button><button id="qaAll" disabled>11개 주기 전체 속도 검증</button><button id="qaBackup" disabled>상세 결과 백업 복원 검증</button></div></header>
+<pre id="qaResult" role="status">준비 대기</pre><div id="qaDetail"></div><main id="qaHost"><div id="qaReport" class="bt-report"></div></main>
+<script src="../timeframes.js"></script><script src="../funding.js"></script><script src="../indicators.js"></script><script src="../backtest-bars.js"></script><script src="../backtest-engine.js"></script><script src="../relay-config.js"></script><script src="../market-shared.js"></script><script src="../market-api.js"></script><script src="../backtest-data.js"></script><script src="../dashboard-model.js"></script><script src="../coin-favorites.js"></script><script src="../coin-favorites-ui.js"></script><script src="../backtest-cache.js"></script><script src="../backtest-results.js"></script><script src="../backtest-batch.js"></script><script src="../backtest-batch-ui.js"></script><script>
+'use strict';
+const $=id=>document.getElementById(id),now=()=>performance.now(),add=text=>{$('qaResult').textContent+='\n'+text;},assert=(ok,text)=>{if(!ok)throw Error(text);},yieldPaint=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+const day=86400,start=Date.UTC(2025,0,1)/1000,end=Date.UTC(2026,0,1)/1000,config=BacktestEngine.normalizeConfig({timeframe:'1m',startTime:start,endTime:end,cacheRangeEnd:end,rsiPeriod:6,rsiOversold:55,entryTrigger:'rsi_oversold',precomputeTimeframes:true}),markets=Array.from({length:139},(_,i)=>({exchange:'BYBIT',symbol:'DEMO'+String(i+1).padStart(3,'0')+'USDT'}));
+let results,started=0,workers=0,network=0,detailTime=null,seeded=false;
+function bar(i){const close=100+5*Math.sin(i/31)+2*Math.sin(i/5);return {time:start+i*60,open:close,high:close+.5,low:close-.5,close,volume:1+i%11};}
+$('qaSeed').onclick=async()=>{
+ $('qaSeed').disabled=true;$('qaResult').textContent='1년 예제 데이터와 1분봉~월봉 결과 준비 중…';await yieldPaint();
+ try{
+  const name='qa-completed-results-'+Date.now(),store=await BacktestResults.open({name}),jobStore=BacktestCache.memory(),builder=BacktestBars.builder(),count=(end-start)/60;
+  for(let i=count-1;i>=0;i--)builder.push(bar(i));const minute=builder.finish(),funding=Array.from({length:365*24+48},(_,i)=>({time:start+(i-48)*3600,rate:i%168===0?-.6:-.01,intervalHours:1,intervalSource:'official-history'})),items=[];
+  for(const tf of BacktestResults.frames){
+   const bars=tf==='1m'?minute:BacktestBars.pack(TimeframeEngine.resample(minute,tf,'1m',BacktestBars.get)),c={...config,timeframe:tf},result=BacktestEngine.runBacktest(bars,funding,c,{equityMaxPoints:BacktestResults.equityPoints});assert(result.success,tf+' 결과 계산 실패');
+   for(const [index,m]of markets.entries()){
+    const meta={market:{ex:m.exchange,symbol:m.symbol,int:tf},coverage:{[tf]:{first:BacktestBars.time(bars,0),last:BacktestBars.time(bars,bars.length-1),count:bars.length}},fundingCoverage:{first:funding[0].time,last:funding.at(-1).time,count:funding.length},startTime:start,endTime:end,gaps:0,source:'generated-browser-fixture',config:result.config,preparedTimeframes:BacktestResults.frames};
+    assert(await store.save(m,c,result,meta),'예제 저장 한도 초과');if(tf==='1m')items.push({...m,status:'done',summary:result.summary,meta});if(index%25===0){$('qaResult').textContent=tf+' 예제 결과 저장 · '+(index+1)+' / 139';await yieldPaint();}
+   }
+  }
+  // Open a new real IndexedDB connection; no in-memory reference to computed results is used for the timed checks.
+  results=await BacktestResults.open({name});const info=await results.info();assert(info.persistent,'실제 IndexedDB 사용 불가');
+  await jobStore.saveJob({id:'generated-139',updated:Date.now(),status:'done',config,items,allHistory:false});BacktestCache.open=async()=>jobStore;BacktestResults.getDefault=async()=>results;
+  CoinFavorites.store=CoinFavorites.create();CoinFavorites.store.change(markets.map(m=>m.exchange+':'+m.symbol),true);
+  window.Worker=function(){workers++;throw Error('저장된 결과를 여는 동안 작업이 재시작됐습니다.');};MarketAPI.json=async()=>{network++;throw Error('예제에서 네트워크 요청이 발생했습니다.');};
+  const view=BacktestBatchUI.bind({host:$('qaHost'),report:$('qaReport'),getConfig:()=>config,isBusy:()=>false,onBusy:()=>{},onResult:output=>{assert(output.meta.reuse&&output.result.config.timeframe==='1m','원래 1분봉 상세 결과 불일치');$('qaDetail').textContent=output.meta.market.symbol+' · 저장한 1분봉 거래 '+output.result.trades.length+'건 · 첫 거래 '+(output.result.trades[0]?.netPnl?.toFixed(4)??'없음')+' USDT';detailTime=now()-started;add('거래 보기: '+detailTime.toFixed(1)+'ms · 원본 재조회 '+network+'회 · 새 Worker '+workers+'회');},onOpen:()=>{},onSettings:()=>{}});view.render();
+  $('qaResult').textContent='준비 완료 · 139개 × 11개 주기 · '+(info.bytes/1048576).toFixed(2)+'MiB · 실제 IndexedDB';seeded=true;
+  for(const id of ['qaTrade','qaThree','qaMonth','qaAll','qaBackup'])$(id).disabled=false;
+ }catch(e){add('실패 · '+e.stack);}
+};
+$('qaTrade').onclick=()=>{started=now();const btn=$('btBatchResults').querySelector('[data-batch-detail]');assert(btn,'거래 보기 버튼을 찾지 못했습니다.');btn.click();};
+async function batch(tf){
+ const select=$('btBatchFrame');select.value=tf;select.dispatchEvent(new Event('change'));$('btBatchStart').click();const accept=[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='테스트 시작');assert(accept,'실행 확인창을 찾지 못했습니다.');
+ const began=now();await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{observer.disconnect();reject(Error('139개 저장 결과를 불러오지 못했습니다.'));},6000),observer=new MutationObserver(()=>{if($('btBatchStatus').textContent.includes('139개 저장 결과 재사용')){observer.disconnect();clearTimeout(timer);resolve();}});observer.observe($('btBatchStatus'),{childList:true,subtree:true});accept.click();});
+ const elapsed=now()-began;assert(workers===0&&network===0,'재사용 중 작업 또는 요청이 발생했습니다.');add('139개 '+DashboardModel.labels[tf]+': '+elapsed.toFixed(1)+'ms · 원본 재조회 0회 · 새 Worker 0회');return elapsed;
+}
+$('qaThree').onclick=()=>batch('3m').catch(e=>add('실패 · '+e.message));$('qaMonth').onclick=()=>batch('1M').catch(e=>add('실패 · '+e.message));
+$('qaAll').onclick=async()=>{try{const times=[];for(const tf of BacktestResults.frames)times.push(await batch(tf));add('11개 주기 완료 · 가장 느린 주기 '+Math.max(...times).toFixed(1)+'ms');}catch(e){add('실패 · '+e.message);}};
+$('qaBackup').onclick=async()=>{try{const file=await results.exportAll(),restored=await BacktestResults.open({name:'qa-restore-results-'+Date.now()}),out=await restored.importAll(JSON.parse(JSON.stringify(file))),h=(await restored.find(markets[0],config,{snapshot:false}))[0],full=await restored.read(h);assert(out.imported===139*BacktestResults.frames.length&&full.result.config.timeframe==='1m','완료 결과 복원 실패');await restored.clear();add('백업 복원: '+out.imported+'개 상세 결과 · 기존 설정과 거래 배열 확인');}catch(e){add('실패 · '+e.message);}};
+addEventListener('pagehide',()=>{if(seeded)void results.clear();},{once:true});
+</script></html>

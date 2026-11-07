@@ -9,9 +9,8 @@ const TimeframeEngine = (() => {
     MEXC: {'1m':'Min1','5m':'Min5','15m':'Min15','30m':'Min30','1h':'Min60','4h':'Hour4','1d':'Day1','1w':'Week1','1M':'Month1'}
   };
   function start(time, interval) {
-    const date=new Date(time*1000);
-    if(interval==='1M')return Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),1)/1000;
-    if(interval==='1w')return Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),date.getUTCDate()-(date.getUTCDay()+6)%7)/1000;
+    if(interval==='1M'){const date=new Date(time*1000);return Date.UTC(date.getUTCFullYear(),date.getUTCMonth(),1)/1000;}
+    if(interval==='1w')return Math.floor((time+3*86400)/604800)*604800-3*86400;
     return Math.floor(time/seconds[interval])*seconds[interval];
   }
   function shift(time, interval, count) {
@@ -68,11 +67,11 @@ const TimeframeEngine = (() => {
     if(!rows?.length)return [];
     const bars=getRow?rows:sorted(rows),read=i=>getRow?getRow(bars,i,scratch):bars[i],scratch={},out=[];
     if(targetInterval===sourceInterval)return Array.from({length:bars.length},(_,i)=>({...read(i)}));
-    let bucket=null,open,high,low,close,volume,count=0,previous=null,valid=true;
-    const flush=()=>{if(bucket!==null&&valid&&count===(end(bucket,targetInterval)-bucket)/seconds[sourceInterval]&&end(previous,sourceInterval)===end(bucket,targetInterval))out.push({time:bucket,open,high,low,close,volume});};
+    let bucket=null,bucketEnd=-Infinity,open,high,low,close,volume,count=0,previous=null,valid=true;
+    const flush=()=>{if(bucket!==null&&valid&&count===(bucketEnd-bucket)/seconds[sourceInterval]&&end(previous,sourceInterval)===bucketEnd)out.push({time:bucket,open,high,low,close,volume});};
     for(let i=0;i<bars.length;i++){
-      const r=read(i),next=start(r.time,targetInterval);
-      if(next!==bucket){flush();bucket=next;open=r.open;high=r.high;low=r.low;close=r.close;volume=0;count=0;previous=null;valid=r.time===bucket;}
+      const r=read(i);
+      if(r.time>=bucketEnd||r.time<bucket){flush();const next=start(r.time,targetInterval);bucket=next;bucketEnd=end(next,targetInterval);open=r.open;high=r.high;low=r.low;close=r.close;volume=0;count=0;previous=null;valid=r.time===bucket;}
       if(start(r.time,sourceInterval)!==r.time||previous!==null&&end(previous,sourceInterval)!==r.time)valid=false;
       high=Math.max(high,r.high);low=Math.min(low,r.low);close=r.close;volume+=r.volume;count++;previous=r.time;
     }
