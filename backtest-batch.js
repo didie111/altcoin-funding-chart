@@ -1,12 +1,13 @@
 (function(root,factory){'use strict';const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.BacktestBatch=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){
  'use strict';
  const clone=value=>structuredClone(value);
- function rangeFor(mode,config,previous,sameStrategy){
+ function rangeFor(mode,config,previous,sameStrategy,markets){
   const allHistory=mode==='all'||mode==='saved'&&Boolean(previous?.allHistory);
-  // Restoring a job keeps its original period type. Only an explicit saved
-  // selection can use the saved strategy; unchanged all-history reruns may
-  // keep the original data cutoff while using today's strategy settings.
-  const useCutoff=previous&&(mode==='saved'||mode==='all'&&previous.allHistory&&config.reuseCompleted!==false&&sameStrategy?.(config,previous.config,config.timeframe));
+  // An enlarged all-history list keeps each reused row's snapshot, while
+  // newly added markets need the current cutoff (they may have listed later).
+  const keys=new Set(previous?.items?.map(m=>m.exchange+':'+m.symbol));
+  const includesNew=markets?.some(m=>!keys.has(m.exchange+':'+m.symbol));
+  const useCutoff=previous&&(mode==='saved'||mode==='all'&&!includesNew&&previous.allHistory&&config.reuseCompleted!==false&&sameStrategy?.(config,previous.config,config.timeframe));
   return {allHistory,fixedRange:useCutoff?{startTime:previous.config.startTime,endTime:previous.config.endTime,cacheRangeEnd:previous.config.cacheRangeEnd??(previous.allHistory?'latest':previous.config.endTime)}:null};
  }
  function create({store,execute,now=Date.now,onUpdate=()=>{},onProgress=()=>{},lookup,validateStrategy}){
@@ -26,9 +27,24 @@
    }catch(error){if(signal.aborted){job.status='paused';job.message='중지했습니다. 완료된 코인은 유지하고 진행 중 코인부터 이어서 계산합니다.';await persist();}else{job.status='paused';job.message=error.message;await persist();}}
    finally{abort=null;active=null;onUpdate(clone(job));}
   }
+  async function prepare(markets,config,options){
+   const next=createJob(markets,config,options);
+   if(lookup&&config.reuseCompleted!==false){
+    const results=await lookup(next.items,next.config);
+    for(const [i,item] of next.items.entries()){const out=results[i];if(sameMarket(out,item,next.config)&&sameSetup(out,next.config))Object.assign(item,out,{status:'done'});}
+   }
+   return next;
+  }
+  async function start(build){
+   if(abort||starting)throw Error('실행 중인 작업을 먼저 중지하세요.');
+   starting=true;stopRequested=false;
+   try{job=await build();if(job.items.every(i=>i.status==='done'))job.status='done';await persist();}finally{starting=false;}
+   if(stopRequested){job.status='paused';await persist();return;}
+   if(job.status!=='done')return run();
+  }
   return {get busy(){return Boolean(abort)||starting;},snapshot:()=>job?clone(job):null,
    async restore(id){if(abort||starting)return;job=id&&store.getJob?await store.getJob(id):store.activeJob?await store.activeJob():await store.latestJob();if(job){for(const item of job.items)if(item.status==='running')item.status='pending';if(job.status==='running')job.status='paused';onUpdate(clone(job));}return job?clone(job):null;},
-   async start(markets,config,options){if(abort||starting)throw Error('실행 중인 작업을 먼저 중지하세요.');starting=true;stopRequested=false;try{job=createJob(markets,config,options);if(lookup&&config.reuseCompleted!==false){const outputs=await lookup(job.items,job.config);for(let i=0;i<job.items.length;i++){const out=outputs[i],item=job.items[i];if(sameMarket(out,item,job.config)&&sameSetup(out,job.config))Object.assign(item,out,{status:'done'});}if(job.items.every(i=>i.status==='done'))job.status='done';}await persist();}finally{starting=false;}if(stopRequested){job.status='paused';await persist();return;}if(job.status==='done')return;return run();},
+   prepare,start(markets,config,options){return start(()=>prepare(markets,config,options));},startPrepared(next){return start(()=>next);},
    async resume({retryErrors=false}={}){if(abort||!job)return;if(job.retryAt>now())throw Error('API 대기 시간이 남았습니다. '+Math.ceil((job.retryAt-now())/1000)+'초 후 이어서 실행하세요.');if(retryErrors)for(const item of job.items)if(['error','deferred'].includes(item.status)){item.status='pending';delete item.error;}return run();},
    pause(){stopRequested=true;if(!abort)return;abort.abort(new DOMException('일괄 테스트 중지','AbortError'));if(active)active.status='pending';},
    createJob
