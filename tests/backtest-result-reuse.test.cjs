@@ -77,3 +77,27 @@ test('a portable backup that fits restores prepared frames even when the destina
  assert.deepEqual(await restored.importAll(await source.exportAll()),{imported:2,skipped:0});assert.equal((await restored.info()).bytes,limit);
  const head=(await restored.find(market,{...history,timeframe:'3m'}))[0];assert.deepEqual((await restored.read(head)).result,derived.result);
 });
+
+test('a restored 143-market batch fills a 173-market list and only calculates the 30 added contracts',async()=>{
+ const now=(config.endTime+86400)*1000,startTime=Date.UTC(2009,0,1)/1000,savedConfig={...config,timeframe:'all',startTime,cacheRangeEnd:'latest',reuseCompleted:true};
+ const markets=Array.from({length:173},(_,i)=>({exchange:i%2?'BYBIT':'BINANCE',symbol:'GROW'+i+'USDT'})),saved=markets.slice(0,143),added=markets.slice(143),summary={timeframe:'3m',totalTrades:7,netPnl:4,totalReturnPct:1};
+ const backup={app:'funding-chart-batch-v1',version:1,pages:[],jobs:[{id:'restored-143',allHistory:true,status:'done',updated:1,config:savedConfig,items:saved.map(m=>({...m,status:'done',summary:{...summary,timeframe:'all',bestTimeframe:'3m'},comparison:[summary]}))}]};
+ const store=C.memory();await store.importAll(JSON.parse(JSON.stringify(backup)));const initial=await store.activeJob(),queries=[],executed=[],updates=[];
+ const indexed={findMany:async (requested,c,options)=>{queries.push({requested,options});return requested.map(()=>null);}};
+ const runner=Batch.create({store,now:()=>now,validateStrategy:R.sameStrategy,lookup:async (ms,c)=>R.findBatch(indexed,await store.listJobs(),ms,c),onUpdate:j=>updates.push(j.items.filter(i=>i.status==='done').length),execute:async (m,c)=>{
+  executed.push(m.symbol);assert.equal(c.endTime,now/1000);return {summary:{...summary,timeframe:c.timeframe},meta:{market:{ex:m.exchange,symbol:m.symbol,int:c.timeframe},config:c}};
+ }});
+ const options=Batch.rangeFor('all',savedConfig,initial,R.sameStrategy,markets);assert.equal(options.fixedRange,null);
+ const next=await runner.prepare(markets,savedConfig,options);assert.equal((await store.activeJob()).id,initial.id);assert.equal(executed.length,0);
+ assert.equal(next.items.filter(i=>i.status==='done').length,143);assert.equal(next.items[142].meta.reuse.snapshotEnd,savedConfig.endTime);
+ assert.equal(queries.length,1);assert.ok(queries[0].options.targeted);assert.deepEqual(queries[0].requested.map(m=>m.symbol),added.map(m=>m.symbol));
+ await runner.startPrepared(next);assert.equal(updates[0],143);assert.equal(updates.at(-1),173);assert.deepEqual(executed,added.map(m=>m.symbol));assert.equal(queries.length,1);assert.deepEqual(await store.getJob(initial.id),initial);
+});
+
+test('batch reuse accepts matching finished results without archived raw data and rejects other strategies, exchanges and ranges',async()=>{
+ const old=historicalJob(computed(history)),c={...history,researchOnly:true,cacheMaxEnd:history.endTime};let archiveChecks=0;
+ const cached=R.memory(),archivedPairs=async markets=>{archiveChecks++;return markets.map(()=>null);};
+ const matches=await R.findBatch(cached,[old],[market],c,{archivedPairs});assert.equal(archiveChecks,0);assert.equal(matches[0].meta.reuse.networkRequests,0);
+ for(const [m,request] of [[market,{...c,rsiOversold:c.rsiOversold-1}],[{...market,exchange:'BINANCE'},c],[market,{...c,startTime:c.startTime+60}],[market,{...c,cacheMaxEnd:c.endTime-60}],[market,{...c,timeframe:'3m'}]])assert.deepEqual(await R.findBatch(cached,[old],[m],request,{archivedPairs}),[null]);
+ assert.equal(archiveChecks,5);
+});

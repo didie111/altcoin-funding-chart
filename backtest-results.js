@@ -30,8 +30,8 @@
   const writes=[...imported.values()].filter(row=>kept.has(row.head.key));return {kept,writes,total,imported:writes.length,skipped:imported.size-writes.length};
  }
  function wrap(backend){
-  async function findMany(markets,c,{snapshot=true,maxEnd=c.cacheMaxEnd??Infinity}={}){
-   const wanted=c.timeframe==='all'?frames:[c.timeframe],profiles=wanted.map(tf=>{const parts=identity({},c,tf);return {parts:parts.slice(3),scope:scopeKey(parts),end:T.start(c.endTime,tf)};}),queries=markets.flatMap(m=>profiles.map(p=>{const parts=[version,m.exchange||m.ex,m.symbol,...p.parts];return {request:JSON.stringify(parts),key:JSON.stringify([...parts,p.end]),scope:p.scope};})),groups=await backend.find(queries,snapshot,maxEnd);
+  async function findMany(markets,c,{snapshot=true,maxEnd=c.cacheMaxEnd??Infinity,targeted=false}={}){
+   const wanted=c.timeframe==='all'?frames:[c.timeframe],profiles=wanted.map(tf=>{const parts=identity({},c,tf);return {parts:parts.slice(3),scope:scopeKey(parts),end:T.start(c.endTime,tf)};}),queries=markets.flatMap(m=>profiles.map(p=>{const parts=[version,m.exchange||m.ex,m.symbol,...p.parts];return {request:JSON.stringify(parts),key:JSON.stringify([...parts,p.end]),scope:p.scope};})),groups=await backend.find(queries,snapshot,maxEnd,targeted);
    return markets.map((m,i)=>{const rows=groups.slice(i*wanted.length,(i+1)*wanted.length);return rows.every(Boolean)?rows:null;});
   }
   return {
@@ -56,8 +56,8 @@
   if(!indexedDB)return memory({limit});let db;try{const r=indexedDB.open(name,2);r.onupgradeneeded=event=>{const d=r.result,h=event.oldVersion<1?d.createObjectStore('heads',{keyPath:'key'}):r.transaction.objectStore('heads');if(event.oldVersion<1){h.createIndex('requestKey','requestKey');d.createObjectStore('payloads');d.createObjectStore('meta');}if(!h.indexNames.contains('retention'))h.createIndex('retention',['priority','touched']);h.createIndex('scope','scope');if(event.oldVersion>0){const cursor=h.openCursor();cursor.onsuccess=()=>{const row=cursor.result;if(!row)return;const old=row.value;row.update({...old,scope:scopeKey(JSON.parse(old.requestKey)),priority:old.priority===1?1:0});row.continue();};}};db=await request(r);}catch{return memory({limit});}db.onversionchange=()=>db.close();const fallback=memory({limit});let persistent=true;
   async function protect(fn,other){if(!persistent)return other();try{return await fn();}catch{persistent=false;return other();}}
   return wrap({
-   find(queries,snapshot,maxEnd){return protect(async()=>{const tx=db.transaction('heads','readonly'),done=complete(tx),h=tx.objectStore('heads');
-    if(snapshot&&queries.length>16){const scopes=[...new Set(queries.map(q=>q.scope))],rows=await Promise.all(scopes.map(s=>request(h.index('scope').getAll(s))));await done;const index=byRequest(rows.flat(),maxEnd);return queries.map(q=>index.get(q.request)||null);}
+   find(queries,snapshot,maxEnd,targeted){return protect(async()=>{const tx=db.transaction('heads','readonly'),done=complete(tx),h=tx.objectStore('heads');
+    if(snapshot&&!targeted&&queries.length>16){const scopes=[...new Set(queries.map(q=>q.scope))],rows=await Promise.all(scopes.map(s=>request(h.index('scope').getAll(s))));await done;const index=byRequest(rows.flat(),maxEnd);return queries.map(q=>index.get(q.request)||null);}
     const groups=await Promise.all(queries.map(q=>request(snapshot?h.index('requestKey').getAll(q.request):h.get(q.key))));await done;return groups.map(g=>snapshot?(g.filter(h=>h.snapshotEnd<=maxEnd).sort((a,b)=>b.snapshotEnd-a.snapshotEnd)[0]||null):(g&&g.snapshotEnd<=maxEnd?g:null));
    },async()=>{const all=(await fallback.exportAll()).entries.map(e=>e.head),index=snapshot?byRequest(all,maxEnd):new Map(all.map(h=>[h.key,h]));return queries.map(q=>{const h=index.get(snapshot?q.request:q.key);return h&&h.snapshotEnd<=maxEnd?h:null;});});},
    put(head,payload){if(head.bytes>limit)return Promise.resolve(false);return protect(async()=>{const tx=db.transaction(['heads','payloads','meta'],'readwrite'),done=complete(tx),h=tx.objectStore('heads'),p=tx.objectStore('payloads'),m=tx.objectStore('meta'),[old,size]=await Promise.all([request(h.get(head.key)),request(m.get('bytes'))]);let total=(size||0)-(old?.bytes||0)+head.bytes,retained=true;h.put({...head,scope:head.scope||scopeKey(JSON.parse(head.requestKey)),priority:head.priority===1?1:0,touched:Date.now()});p.put(payload,head.key);if(total>limit)await new Promise((resolve,reject)=>{const q=h.index('retention').openCursor();q.onerror=()=>reject(q.error);q.onsuccess=()=>{const row=q.result;if(!row||total<=limit){resolve();return;}total-=row.value.bytes;if(row.value.key===head.key)retained=false;p.delete(row.value.key);row.delete();row.continue();};});m.put(total,'bytes');await done;return retained;},async()=>{const data={version,entries:[{head,payload:{encoding:payload.encoding,b64:base64(payload.data)}}]};return (await fallback.importAll(data)).imported===1;});},
@@ -84,13 +84,13 @@
   const meta={...item.meta,market,config,startTime:item.meta?.startTime??config.startTime,endTime,coverage:item.meta?.coverage||{},fundingCoverage:item.meta?.fundingCoverage||{},gaps:item.meta?.gaps||0};
   return {market,config,meta,summary,comparison:tf==='all'?item.comparison:undefined};
  }
- function batchCandidates(jobs,market,c,{sameRange=false}={}){
+ function batchCandidates(jobs,market,c,{sameRange=false,allowJobRange=c.researchOnly!==true}={}){
   const tf=c.timeframe==='all'?'1m':c.timeframe,signature=JSON.stringify(strategyValues(c,tf)),rows=[];
   for(const job of jobs||[]){
    const item=job.items?.find(i=>i.exchange===(market.exchange||market.ex)&&i.symbol===market.symbol&&i.status==='done'),row=batchCandidate(job,item,c.timeframe);if(!row)continue;
    try{if(JSON.stringify(strategyValues(row.config,tf))!==signature)continue;}catch{continue;}
    const requestEnd=c.cacheRangeEnd??c.endTime,originalEnd=job.config.cacheRangeEnd??(job.allHistory?'latest':job.config.endTime);
-   const rangeMatches=row.config.startTime===c.startTime&&row.config.cacheRangeEnd===requestEnd||c.researchOnly!==true&&job.config.startTime===c.startTime&&originalEnd===requestEnd;
+   const rangeMatches=row.config.startTime===c.startTime&&row.config.cacheRangeEnd===requestEnd||allowJobRange&&job.config.startTime===c.startTime&&originalEnd===requestEnd;
    if((!sameRange||rangeMatches)&&row.config.endTime<=(c.cacheMaxEnd??Infinity))rows.push({...row,rangeMatches});
   }
   return rows.sort((a,b)=>Number(b.rangeMatches)-Number(a.rangeMatches));
@@ -99,6 +99,25 @@
  function savedSummary(row){
   if(!usableSummary(row?.summary))return null;
   return {summary:row.summary,comparison:row.comparison,summaryOnly:true,detailRequest:{market:row.market,config:row.config},meta:{...row.meta,reuse:{kind:'batch-summary',snapshotEnd:row.meta.endTime,rangeDiffers:row.rangeMatches===false,networkRequests:0,recalculated:false}}};
+ }
+ async function findBatch(store,jobs,markets,c,{archivedPairs}={}){
+  const request={...c,cacheMaxEnd:c.cacheMaxEnd??c.endTime},results=markets.map(m=>{
+   for(const row of batchCandidates(jobs,m,request,{sameRange:true,allowJobRange:true})){
+    const saved=savedSummary(row);if(saved)return {summary:saved.summary,meta:saved.meta,comparison:saved.comparison};
+   }
+   return null;
+  });
+  const remaining=()=>results.flatMap((out,i)=>out?[]:[i]);
+  async function fill(indices,heads,configs){
+   await Promise.all(indices.map(async(index,i)=>{const rows=heads[i],config=configs?.[i]??request;
+    if(rows?.some(h=>h.success&&usableSummary(h.summary))&&rows.every(h=>h.success||config.timeframe==='all'&&h.reason))results[index]=await fromHeads(store,rows,config);
+   }));
+  }
+  let missing=remaining();if(!store||!missing.length)return results;
+  const heads=await store.findMany(missing.map(i=>markets[i]),request,{targeted:missing.length*2<=markets.length});
+  await fill(missing,heads);
+  missing=remaining();if(archivedPairs&&missing.length){const pairs=await archivedPairs(missing.map(i=>markets[i]));await fill(missing,await store.findConfigured(pairs),pairs.map(p=>p?.config));}
+  return results;
  }
  async function readDetail(store,market,c,snapshot=true){
   if(!store)return null;
@@ -116,5 +135,5 @@
   for(const row of candidates){const output=await openBatchResult(store,row);signal?.throwIfAborted();if(output&&!output.summaryOnly)return output;summary??=output;}
   return summary;
  }
- let shared;return {readyFor,equityPoints,version,maxBytes,frames,key,requestKey,sameStrategy,memory,open,output,compare,fromHeads,batchCandidate,batchCandidates,savedSummary,openBatchResult,openIndividual,getDefault:()=>shared??=open()};
+ let shared;return {readyFor,equityPoints,version,maxBytes,frames,key,requestKey,sameStrategy,memory,open,output,compare,fromHeads,batchCandidate,batchCandidates,savedSummary,findBatch,openBatchResult,openIndividual,getDefault:()=>shared??=open()};
 });
