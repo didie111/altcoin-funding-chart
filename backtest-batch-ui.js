@@ -53,7 +53,7 @@
   async function execute(item,c,signal,onProgress,detail=false,strictSnapshot=false,purpose='backtest'){
    if(purpose==='backtest'&&c.timeframe!=='all'&&!c.researchOnly&&root.BacktestResults&&(strictSnapshot&&detail||c.reuseCompleted!==false)){signal.throwIfAborted();const store=await resultsPromise,heads=await store.find(item,c,{snapshot:!strictSnapshot}),output=(detail&&heads||root.BacktestResults.readyFor(heads,c,strictSnapshot))?await root.BacktestResults.fromHeads(store,heads,c,{detail}):null;signal.throwIfAborted();if(output){onProgress({phase:'reuse',text:'저장된 완료 결과 · 원본 재조회 0회 · 재계산 없음'});return output;}}
    return new Promise((resolve,reject)=>{
-    signal.throwIfAborted();clearTimeout(workerTimer);const id=++serial,task=worker??=new Worker('backtest-batch-worker.js?v=20261109-verified-results-first-1');let settled=false;
+    signal.throwIfAborted();clearTimeout(workerTimer);const id=++serial,task=worker??=new Worker('backtest-batch-worker.js?v=20261109-show-saved-strategy-1');let settled=false;
     const hosts={BINANCE:'fapi.binance.com',BYBIT:'api.bybit.com',BINGX:'open-api.bingx.com',BITGET:'api.bitget.com',MEXC:'api.mexc.com',OKX:'www.okx.com'},retry=event=>{if(event.detail.host===hosts[item.exchange])onProgress({phase:'wait',...event.detail});};
     const finish=(fn,value)=>{if(settled)return;settled=true;signal.removeEventListener('abort',abort);root.removeEventListener('market-api-wait',retry);task.onmessage=null;task.onerror=null;if(fn===resolve)workerTimer=setTimeout(stopWorker,25000);else stopWorker();fn(value);},abort=()=>finish(reject,signal.reason);signal.addEventListener('abort',abort,{once:true});root.addEventListener('market-api-wait',retry);
     task.onmessage=async event=>{
@@ -67,7 +67,7 @@
   }
   async function savedJobs(){const store=await storePromise;return store.listJobs?store.listJobs():job?[job]:[];}
   async function preferredJobs(){const rows=await savedJobs();return job?[...rows.filter(r=>r.id===job.id),...rows.filter(r=>r.id!==job.id)]:rows;}
-  async function refreshHistory(){const rows=await savedJobs(),select=$('btBatchSavedJob');select.replaceChildren(...(rows.length?rows.map(j=>{const option=node('option',frameLabel(j.config.timeframe)+' · '+j.items.filter(i=>i.status==='done').length+'/'+j.items.length+' 완료'+(Number.isFinite(j.config.endTime)?' · '+stamp(j.config.endTime):''));option.value=j.id;return option;}):[node('option','보관 기록 없음')]));if(job)select.value=job.id;select.disabled=!ready||locked||ioBusy||planning||!rows.length;}
+  async function refreshHistory(){const rows=await savedJobs(),select=$('btBatchSavedJob');select.replaceChildren(...(rows.length?rows.map(j=>{const option=node('option',frameLabel(j.config.timeframe)+' · '+j.items.filter(i=>i.status==='done').length+'/'+j.items.length+' 완료 · '+strategyText(j.config)+(Number.isFinite(j.config.endTime)?' · '+stamp(j.config.endTime):''));option.value=j.id;return option;}):[node('option','보관 기록 없음')]));if(job)select.value=job.id;select.disabled=!ready||locked||ioBusy||planning||!rows.length;}
   function rememberRunOptions(){try{root.localStorage.setItem(runOptionsKey,JSON.stringify({frame:$('btBatchFrame').value,period:$('btBatchPeriod').value}));}catch{}}
   function readRunOptions(){
    try{const saved=JSON.parse(root.localStorage.getItem(runOptionsKey)||'{}');if(saved.frame==='all'||Object.hasOwn(M.labels,saved.frame))$('btBatchFrame').value=saved.frame;if(saved.period==='all')$('btBatchPeriod').value='all';}catch{}
@@ -110,6 +110,38 @@
   function showSourceNotice(check,resume=false,reused=0){
    const message=sourceNotice(check,resume,reused);if(researchUI)researchUI.reveal(message);else status(message);
   }
+  const strategyText=c=>splitLabel(c)+' · RSI '+c.rsiOversold;
+  const entryText=c=>Math.max(1,c.splitCount)===1?'1회 진입':c.splitCount+'분할';
+  const conditionGroups=[
+   ['진입 횟수',['splitCount']],['RSI',['rsiOversold','rsiPeriod','rsiSource','rsiExitLevel']],
+   ['펀딩 조건',['fundingIntervalHours','fundingIntervalBasis','minFundingRate','maxFundingRate','fundingWindowSeconds','fundingTransitionLookbackSeconds']],
+   ['재진입·대기',['oneEntryPerFunding','entryCooldownBars','requireFreshFundingAfterCooldown']],
+   ['진입·분할 방식',['entryTrigger','splitTrigger','splitStepPct','dcaMethod']],
+   ['청산·익절·손절',['stopLossMode','exitType','takeProfitPct','stopLossPct','maxHoldBars']],
+   ['자본·주문 크기',['initialCapital','allocationPerTradePct','positionSizing','firstEntryAmount']],['거래 비용',['feePct','slippagePct','includeFundingPayment']]
+  ];
+  async function savedComparison(next,markets){
+   const wanted=new Set(markets.map(m=>m.exchange+':'+m.symbol));
+   const saved=(await preferredJobs()).map(row=>({row,count:row.items.filter(i=>i.status==='done'&&wanted.has(i.exchange+':'+i.symbol)).length})).filter(x=>x.count);
+   if(!saved.length)return null;
+   const {row,count}=saved[0],prior=row.config,current=next.config,changed=new Set(root.BacktestResults.strategyDifferences(prior,current));
+   const labels=conditionGroups.filter(([,keys])=>keys.some(k=>changed.has(k))).map(([label])=>label);
+   if(prior.timeframe!=='all'&&prior.timeframe!==current.timeframe)labels.push('주기');
+   if(Boolean(row.allHistory)!==Boolean(next.allHistory)||prior.startTime!==current.startTime||!next.allHistory&&(prior.cacheRangeEnd??prior.endTime)!==(current.cacheRangeEnd??current.endTime))labels.push('기간');
+   const alt=saved.slice(1).filter(x=>entryText(x.row.config)===entryText(current)).sort((a,b)=>b.count-a.count)[0];
+   return {row,count,lines:[
+    '저장 결과: '+count+'개 · '+frameLabel(prior.timeframe)+' · '+strategyText(prior),
+    '이번 실행: '+markets.length+'개 · '+frameLabel(current.timeframe)+' · '+strategyText(current),
+    ...(alt?['다른 저장 실행: '+alt.count+'개 · '+frameLabel(alt.row.config.timeframe)+' · '+strategyText(alt.row.config)]:[]),
+    ...(labels.length?['달라진 조건: '+labels.join(', ')]:[])
+   ]};
+  }
+  async function showStoredRun({row,count}){
+   if(job?.id!==row.id){const store=await storePromise;if(await store.selectJob?.(row.id))await runner.restore(row.id);}
+   options.open=false;content.scrollTop=0;
+   status('저장 결과 '+count+'개 표시 · '+frameLabel(row.config.timeframe)+' · '+strategyText(row.config)+' · 재계산 없음');
+   $('btBatchSavedJob').focus({preventScroll:true});
+  }
   async function perform(start,useSaved=false){
    if(working()||useSaved&&!job)return;
    if(!start&&job?.retryAt>Date.now()){status('API 대기 중 · '+Math.ceil((job.retryAt-Date.now())/1000)+'초 후 이어서 실행하세요.',true);return;}
@@ -118,7 +150,7 @@
     if(start){
      const c=config(useSaved),markets=F.store.snapshot().markets;if(!markets.length)return;
      const source=useSaved?job:null,mode=source?(source.allHistory?'all':'saved'):$('btBatchPeriod').value,p=plan(c,mode,markets,source);
-     const {next,check,reused,local}=await inspect(async()=>{
+     const {next,check,reused,local,previous}=await inspect(async()=>{
       const next=await runner.prepare(markets,c,{allHistory:p.allHistory,fixedRange:p.fixedRange}),pending=next.items.filter(i=>i.status!=='done');
       if(source)next.sourceJobId=source.sourceJobId||source.id;
       else{
@@ -127,7 +159,8 @@
       }
       const states=pending.length?await storedStates():[],byId=new Map(states.map(s=>[s.id,s]));
       const local=pending.filter(m=>root.BacktestResearch?.executionProfile(byId.get(m.exchange+':'+m.symbol),m.frameReuse?{...next.config,endTime:m.frameReuse.snapshotEnd}:next.config,{strictSnapshot:Boolean(m.frameReuse)})).length;
-      return {next,local,reused:next.items.length-pending.length,check:c.researchOnly&&pending.length?await checkResearch(pending,next.config,states):null};
+      const reused=next.items.length-pending.length,check=c.researchOnly&&pending.length?await checkResearch(pending,next.config,states):null;
+      return {next,local,reused,check,previous:!useSaved&&!reused&&!check?.missing.length?await savedComparison(next,markets):null};
      });
      if(working())return;
      const partial=Boolean(check?.missing.length);
@@ -137,10 +170,19 @@
       const readyItems=new Set(check.ready);next.items=next.items.filter(i=>i.status==='done'||readyItems.has(i));
      }
      const period=source?'저장한 기간·전략':'이 브라우저의 현재 설정',fresh=next.items.length-reused;
-     const rawText=local?' 보관 원본 '+local+'개는 저장한 범위에서 계산합니다.':(fresh?' 이번 조건으로 바로 계산할 보관 원본이 없습니다.':'');
+     const rawText=local?' 보관 원본 '+local+'개는 저장한 범위에서 계산합니다.':(fresh?' 새 계산에 필요한 전체 원본이 준비되지 않았습니다. 보관된 자료는 재사용하고 빠진 구간을 조회합니다.':'');
      const rangeText=c.researchOnly||local===fresh?'':(p.allHistory?' 추가 자료가 필요한 코인의 요청 기간 · 거래소 제공 과거 ~ ':' 추가 자료가 필요한 코인의 요청 기간 · '+stamp(next.config.startTime)+' ~ ')+stamp(next.config.endTime)+' KST.';
      const reuseText=reused?'저장 결과 '+reused+'개 재사용 · 새 계산 '+fresh+'개. 저장 결과는 원래 자료 시점을 유지합니다.':'현재 선택한 기간·주기·전략과 일치하는 저장 결과 0개 · 새 계산 '+fresh+'개.';
-     const accepted=!useSaved&&!partial&&reused>0||await root.CoinFavoritesUI.confirm({
+     let accepted;
+     if(previous){
+      const choice=await root.CoinFavoritesUI.choose({
+       host,title:'저장 결과와 이번 실행 조건',message:'저장 결과 '+previous.count+'개는 남아 있습니다. 이번 조건과 일치하는 결과만 0개입니다.',
+       details:previous.lines.join('\n')+'\n'+reuseText+rawText+rangeText,
+       choices:[{value:'saved',label:'저장 결과 보기',primary:true},{value:'run',label:'현재 설정으로 새 계산'}]
+      });
+      if(choice==='saved'){if(!working())await showStoredRun(previous);return;}
+      accepted=choice==='run';
+     }else accepted=!useSaved&&!partial&&reused>0||await root.CoinFavoritesUI.confirm({
       host,title:partial?'일부 코인의 원본만 준비됨':source?'저장 설정으로 일괄 실행':'현재 설정으로 일괄 실행',
       message:partial?markets.length+'개 중 '+next.items.length+'개만 '+frameLabel(c.timeframe)+' 결과에 포함할까요?':markets.length+'개 거래소·코인을 '+frameLabel(c.timeframe)+' 설정으로 테스트하시겠습니까?',
       details:reuseText+rawText+(partial?' 원본이 부족한 '+check.missing.length+'개는 제외합니다. 그 코인도 계산하려면 원본을 수집하거나 보관 원본만 사용을 끄세요.':'')+rangeText+' '+period+' · '+splitLabel(c)+' / RSI '+c.rsiOversold+' · 각 자본 '+fmt(c.initialCapital)+' USDT · 주문 '+fmt(c.allocationPerTradePct)+'% · 수수료 '+fmt(c.feePct,4)+'% · 슬리피지 '+fmt(c.slippagePct,4)+'%.',
@@ -206,8 +248,8 @@
      if(!archive&&payload.pages.length&&root.BacktestResearch){try{migrated=await root.BacktestResearch.carryLegacy(await root.BacktestResearchStore.getDefault(),root.BacktestCache.backupHistoryEntries(payload),{Cache:root.BacktestCache,Archive:root.BacktestArchive});}catch(error){sourceError=error.message;}}
      let completed,completionError;try{completed=await (await resultsPromise)?.importAll(payload.completedResults);}catch(error){completionError=error.message;}await runner.restore(result.restoredJobId||undefined);await refreshHistory();void cacheInfo();void researchUI?.refresh();
      const current=new Set(F.store.snapshot().keys),states=await storedStates(),readyCount=states.filter(s=>s.completed&&current.has(s.id)).length;
-     const runNote=result.restoredJobId&&job?' · '+frameLabel(job.config.timeframe)+' 결과 '+job.items.filter(i=>i.status==='done').length+' / '+job.items.length+'개':' · 백업에 저장 실행 없음';
-     status('데이터 복원 완료 · 즐겨찾기 '+result.localFavorites+'개'+(result.backupFavorites===null?' 유지 · 구형 파일에 목록 없음':' 복원')+runNote+(readyCount?' · 원본 준비 '+readyCount+' / '+result.localFavorites+'개':' · 새 전략 계산에 바로 쓸 원본 없음')+(migrated?.pages?' · 남아 있던 자료 '+migrated.pages+'묶음 이관':'')+(sourceError?' · 원본 이관 제외: '+sourceError:'')+(completed?' · 상세 결과 '+completed.imported+'개 복원'+(completed.skipped?' · 호환·용량 제외 '+completed.skipped+'개':''):'')+(completionError?' · 상세 결과 제외: '+completionError:'')+(result.skippedPages?' · 용량·유효기간에 따라 '+result.skippedPages+'개 제외':'')+'. '+(result.favoritesPersistent?'':'즐겨찾기는 임시 저장입니다. ')+'새 실행은 현재 백테스팅 설정을 사용합니다.');
+     const runNote=result.restoredJobId&&job?' · '+frameLabel(job.config.timeframe)+' 결과 '+job.items.filter(i=>i.status==='done').length+' / '+job.items.length+'개 ('+strategyText(job.config)+')':' · 백업에 저장 실행 없음';
+     status('데이터 복원 완료 · 즐겨찾기 '+result.localFavorites+'개'+(result.backupFavorites===null?' 유지 · 구형 파일에 목록 없음':' 복원')+runNote+(readyCount?' · 원본 준비 '+readyCount+' / '+result.localFavorites+'개':' · 전체 기간 원본 0 / '+result.localFavorites+'개')+(migrated?.pages?' · 남아 있던 자료 '+migrated.pages+'묶음 이관':'')+(sourceError?' · 원본 이관 제외: '+sourceError:'')+(completed?' · 상세 결과 '+completed.imported+'개 복원'+(completed.skipped?' · 호환·용량 제외 '+completed.skipped+'개':''):'')+(completionError?' · 상세 결과 제외: '+completionError:'')+(result.skippedPages?' · 용량·유효기간에 따라 '+result.skippedPages+'개 제외':'')+'. '+(result.favoritesPersistent?'':'즐겨찾기는 임시 저장입니다. ')+'새 실행은 현재 백테스팅 설정을 사용합니다.');
     }catch(err){status(err.name==='AbortError'?'복원을 중지했습니다.':'복원 실패: '+err.message,err.name!=='AbortError');}
     finally{detailAbort=null;setTransferBusy(false);importFile.value='';}
    };

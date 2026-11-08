@@ -43,7 +43,7 @@ async function importFile(file){
  assert($('btBatchSavedJob').value===batchId&&$('btBatchCount').textContent==='143 / 143','파일의 1분봉 143개를 열지 않았습니다.');
 }
 async function confirmation(action='테스트 시작'){
- const button=()=>[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent===action);
+ const button=()=>[...document.querySelectorAll('dialog[open] button')].find(b=>b.dataset.choice==='run'||b.textContent===action);
  await waitFor(button,'실행 확인창');return button();
 }
 async function rerun(tf){

@@ -7,6 +7,11 @@
  // The engine gives 0 and 1 the same single entry. Preserve both legacy file keys.
  const strategySignature=(c,tf)=>JSON.stringify(strategyValues(c,tf,true));
  function sameStrategy(a,b,tf=a?.timeframe){if(!a||!b)return false;const frame=tf==='all'?'1m':tf;try{return strategySignature(a,frame)===strategySignature(b,frame);}catch{return false;}}
+ function strategyDifferences(saved,current,tf=current?.timeframe){
+  const frame=tf==='all'?'1m':tf;
+  try{const prior=new Map(strategyValues(saved,frame,true));return strategyValues(current,frame,true).filter(([key,value])=>value!==prior.get(key)).map(([key])=>key);}
+  catch{return [];}
+ }
  function identity(m,c,tf=c.timeframe){return [version,m.exchange||m.ex,m.symbol,strategyValues(c,tf),c.startTime,c.cacheRangeEnd??c.endTime];}
  const requestKey=(m,c,tf)=>JSON.stringify(identity(m,c,tf));
  const scopeKey=parts=>JSON.stringify([parts[0],...parts.slice(3)]);
@@ -201,5 +206,5 @@
   for(const row of candidates){const output=await openBatchResult(store,row);signal?.throwIfAborted();if(output&&!output.summaryOnly)return output;summary??=output;}
   return summary;
  }
- let shared;return {readyFor,equityPoints,version,maxBytes,frames,key,requestKey,sameStrategy,matchesExecution,memory,open,output,compare,fromHeads,frameRecord,framePlan,combineFrames,batchCandidate,batchCandidates,savedSummary,findBatch,openBatchResult,openIndividual,getDefault:()=>shared??=open()};
+ let shared;return {readyFor,equityPoints,version,maxBytes,frames,key,requestKey,sameStrategy,strategyDifferences,matchesExecution,memory,open,output,compare,fromHeads,frameRecord,framePlan,combineFrames,batchCandidate,batchCandidates,savedSummary,findBatch,openBatchResult,openIndividual,getDefault:()=>shared??=open()};
 });
