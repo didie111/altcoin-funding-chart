@@ -12,6 +12,18 @@ test('reuse isolates exchange, symbol, timeframe, dates, fees, every strategy sw
  for(const c of [{...config,timeframe:'3m'},{...config,feePct:.2},{...config,takeProfitPct:4},{...config,oneEntryPerFunding:true},{...config,entryCooldownBars:150},{...config,startTime:config.startTime+60},{...config,cacheRangeEnd:config.cacheRangeEnd+86400}])assert.equal(await store.find(market,c),null);
  assert.equal(await store.find({...market,exchange:'BINANCE'},config),null);assert.equal(await store.find({...market,symbol:'ETHUSDT'},config),null);const exported=await store.exportAll();exported.entries[0].head.version=0;await assert.rejects(R.memory().importAll(exported),/백업/);
 });
+test('every engine strategy value participates in saved result identity and validation',async()=>{
+ const variants={timeframe:'3m',fundingIntervalHours:4,fundingIntervalBasis:'chart',minFundingRate:-.6,maxFundingRate:-2,fundingWindowSeconds:7200,fundingTransitionLookbackSeconds:7200,oneEntryPerFunding:true,entryCooldownBars:4,requireFreshFundingAfterCooldown:false,rsiPeriod:8,rsiOversold:45,rsiSource:'hl2',entryTrigger:'rsi_cross_up',splitCount:10,splitTrigger:'bar',splitStepPct:2,dcaMethod:'martingale',stopLossMode:'after_all_dca',exitType:'composite',takeProfitPct:3,stopLossPct:4,rsiExitLevel:55,maxHoldBars:301,feePct:.08,slippagePct:.06,includeFundingPayment:false,initialCapital:12000,allocationPerTradePct:70,positionSizing:'first_entry',firstEntryAmount:12};
+ assert.deepEqual(Object.keys(variants).sort(),Object.keys(E.defaultStrategyConfig).sort());
+ const store=R.memory(),{result,meta}=computed();await store.save(market,config,result,meta);
+ assert.ok(await store.find(market,config));assert.ok(R.matchesExecution(result,config,config.timeframe,{strictTrades:true}));
+ for(const [field,value] of Object.entries(variants)){
+  const changed=E.normalizeConfig({...config,[field]:value});assert.notEqual(changed[field],config[field],field);
+  assert.equal(await store.find(market,changed),null,field);
+  assert.equal(R.matchesExecution(result,changed,changed.timeframe,{strictTrades:true}),false,field);
+ }
+});
+
 test('snapshot reuse is explicit and distinguishes the saved cutoff from a newer requested end',async()=>{
  const store=R.memory(),o=computed();await store.save(market,config,o.result,o.meta);const newer={...config,endTime:config.endTime+3600};assert.equal(await store.find(market,newer,{snapshot:false}),null);assert.ok(await store.find(market,newer));const saved=await R.fromHeads(store,await store.find(market,newer),newer,{detail:true});assert.equal(saved.result.config.endTime,config.endTime);assert.equal(saved.meta.reuse.snapshotEnd,config.endTime);
 });
@@ -30,13 +42,34 @@ test('a seed dataset resamples real minute bars without reloading funding or min
  const derived=await source.loadBacktestDataset(market.symbol,{...opts,intervals:['3m','1h'],fastResample:true,seedDataset:seed});assert.ok(!calls.slice(before).includes('1m')&&!calls.slice(before).includes('funding'));const native=await source.loadBacktestDataset(market.symbol,{...opts,intervals:['3m','1h']});for(const tf of ['3m','1h'])assert.deepEqual(E.runBacktest(derived.timeframeCandles[tf],derived.fundingRecords,{...config,timeframe:tf}),E.runBacktest(native.timeframeCandles[tf],native.fundingRecords,{...config,timeframe:tf}));
  await assert.rejects(source.loadBacktestDataset('ETHUSDT',{...opts,intervals:['3m'],seedDataset:seed}),/종목·기간/);
 });
-function worker(cache,{precompute=false,detail=false,fresh=false,tf='1m'}={}){let resolve,loads=0,calculations=0;const done=new Promise(r=>resolve=r),source=D.create({candlePage:async(ex,s,t,edge)=>(t==='1m'?rows:T.resample(rows,t)).filter(r=>r.time*1000<=edge).slice(-1000),fundingPage:async(ex,s,edge,p)=>p===1?funding:[]}),scope={importScripts(){},postMessage(v){if(v.output||v.error)resolve(v);},AbortController,Date,TimeframeEngine:T,BacktestResults:{...R,getDefault:async()=>cache},BacktestCache:{open:async()=>C.memory(),adapter:()=>({})},MarketAPI:{},BacktestData:{create:()=>({loadBacktestDataset:(s,o)=>{loads++;return source.loadBacktestDataset(s,o);}})},DashboardModel:M,BacktestEngine:{...E,runBacktest(...args){calculations++;return E.runBacktest(...args);}},BacktestBars:B};vm.createContext(scope);vm.runInContext(fs.readFileSync(require.resolve('../backtest-batch-worker.js'),'utf8'),scope);scope.onmessage({data:{id:1,market,config:{...config,timeframe:tf,precomputeTimeframes:precompute,reuseCompleted:!fresh},detail}});return done.then(v=>({...v,loads,calculations}));}
+function worker(cache,{precompute=false,detail=false,fresh=false,tf='1m',settings={},alterResult=x=>x}={}){let resolve,loads=0,calculations=0;const done=new Promise(r=>resolve=r),source=D.create({candlePage:async(ex,s,t,edge)=>(t==='1m'?rows:T.resample(rows,t)).filter(r=>r.time*1000<=edge).slice(-1000),fundingPage:async(ex,s,edge,p)=>p===1?funding:[]}),scope={importScripts(){},postMessage(v){if(v.output||v.error)resolve(v);},AbortController,Date,TimeframeEngine:T,BacktestResults:{...R,getDefault:async()=>cache},BacktestCache:{open:async()=>C.memory(),adapter:()=>({})},MarketAPI:{},BacktestData:{create:()=>({loadBacktestDataset:(s,o)=>{loads++;return source.loadBacktestDataset(s,o);}})},DashboardModel:M,BacktestEngine:{...E,runBacktest(...args){calculations++;return alterResult(E.runBacktest(...args));}},BacktestBars:B};vm.createContext(scope);vm.runInContext(fs.readFileSync(require.resolve('../backtest-batch-worker.js'),'utf8'),scope);scope.onmessage({data:{id:1,market,config:{...config,...settings,timeframe:tf,precomputeTimeframes:precompute,reuseCompleted:!fresh},detail}});return done.then(v=>({...v,loads,calculations}));}
 test('a new worker opens saved detail without loading data or recalculating, while latest refresh really recalculates',async()=>{
  const cache=R.memory(),first=await worker(cache);assert.ok(!first.error,first.error?.message);assert.ok(first.loads&&first.calculations);const detail=await worker(cache,{detail:true});assert.ok(!detail.error,detail.error?.message);assert.equal(detail.loads,0);assert.equal(detail.calculations,0);assert.ok(detail.output.result.trades.length);const fresh=await worker(cache,{detail:true,fresh:true});assert.ok(fresh.loads&&fresh.calculations);
 });
 test('one minute execution prepares other timeframe results once; subsequent 3m detail opens without any data work',async()=>{
  const cache=R.memory(),first=await worker(cache,{precompute:true});assert.ok(!first.error,first.error?.message);assert.ok(first.output.meta.preparedTimeframes?.includes('3m'));const next=await worker(cache,{tf:'3m',detail:true});assert.ok(!next.error,next.error?.message);assert.equal(next.loads,0);assert.equal(next.calculations,0);assert.equal(next.output.result.config.timeframe,'3m');const monthly=await worker(cache,{tf:'1M',detail:true});assert.match(monthly.error?.message||'',/완성|제공/);assert.equal(monthly.loads,0);
 });
+test('single-frame and full-frame workers really fill 5 and 10 entries and reject 1-split results labeled as 5',async()=>{
+ const cache=R.memory(),setup={takeProfitPct:0,stopLossPct:0,maxHoldBars:24,splitTrigger:'bar',minFundingRate:-.55,rsiOversold:40,feePct:.12,slippagePct:.07,allocationPerTradePct:25,initialCapital:16000,dcaMethod:'martingale'};
+ const previous=await worker(cache,{tf:'1m',detail:true,settings:{...setup,splitCount:1}});
+ assert.equal(previous.error,undefined,previous.error?.message);assert.ok(previous.output.result.trades.length>0);
+ assert.ok(previous.output.result.trades.every(t=>t.splitTarget===1));
+ for(const [count,tf] of [[5,'1m'],[10,'all']]){
+  const settings={...setup,splitCount:count},execution=await worker(cache,{tf,detail:true,settings});
+  assert.equal(execution.error,undefined,execution.error?.message);assert.ok(execution.calculations>0);
+  for(const frame of tf==='all'?['1m','3m']:['1m']){
+   const requested={...config,...settings,timeframe:frame},heads=await cache.find(market,requested),saved=await R.fromHeads(cache,heads,requested,{detail:true});
+   assert.ok(saved?.result,frame);const result=saved.result;
+   assert.ok(R.matchesExecution(result,requested,frame,{strictTrades:true}));
+   assert.ok(result.trades.some(t=>t.entries.length===count),frame+' should reach the configured split limit');
+   assert.ok(result.trades.every(t=>t.splitTarget===count&&t.entries.length<=count));
+   for(const [name,value] of Object.entries(settings))assert.equal(result.config[name],value);
+  }
+ }
+ const empty=R.memory(),bad=await worker(empty,{detail:true,settings:{...setup,splitCount:5},alterResult:r=>({...r,trades:r.trades.map(t=>({...t,splitTarget:1}))})});
+ assert.match(bad.error?.message||'',/전략|분할/);assert.equal(await empty.find(market,{...config,...setup,splitCount:5}),null);
+});
+
 test('a minute captured before its close never reappears as a completed cached candle after the clock crosses the boundary',async()=>{
  const edge=base*1000+59000;let clock=edge,calls=0;const store=C.memory(),adapter=C.adapter({store,now:()=>clock,wait:async()=>{},candlePage:async()=>{calls++;const forming={...rows[0],volume:calls===1?1:100};if(calls===1)clock+=2000;return [{...rows[0],time:base-60},forming];}}),signal=new AbortController().signal;
  await adapter.candlePage(market.exchange,market.symbol,'1m',edge,signal);const complete=await adapter.candlePage(market.exchange,market.symbol,'1m',clock,signal);assert.equal(calls,2);assert.equal(complete.at(-1).volume,100);

@@ -17,9 +17,13 @@
  const unbase64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
  const clone=value=>structuredClone(value);
  function valid(head){return head?.version===version&&typeof head.key==='string'&&typeof head.requestKey==='string'&&frames.includes(head.timeframe)&&Number.isFinite(head.snapshotEnd)&&head.meta?.market?.symbol&&head.meta.market.ex&&head.meta.market.int===head.timeframe&&head.meta.config?.timeframe===head.timeframe&&Number.isFinite(head.meta.config.startTime)&&Number.isFinite(head.meta.config.endTime);}
+ function matchesExecution(result,config,tf,{strictTrades=false}={}){
+  if(result?.config?.timeframe!==tf||!sameStrategy(config,result.config,tf)||!Array.isArray(result.trades))return false;
+  const max=Math.max(1,E.normalizeConfig({...config,timeframe:tf}).splitCount);
+  return result.trades.every(t=>t&&(strictTrades?t.splitTarget===max&&Number.isInteger(t.dcaSteps)&&t.dcaSteps>=1&&t.dcaSteps<=max&&t.entries?.length===t.dcaSteps:(!Number.isFinite(t.splitTarget)||t.splitTarget===max)&&(!Number.isFinite(t.dcaSteps)||t.dcaSteps<=max)&&(!Array.isArray(t.entries)||t.entries.length<=max)));
+ }
  function matchesResult(head,result){
-  if(result.config?.timeframe!==head.timeframe||result.config.startTime!==head.meta.config.startTime||result.config.endTime!==head.meta.config.endTime||!sameStrategy(head.meta.config,result.config,head.timeframe)||!Array.isArray(result.trades)||!Array.isArray(result.signals))return false;
-  const entries=Math.max(1,E.normalizeConfig(result.config).splitCount);return result.trades.every(t=>t&&(!Number.isFinite(t.splitTarget)||t.splitTarget===entries)&&(!Number.isFinite(t.dcaSteps)||t.dcaSteps<=entries)&&(!Array.isArray(t.entries)||t.entries.length<=entries));
+  return matchesExecution(result,head.meta.config,head.timeframe)&&result.config.startTime===head.meta.config.startTime&&result.config.endTime===head.meta.config.endTime&&Array.isArray(result.signals);
  }
  function storageBytes(head,payload){const {bytes:_,touched:__,...fields}=head;return payload.data.byteLength+encoder.encode(JSON.stringify(fields)).byteLength+256;}
  function restorePlan(previous,entries,limit){
@@ -135,5 +139,5 @@
   for(const row of candidates){const output=await openBatchResult(store,row);signal?.throwIfAborted();if(output&&!output.summaryOnly)return output;summary??=output;}
   return summary;
  }
- let shared;return {readyFor,equityPoints,version,maxBytes,frames,key,requestKey,sameStrategy,memory,open,output,compare,fromHeads,batchCandidate,batchCandidates,savedSummary,findBatch,openBatchResult,openIndividual,getDefault:()=>shared??=open()};
+ let shared;return {readyFor,equityPoints,version,maxBytes,frames,key,requestKey,sameStrategy,matchesExecution,memory,open,output,compare,fromHeads,batchCandidate,batchCandidates,savedSummary,findBatch,openBatchResult,openIndividual,getDefault:()=>shared??=open()};
 });

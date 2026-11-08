@@ -25,7 +25,7 @@
   }
   await part(u32(blocks));await part(endMagic);return {blocks,markets:states.filter(s=>s.candles.count||s.funding.count).length,bytes};
  }
- async function restore(file,store,{signal=aborted(),onProgress=()=>{}}={}){
+ async function restore(file,store,{signal=aborted(),onProgress=()=>{},beforeImport}={}){
   if(!await isResearch(file))throw Error('지원하지 않는 원본 백업 파일입니다.');
   const limit=file.size-endMagic.length-4;
   if(limit<magic.length+4+64+4||!equal(new Uint8Array(await file.slice(file.size-endMagic.length).arrayBuffer()),endMagic))throw Error('원본 백업이 끝까지 저장되지 않았습니다. 기존 기록은 유지됩니다.');
@@ -42,6 +42,7 @@
   if(await A.sha256(legacyData)!==legacyHash)throw Error('백업의 설정·결과 무결성 검증에 실패했습니다.');
   const legacy=parse(legacyData);
   if(legacy?.app!=='funding-chart-batch-v1'||legacy.version!==1||!Array.isArray(legacy.pages)||legacy.pages.length||!Array.isArray(legacy.jobs))throw Error('원본 백업의 설정·결과를 확인하세요.');
+  if(beforeImport){await beforeImport(legacy);signal.throwIfAborted();}
   const seen=new Set(),counts=new Map();
   for(let i=0;i<info.blocks;i++){
    const {head,SHA}=parse(await bytes(await length(),descriptorLimit)),m=S.validateHead(head),key=JSON.stringify(head.key);
