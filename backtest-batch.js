@@ -22,7 +22,7 @@
      catch(error){if(signal.aborted){item.status='pending';throw signal.reason;}if(error.name==='RateLimitError'){item.status='pending';job.status='paused';job.message=error.message;job.retryAt=error.retryAt||now()+60000;await persist();return;}item.status='error';item.error=error.message;
       if(error.name==='MarketServiceError'||/연결 실패:|HTTP (?:403|451|5\d\d)/.test(error.message))for(const next of job.items)if(next.status==='pending'&&next.exchange===item.exchange){next.status='deferred';next.error='거래소 연결 문제로 조회 보류 · '+error.message;}
      }
-     finally{active=null;}if(job.config.researchOnly&&item.status==='done'&&++sinceSave<8&&now()-lastSave<800)onUpdate(clone(job));else{await persist();sinceSave=0;lastSave=now();}}
+     finally{active=null;}if((job.config.researchOnly||item.meta?.research&&!item.meta.research.tailRefreshed)&&item.status==='done'&&++sinceSave<8&&now()-lastSave<800)onUpdate(clone(job));else{await persist();sinceSave=0;lastSave=now();}}
     job.status=job.items.some(i=>['error','deferred'].includes(i.status))?'partial':'done';delete job.message;delete job.retryAt;await persist();
    }catch(error){if(signal.aborted){job.status='paused';job.message='중지했습니다. 완료된 코인은 유지하고 진행 중 코인부터 이어서 계산합니다.';await persist();}else{job.status='paused';job.message=error.message;await persist();}}
    finally{abort=null;active=null;onUpdate(clone(job));}

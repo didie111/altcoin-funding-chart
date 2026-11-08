@@ -9,8 +9,8 @@
  const aborted=()=>new AbortController().signal;
  function join(a,b){const out=new Uint8Array(a.length+b.length);out.set(a);out.set(b,a.length);return out;}
  async function isResearch(file){return file.size>=magic.length&&equal(new Uint8Array(await file.slice(0,magic.length).arrayBuffer()),magic);}
- async function write(store,legacy,sink,{signal=aborted(),onProgress=()=>{}}={}){
-  signal.throwIfAborted();const {keys,states}=await store.snapshot();
+ async function write(store,legacy,sink,{signal=aborted(),onProgress=()=>{},snapshot}={}){
+  signal.throwIfAborted();const {keys,states}=snapshot??await store.snapshot();
   if(!keys.length)throw Error('보관된 원본이 없습니다. 먼저 원본 수집·이어서를 실행하세요.');
   const manifest=json({version:1,blocks:keys.length,markets:states.map(s=>S.validatedState(s))}),meta=await Backup.blob({...legacy,pages:[]});
   if(manifest.length>metaLimit||meta.size>legacyLimit)throw Error('백업 설정·결과 자료의 크기 한도를 초과했습니다.');
@@ -61,16 +61,18 @@
   const url=environment.URL.createObjectURL(file),link=doc.createElement('a');link.href=url;link.download=name;doc.body.append(link);
   try{link.click();}finally{link.remove();environment.setTimeout(()=>{environment.URL.revokeObjectURL(url);void cleanup();},600000);}
  }
- async function save(store,readLegacy,{environment=root,document=environment.document,onProgress=()=>{},signal=aborted(),name=filename()}={}){
+ async function save(store,readLegacy,{environment=root,document=environment.document,onProgress=()=>{},signal=aborted(),optional=false,name=optional?Backup.filename():filename()}={}){
   let selection;
   if(typeof environment.showSaveFilePicker==='function'){
    try{selection=Promise.resolve(environment.showSaveFilePicker({suggestedName:name,types:[{description:'백테스트 원본 포함 백업',accept:{'application/octet-stream':['.dat']}}]})).then(handle=>({handle}),error=>({error}));}
    catch(error){selection=Promise.resolve({error});}
   }
   const chosen=selection?await selection:null;if(chosen?.error?.name==='AbortError')throw chosen.error;
-  signal.throwIfAborted();const legacy=await readLegacy();let sink,dir,temp,handle=chosen?.handle,parts=null;
+  signal.throwIfAborted();const source=await store,snapshot=await source?.snapshot(),includeRaw=Boolean(snapshot?.keys.length);
+  if(!includeRaw&&!optional)throw Error('보관된 원본이 없습니다. 먼저 원본 수집·이어서를 실행하세요.');
+  const legacy=await readLegacy(includeRaw);let sink,dir,temp,handle=chosen?.handle,parts=null;
   try{
-   if(!handle&&environment.navigator?.storage?.getDirectory){
+   if(!handle&&includeRaw&&environment.navigator?.storage?.getDirectory){
     try{
      dir=await environment.navigator.storage.getDirectory();
      if(typeof dir.entries==='function')for await(const [key,entry] of dir.entries()){if(key.startsWith('tmp-research-export-')&&entry.kind==='file'){try{const old=await entry.getFile();if(Date.now()-old.lastModified>86400000)await dir.removeEntry(key);}catch{}}}
@@ -79,8 +81,12 @@
     }catch(error){if(error.name==='QuotaExceededError')throw error;dir=null;temp=null;}
    }
    if(handle)sink=await handle.createWritable();
-   else{let size=0;parts=[];sink={write(p){size+=p.size??p.byteLength;if(size>downloadLimit)throw Error('이 브라우저는 큰 원본 파일을 바로 저장할 수 없습니다. Chrome·Edge 등 파일 저장 창을 지원하는 브라우저에서 원본 포함 백업을 실행하세요.');parts.push(p);},close(){},abort(){parts.length=0;}};}
-   const result=await write(await store,legacy,sink,{signal,onProgress});await sink.close();
+   else{let size=0;parts=[];sink={write(p){size+=p.size??p.byteLength;if(size>(includeRaw?downloadLimit:legacyLimit))throw Error('이 브라우저는 큰 원본 파일을 바로 저장할 수 없습니다. Chrome·Edge 등 파일 저장 창을 지원하는 브라우저에서 원본 포함 백업을 실행하세요.');parts.push(p);},close(){},abort(){parts.length=0;}};}
+   let raw;
+   if(includeRaw)raw=await write(source,legacy,sink,{signal,onProgress,snapshot});
+   else{const file=await Backup.blob(legacy);await sink.write(file);raw={blocks:0,markets:0,bytes:file.size};}
+   await sink.close();
+   const result={...raw,includesRaw:includeRaw,favorites:legacy.favorites?.length||0,jobs:legacy.jobs.length,completedResults:legacy.completedResults?.entries?.length||0};
    if(chosen?.handle)return {...result,method:'file'};
    const file=parts?new Blob(parts,{type:'application/octet-stream'}):await handle.getFile(),cleanup=async()=>{if(dir&&temp)try{await dir.removeEntry(temp);}catch{}};
    download(environment,document,file,name,cleanup);return {...result,method:'download'};

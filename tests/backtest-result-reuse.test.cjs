@@ -87,6 +87,7 @@ test('individual execution can open a completed whole-history batch detail with 
  assert.ok(o.result.trades.length>0);await store.save(market,history,o.result,o.meta);
  const saved=await R.openIndividual(store,market,request,{listJobs});assert.deepEqual(saved.result,o.result);assert.equal(saved.meta.reuse.snapshotEnd,history.endTime);assert.equal(saved.meta.reuse.rangeDiffers,true);
  for(const [m,c] of [[{...market,exchange:'BINANCE'},request],[{...market,symbol:'ETHUSDT'},request],[market,{...request,feePct:.12}],[market,{...request,rsiPeriod:20}],[market,{...request,timeframe:'3m'}],[market,{...request,reuseCompleted:false}]])assert.equal(await R.openIndividual(store,m,c,{listJobs}),null);
+ assert.equal(await R.openIndividual(store,market,request,{listJobs,sameRange:true}),null);
  const exact=computed(config);await store.save(market,config,exact.result,exact.meta);assert.deepEqual((await R.openIndividual(store,market,request,{listJobs})).result,exact.result);
 });
 test('older backups open the real summary immediately and never substitute 1m statistics for 3m trades',async()=>{

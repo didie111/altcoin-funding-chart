@@ -76,10 +76,10 @@ test('truncated or damaged raw backups never mark partial data as ready',async()
  await assert.rejects(File.restore(new Blob([raw]),dst),/무결성/);assert.notEqual((await dst.state(m))?.completed?.to,start+day);
 });
 
-function realWorker(store,results){
- const calls={network:0,datasets:0,compute:0},pending=new Map(),mod={...H,async dataset(...args){calls.datasets++;return H.dataset(...args);}},ctx={importScripts(){},postMessage(event){if(event.marketRequest||event.archiveRequest){calls.network++;pending.get(event.id)?.({error:{message:'unexpected exchange request'}});}if(event.error||event.output)pending.get(event.id)?.(event);},AbortController,Date,TimeframeEngine:T,BacktestCache:{...C,open:async()=>C.memory()},BacktestResults:{...R,getDefault:async()=>results},BacktestResearch:mod,BacktestResearchStore:{...S,getDefault:async()=>store},BacktestData:{...D,create:()=>({loadBacktestDataset(){calls.network++;throw Error('original data was fetched');}})},MarketAPI:{},DashboardModel:M,BacktestEngine:{...E,runBacktest(...args){calls.compute++;return E.runBacktest(...args);}},BacktestBars:B};
+function realWorker(store,results,io){
+ const calls={network:0,datasets:0,compute:0},pending=new Map(),mod={...H,async dataset(...args){calls.datasets++;return H.dataset(...args);}},ctx={importScripts(){},postMessage(event){if(event.marketRequest||event.archiveRequest){calls.network++;pending.get(event.id)?.({error:{message:'unexpected exchange request'}});}if(event.error||event.output)pending.get(event.id)?.(event);},AbortController,Date,TimeframeEngine:T,BacktestCache:{...C,open:async()=>C.memory()},BacktestResults:{...R,getDefault:async()=>results},BacktestResearch:mod,BacktestResearchStore:{...S,getDefault:async()=>store},BacktestData:{...D,...(io?{candlePage:io.candlePage,fundingPage:io.fundingPage}:{}),create:()=>({loadBacktestDataset(){calls.network++;throw Error('the entire dataset was fetched');}})},MarketAPI:{},DashboardModel:M,BacktestEngine:{...E,runBacktest(...args){calls.compute++;return E.runBacktest(...args);}},BacktestBars:B};
  vm.createContext(ctx);vm.runInContext(fs.readFileSync(require.resolve('../backtest-batch-worker.js'),'utf8'),ctx);
- let id=0;return {calls,run(config){return new Promise(resolve=>{const current=++id;pending.set(current,resolve);void ctx.onmessage({data:{id:current,market:m,detail:true,config:{...config,researchOnly:true}}});});}};
+ let id=0;return {calls,run(config){return new Promise(resolve=>{const current=++id;pending.set(current,resolve);void ctx.onmessage({data:{id:current,market:m,detail:true,config:{...config,researchOnly:config.researchOnly??true}}});});}};
 }
 test('actual worker changes RSI and split values on archived candles, reuses the same data and never calls an exchange',async()=>{
  const archive=S.memory(),results=R.memory(),end=start+3*day;await seed(archive,m,start,end);
@@ -92,6 +92,53 @@ test('actual worker changes RSI and split values on archived candles, reuses the
  assert.deepEqual(worker.calls,{network:0,datasets:1,compute:2});
  const same=await worker.run({...config,splitCount:1,rsiOversold:25});assert.ok(same.output.meta.reuse);assert.deepEqual(worker.calls,{network:0,datasets:1,compute:2});
  const other=await worker.run({...config,timeframe:'1h',splitCount:1,rsiOversold:25});assert.equal(other.output.result.config.timeframe,'1h');assert.deepEqual(worker.calls,{network:0,datasets:2,compute:3});
+});
+
+test('ordinary execution after restoring raw inputs calculates current settings through the saved cutoff, then reuses the new result',async()=>{
+ const original=S.memory(),archive=S.memory(),results=R.memory(),end=start+3*day;
+ await seed(original,m,start,end);const parts=[];await File.write(original,legacy(),{write:p=>parts.push(p)});await File.restore(new Blob(parts),archive);
+ const worker=realWorker(archive,results),settings={...base,endTime:end+day,rsiOversold:42,splitCount:5,researchOnly:false,reuseCompleted:true};
+ const outcome=await worker.run(settings);
+ assert.equal(outcome.error,undefined,outcome.error?.message);assert.equal(outcome.output.result.config.endTime,end);assert.equal(outcome.output.result.config.splitCount,5);
+ assert.equal(outcome.output.result.config.rsiOversold,42);assert.equal(outcome.output.meta.research.cutoffDiffers,true);assert.equal(outcome.output.meta.research.through,end);
+ assert.deepEqual(worker.calls,{network:0,datasets:1,compute:1});
+ const same=await worker.run(settings);assert.equal(same.output.meta.reuse.networkRequests,0);assert.deepEqual(worker.calls,{network:0,datasets:1,compute:1});
+ const target=H.executionProfile(await archive.state(m),settings),found=await R.findBatch(results,[],[m],settings,{archivedPairs:async()=>[{market:m,config:target.config}]});
+ assert.equal(found[0].meta.reuse.networkRequests,0);assert.equal(found[0].meta.config.splitCount,5);
+ assert.equal(H.executionProfile(await archive.state(m),{...settings,startTime:start-60}),null,'must not silently omit an earlier requested period');
+ assert.equal(H.executionProfile(await archive.state(m),settings,{strictSnapshot:true}),null,'must not pass off an older cutoff as the archived exact result');
+});
+
+test('an explicit fresh backtest extends a portable archive with only the missing candle and funding pages',async()=>{
+ const archive=S.memory(),results=R.memory(),end=start+3*day,tail=end+6*60;await seed(archive,m,start,end);
+ const io=source(candles(start,tail),funding(start-2*day,end+3600)),worker=realWorker(archive,results,io);
+ const outcome=await worker.run({...base,endTime:tail,reuseCompleted:false,researchOnly:false,splitCount:10});
+ assert.equal(outcome.error,undefined,outcome.error?.message);assert.equal(outcome.output.result.config.endTime,tail);assert.equal(outcome.output.result.config.splitCount,10);
+ assert.equal(outcome.output.meta.research.tailRefreshed,true);assert.deepEqual(worker.calls,{network:0,datasets:1,compute:1});
+ assert.deepEqual(io.calls.map(c=>c.tf),['1m','funding']);assert.ok(io.calls.every(c=>c.edge>=end*1000));
+ const state=await archive.state(m);assert.equal(state.completed.to,tail);assert.equal(state.candles.count,(tail-start)/60);assert.equal(state.funding.last,end);
+});
+
+test('ordinary 1m downloads can be kept and transferred as verified raw source instead of downloading twice',async()=>{
+ const end=start+day,price=candles(start,end),settled=funding(start-2*day,end),io=source(price,settled),adapter=D.create(io);
+ const data=await adapter.loadBacktestDataset(m.symbol,{exchange:m.exchange,intervals:['1m'],packed:true,startTime:start,endTime:end});
+ assert.deepEqual(data.rawBounds,{from:start,to:end,fundingFrom:start-2*day,fundingTo:end});
+ const src=S.memory();assert.deepEqual(await H.retainDataset(src,m,data),{from:start,to:end,fundingFrom:start-2*day});
+ const state=await src.state(m),calls=io.calls.length;await H.retainDataset(src,m,data);assert.equal((await src.state(m)).signature,state.signature);
+ const picked=[];let activated=false;
+ const environment={showSaveFilePicker(){activated=true;return Promise.resolve({async createWritable(){return {write:p=>picked.push(p),close(){}};}});}};
+ const saving=File.save(Promise.resolve(src),async includeRaw=>{assert.equal(includeRaw,true);return legacy();},{environment,optional:true});
+ assert.equal(activated,true);const saved=await saving;assert.equal(saved.includesRaw,true);assert.equal(saved.favorites,1);
+ const dst=S.memory();await File.restore(new Blob(picked),dst);
+ const worker=realWorker(dst,R.memory()),output=await worker.run({...base,timeframe:'3m',endTime:end+60,researchOnly:false,splitCount:5});
+ assert.equal(output.error,undefined,output.error?.message);assert.equal(output.output.result.config.endTime,end);assert.equal(worker.calls.network,0);
+ assert.equal(io.calls.length,calls);
+});
+
+test('the same backup action falls back to a valid result file when no raw blocks are saved',async()=>{
+ const written=[],environment={showSaveFilePicker:async()=>({async createWritable(){return {write:p=>written.push(p),close(){}};}})};
+ const result=await File.save(S.memory(),async raw=>{assert.equal(raw,false);return legacy();},{environment,optional:true});
+ const file=new Blob(written);assert.equal(result.includesRaw,false);assert.equal(await File.isResearch(file),false);assert.deepEqual(JSON.parse(await file.text()),legacy());
 });
 
 test('a restored all-timeframe batch reuses all 143 recorded summaries with no worker, but a changed split never reuses 10-entry results',async()=>{

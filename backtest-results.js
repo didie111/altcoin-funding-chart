@@ -132,10 +132,10 @@
   if(!saved)return savedSummary(row);
   return {...saved,meta:{...saved.meta,reuse:{...saved.meta.reuse,kind:'batch-completed-result',rangeDiffers:row.rangeMatches===false}}};
  }
- async function openIndividual(store,market,c,{listJobs=async()=>[],signal}={}){
+ async function openIndividual(store,market,c,{listJobs=async()=>[],signal,sameRange=false}={}){
   if(c.reuseCompleted===false||c.timeframe==='all')return null;
   signal?.throwIfAborted();const exact=await readDetail(store,market,c);signal?.throwIfAborted();if(exact)return exact;
-  const candidates=batchCandidates(await listJobs(),market,c);signal?.throwIfAborted();let summary=null;
+  const candidates=batchCandidates(await listJobs(),market,c,{sameRange});signal?.throwIfAborted();let summary=null;
   for(const row of candidates){const output=await openBatchResult(store,row);signal?.throwIfAborted();if(output&&!output.summaryOnly)return output;summary??=output;}
   return summary;
  }

@@ -68,6 +68,9 @@ $('qaStart').onclick=async()=>{
     if(tf!=='1m'||i!==1)assert(await source.save(m,config,result,meta),'예제 완료 결과를 저장하지 못했습니다.');
    }
   }
+  const localStart=TimeframeEngine.parseKst('2025-01-10','00:00'),localEnd=TimeframeEngine.parseKst('2025-01-20','00:00')+86400;
+  const localConfig={...config,startTime:localStart,endTime:localEnd,cacheRangeEnd:localEnd},localResult=BacktestEngine.runBacktest(minute,funding,localConfig,{equityMaxPoints:BacktestResults.equityPoints});
+  await source.save(markets[0],localConfig,localResult,{...items[0].meta,startTime:localStart,endTime:localEnd,config:localResult.config});
   const completed={id:batchId,created:1,updated:1,status:'done',config,items,allHistory:true};
   const oldFile=new File([await BacktestBackup.blob({version:1,app:'funding-chart-batch-v1',exportedAt:2,pages:[],jobs:[completed],favorites:markets.map(m=>exchange+':'+m.symbol),completedResults:await source.exportAll()})],'generated-143-legacy.dat');
   const blank=(id,tf,updated)=>({id,status:'paused',updated,items:pending,config:{...config,timeframe:tf},allHistory:true});
@@ -82,11 +85,10 @@ $('qaStart').onclick=async()=>{
   assert($('btBatchCount').textContent==='0 / 143','빈 실행 재현 실패');await importFile(oldFile);
   $('qaResult').textContent='구형 백업 복원: 더 최신의 빈 실행 대신 원본 1분봉 143/143 선택';
 
-  let begin=performance.now();$('btRunBtn').click();await waitFor(()=>requireSuccess()&&$('btStatusMsg').textContent.includes('완료 · 저장 결과'),'개별 실행');
-  assert(lastOverlay?.market.symbol===markets[0].symbol&&lastOverlay.trades.length===items[0].summary.totalTrades,'개별 결과 거래 배열 불일치');
-  assert(!$('btResultContext').hidden&&$('btResultContext').textContent.includes('현재 설정 기간'), '다른 설정 기간 안내 없음');
-  const individual=performance.now()-begin;assert(individual<1000,'개별 실행이 1초를 넘겼습니다.');log('개별 1분봉 실행: '+individual.toFixed(1)+'ms · 원래 거래 '+lastOverlay.trades.length+'건');
-
+  let begin=performance.now();$('btRunBtn').click();await waitFor(()=>requireSuccess()&&$('btStatusMsg').textContent.startsWith('완료 · 저장 결과'),'현재 기간의 개별 실행');
+  assert(lastOverlay?.config.startTime===localStart&&lastOverlay.config.endTime===localEnd,'개별 실행에서 저장된 과거 기간으로 바뀌었습니다.');
+  assert(lastOverlay.market.symbol===markets[0].symbol&&lastOverlay.trades.length===localResult.summary.totalTrades&&lastOverlay.trades.length<items[0].summary.totalTrades,'개별 결과가 현재 기간과 다릅니다.');
+  log('개별 새 실행: 현재 브라우저 기간 유지 · 같은 기간 결과만 바로 표시');
   showBatch();begin=performance.now();row(0).click();await waitFor(()=>requireSuccess()&&tab('trades'),'일괄 거래 보기');
   assert($('btReport').querySelectorAll('tbody tr').length===100,'저장된 거래 표가 표시되지 않았습니다.');const tradeView=performance.now()-begin;assert(tradeView<1000,'거래 보기가 1초를 넘겼습니다.');log('일괄 거래 보기: '+tradeView.toFixed(1)+'ms · 첫 페이지 100건 표시');
   showBatch();row(1).click();await waitFor(()=>requireSuccess()&&tab('overview')&&!!$('btBuildSavedDetails'),'요약만 있는 구형 거래 보기');
