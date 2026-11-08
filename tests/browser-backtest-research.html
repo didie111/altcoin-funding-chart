@@ -35,7 +35,7 @@ function readySingle(){const s=$('btStatusMsg');if(s.classList.contains('bt-erro
 async function runOriginal(){const began=performance.now();$('btRunBtn').click();await waitFor(readySingle,'일반 실행으로 보관 원본 계산');return performance.now()-began;}
 function settings(split,rsi){$('backtestSettings').click();select('btSplitCount',String(split));$('btRsiOversold').value=String(rsi);$('backtestSettingsForm').requestSubmit();assert(!$('backtestSettingsDialog').open,'설정 저장 실패: '+$('backtestSettingsError').textContent);}
 async function startBatch(expected,label,{reused=false}={}){
- batch();const prev=$('btBatchSavedJob').value,confirm=()=>[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='테스트 시작');
+ batch();const prev=$('btBatchSavedJob').value,confirm=()=>[...document.querySelectorAll('dialog[open] button')].find(b=>b.dataset.choice==='run'||b.textContent==='테스트 시작');
  const began=performance.now();$('btBatchStart').click();let details;
  if(!reused){await waitFor(confirm,'일괄 실행 확인창');const accept=confirm();details=accept.closest('dialog').textContent;accept.click();}
  await waitFor(()=>!$('btBatchStart').disabled&&$('btBatchCount').textContent===expected+' / '+expected&&$('btBatchSavedJob').value!==prev&&$('btBatchStatus').textContent.includes('전체 처리 완료'),label,45000);

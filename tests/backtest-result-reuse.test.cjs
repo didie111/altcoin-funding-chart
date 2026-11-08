@@ -30,6 +30,9 @@ test('legacy single-entry aliases restore existing summaries and full detail wit
  const restored=R.memory();assert.deepEqual(await restored.importAll(await source.exportAll()),{imported:1,skipped:0});
  const current={...saved,splitCount:1};
  assert.notEqual(R.requestKey(market,saved),R.requestKey(market,current));
+ assert.deepEqual(R.strategyDifferences(saved,current),[]);
+ assert.deepEqual(R.strategyDifferences(current,{...current,splitCount:10}),['splitCount']);
+ assert.deepEqual(R.strategyDifferences({...current,splitCount:10,rsiOversold:28},{...current,splitCount:10,rsiOversold:30}),['rsiOversold']);
  const detail=await R.openIndividual(restored,market,current,{sameRange:true});
  assert.deepEqual(detail.result.trades,o.result.trades);assert.equal(detail.meta.reuse.networkRequests,0);
  assert.equal(await restored.find(market,{...current,splitCount:5}),null);
