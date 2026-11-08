@@ -1,5 +1,5 @@
 'use strict';
-importScripts('relay-config.js?v=20261013-relay-1','market-shared.js?v=20261025-mtf-1','market-api.js?v=20261026-context-data-ruler-1','funding.js?v=20261027-funding-cursor-1','timeframes.js?v=20261107-result-reuse-1','indicators.js?v=20261025-backtest-1','backtest-bars.js?v=20261107-research-1','backtest-engine.js?v=20261107-responsive-backup-1','backtest-data.js?v=20261107-result-reuse-1','backtest-cache.js?v=20261108-current-batch-settings-1','backtest-archive.js?v=20261107-responsive-backup-1','dashboard-model.js?v=20261107-result-reuse-1','backtest-results.js?v=20261108-current-batch-settings-1','backtest-research-store.js?v=20261107-research-1','backtest-research.js?v=20261107-research-preflight-1');
+importScripts('relay-config.js?v=20261013-relay-1','market-shared.js?v=20261025-mtf-1','market-api.js?v=20261026-context-data-ruler-1','funding.js?v=20261027-funding-cursor-1','timeframes.js?v=20261107-result-reuse-1','indicators.js?v=20261025-backtest-1','backtest-bars.js?v=20261107-research-1','backtest-engine.js?v=20261107-responsive-backup-1','backtest-data.js?v=20261108-restore-raw-first-1','backtest-cache.js?v=20261108-current-batch-settings-1','backtest-archive.js?v=20261107-responsive-backup-1','dashboard-model.js?v=20261108-restore-raw-first-1','backtest-results.js?v=20261108-restore-raw-first-1','backtest-research-store.js?v=20261107-research-1','backtest-research.js?v=20261108-restore-raw-first-1');
 let active=false,requestNumber=0,retainedDataset=null,temporaryStore;const pendingRequests=new Map();
 onmessage=async event=>{
  if(event.data.marketResponse){const response=event.data.marketResponse,pending=pendingRequests.get(response.requestId);if(pending){pendingRequests.delete(response.requestId);response.error?pending.reject(Object.assign(Error(response.error.message),response.error)):pending.resolve(response.data);}return;}
@@ -19,7 +19,7 @@ onmessage=async event=>{
   if(history){
    if(purpose==='collect-research')await research.carryLegacy(history,research.cacheEntries(store),{item:market,signal,Cache:BacktestCache,Archive:BacktestArchive,onProgress:progress});
    state=await history.state(market);
-   if(purpose==='backtest')archived=research.profile(state,config,{localOnly:Boolean(config.researchOnly)});
+   if(purpose==='backtest')archived=research.executionProfile(state,config,{strictSnapshot});
   }
   if(config.researchOnly&&!archived)throw Error('이 코인·기간에 계산할 보관 원본이 없습니다. 원본 수집·이어서를 실행하거나 보관 범위 안의 기간을 선택하세요.');
   if(archived){
@@ -29,8 +29,9 @@ onmessage=async event=>{
     if(saved){progress({phase:'reuse',text:'보관 원본에서 계산했던 동일 조건 결과 · 거래소 재조회 없음'});postMessage({id,output:saved});return;}
    }
   }
-  let effectiveStartTime=config.startTime,knownListingTime=null;
-  if(!archived&&m.ex==='BINANCE'&&config.startTime<1567296000&&(purpose!=='collect-research'||!state?.candles.count||BacktestResearchStore.missing(state.candles.ranges,config.startTime,state.candles.first).length)){
+  const extend=!archived&&purpose==='backtest'&&!strictSnapshot&&history&&research.canExtend(state,config);
+  let effectiveStartTime=extend?state.completed.to:config.startTime,knownListingTime=null;
+  if(!archived&&!extend&&m.ex==='BINANCE'&&config.startTime<1567296000&&(purpose!=='collect-research'||!state?.candles.count||BacktestResearchStore.missing(state.candles.ranges,config.startTime,state.candles.first).length)){
    try{
     let listingSec=null;
     const saved=await store.get(JSON.stringify(['listing-time-v1',m.symbol]),Date.now()).catch(()=>null);
@@ -55,6 +56,14 @@ onmessage=async event=>{
    const output=await research.collect({store:history,item:market,from:config.startTime,to:config.endTime,knownListing:knownListingTime,candlePage:archive?archive.candlePage:BacktestData.candlePage,fundingPage:BacktestData.fundingPage,signal,onProgress:progress});
    postMessage({id,output});return;
   }
+  if(extend){
+   const old=state.completed;
+   progress({phase:'research-tail',text:'보관한 과거 원본 재사용 · 저장 이후 구간만 거래소 확인'});
+   const updated=await research.collect({store:history,item:market,from:old.from,to:config.endTime,keepFundingFrom:old.fundingFrom,candlePage:archive?archive.candlePage:BacktestData.candlePage,fundingPage:BacktestData.fundingPage,signal,onProgress:progress});
+   state=updated.state;archived=research.profile(state,config,{preferSaved:true});
+   if(!archived)throw Error('갱신한 원본에서 요청한 주기의 완성 캔들을 만들 수 없습니다.');
+   Object.assign(config,archived.config);
+  }
   const intervals=isAllFrames?allFrames:[m.int],maxBars=BacktestBars.recommendedMaxBars(deviceMemory);
   let dataset,calculationContext;
   if(archived){
@@ -68,14 +77,19 @@ onmessage=async event=>{
    calculationContext=retainedDataset;
   }else{
    retainedDataset=null;
-   dataset=await source.loadBacktestDataset(m.symbol,{packed:true,maxBars,exchange:m.ex,intervals,requireMinuteData:isAllFrames||config.splitTrigger==='rsi_cross_up_1m',fastResample:isAllFrames||config.splitTrigger==='rsi_cross_up_1m',allowMissing:isAllFrames,startTime:effectiveStartTime,endTime:config.endTime,rsiPeriod:config.rsiPeriod,fundingWindowSeconds:config.fundingWindowSeconds,fundingIntervalBasis:config.fundingIntervalBasis,signal,onProgress:progress});
+   dataset=await source.loadBacktestDataset(m.symbol,{packed:true,maxBars,exchange:m.ex,intervals,requireMinuteData:isAllFrames||config.splitTrigger==='rsi_cross_up_1m',fastResample:isAllFrames||config.splitTrigger==='rsi_cross_up_1m',allowMissing:isAllFrames,startTime:effectiveStartTime,endTime:config.endTime,rsiPeriod:config.rsiPeriod,requestedStartTime:config.startTime,knownListingTime,fundingWindowSeconds:config.fundingWindowSeconds,fundingIntervalBasis:config.fundingIntervalBasis,signal,onProgress:progress});
+  }
+  let retention,retentionWarning;
+  if(history&&!archived&&!strictSnapshot&&(config.timeframe==='1m'||isAllFrames)&&dataset.rawBounds){
+   try{retention=await research.retainDataset(history,market,dataset,{signal,onProgress:progress});}
+   catch(error){retentionWarning=error.name==='QuotaExceededError'?'브라우저 공간 부족으로 이번 원본을 모두 저장하지 못했습니다.':error.message;}
   }
   async function calculate(tf,data){
    progress({phase:'prepare',timeframe:tf});
    const controls={...calculationContext,minuteCandles:data.timeframeCandles['1m'],equityMaxPoints:typeof BacktestResults==='undefined'?5000:BacktestResults.equityPoints,onProgress:progress};
    const result=BacktestEngine.runBacktest(data.timeframeCandles[tf],data.fundingRecords,{...config,timeframe:tf,endTime:data.endTime},controls);if(calculationContext)calculationContext.minutePrepared=controls.minutePrepared;
    if(typeof BacktestResults!=='undefined'&&!BacktestResults.matchesExecution(result,config,tf,{strictTrades:true}))throw Error('실행한 전략과 '+tf+' 계산 결과의 전략 또는 분할 수가 일치하지 않습니다.');
-   const meta={market:{...m,int:tf},coverage:{[tf]:{...data.coverage[tf],...(!result.success?{error:result.reason}:{})}},fundingCoverage:data.fundingCoverage,gaps:data.gapsCount,startTime:data.startTime,endTime:data.endTime,source:data.source,...(data.research?{research:data.research}:{}),...(archive?{archive:archive.info()}:{}),config:result.config};
+   const meta={market:{...m,int:tf},coverage:{[tf]:{...data.coverage[tf],...(!result.success?{error:result.reason}:{})}},fundingCoverage:data.fundingCoverage,gaps:data.gapsCount,startTime:data.startTime,endTime:data.endTime,source:data.source,...(data.research?{research:{...data.research,...(extend?{tailRefreshed:true}:{})}}:{}),...(retention?{retainedSource:retention}:{}),...(retentionWarning?{retentionWarning}:{}),...(archive?{archive:archive.info()}:{}),config:result.config};
    let saved=false;if(results){try{saved=await results.save(market,config,result,meta);}catch{}}
    return {result,summary:result.summary,meta,warnings:result.warnings,diagnostics:result.diagnostics,cache:{hits:cached,resultSaved:saved,...await store.info()}};
   }

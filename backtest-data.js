@@ -28,7 +28,7 @@
    if(!Number.isFinite(start)||!Number.isFinite(end)||start>=end||start<0)throw Error('테스트 기간을 확인하세요.');symbol=String(symbol).trim().toUpperCase().replace(/[-_]/g,'').replace(/USDT$/,'')+'USDT';if(!/^[A-Z0-9]{1,28}USDT$/.test(symbol))throw Error('코인 심볼을 확인하세요.');
    for(const tf of intervals)T.plan(ex,tf);signal.throwIfAborted();const expected=estimate({...options,exchange:ex,intervals,startTime:start,endTime:end});
    const seed=options.seedDataset;if(seed&&(seed.exchange!==ex||seed.symbol!==symbol||seed.startTime!==start||seed.endTime!==end))throw Error('재사용할 원본의 종목·기간이 다릅니다.');
-   const timeframeCandles={},coverage={},allFunding=new Map((seed?.fundingRecords||[]).map(r=>[r.time,r])),fundingStart=Math.max(0,start-Math.max(48*3600,Math.min(864000,Number(options.fundingWindowSeconds)||0))),fundingEnd=Math.min(Date.now()/1000,end+(options.fundingIntervalBasis==='chart'?48*3600:0));let totalCount=0,pages=0,cursor=ex==='BINANCE'?fundingStart*1000:Math.floor(fundingEnd*1000)-1,page=1;
+   const timeframeCandles={},coverage={},allFunding=new Map((seed?.fundingRecords||[]).map(r=>[r.time,r])),fundingStart=Math.max(0,start-Math.max(48*3600,Math.min(864000,Number(options.fundingWindowSeconds)||0))),fundingEnd=Math.min(Date.now()/1000,end+(options.fundingIntervalBasis==='chart'?48*3600:0));let minuteCheckedFrom=seed?.rawBounds?.from,totalCount=0,pages=0,cursor=ex==='BINANCE'?fundingStart*1000:Math.floor(fundingEnd*1000)-1,page=1;
    if(!seed)for(;;){
     signal.throwIfAborted();const rows=F.merge(await funding(ex,symbol,cursor,page,signal));signal.throwIfAborted();pages++;
     for(const r of rows)if(r.time>=fundingStart&&r.time<fundingEnd)allFunding.set(r.time,r);
@@ -60,10 +60,10 @@
       onProgress({phase:'candles',timeframe:tf,pages:warmupPages,count:combined.length,exchange:ex,expectedCount:expected.frames[tf].totalCount,expectedPages:warmupPages,archiveFiles:0,restPages:warmupPages,startTime:start,endTime:end,first:combined[0].time,last:combined.at(-1).time,synthesized:true});continue;
      }
     }
-    const warmupStart=Math.max(0,T.shift(T.start(start,tf),tf,-Math.max(80,(options.rsiPeriod||14)*3))),map=packed?null:new Map(),compact=packed?B.builder():null,localGaps=[];let localGapCount=0,edge=Math.floor(end*1000)-1,tfPages=0,firstInside=null,lastInside=null,insideCount=0,newer=null,oldestRetained=null,newestRetained=null,tfArchives=0,tfRest=0;
+    const warmupStart=Math.max(0,T.shift(T.start(start,tf),tf,-Math.max(80,(options.rsiPeriod||14)*3))),map=packed?null:new Map(),compact=packed?B.builder():null,localGaps=[];let localGapCount=0,edge=Math.floor(end*1000)-1,tfPages=0,firstInside=null,lastInside=null,insideCount=0,newer=null,oldestRetained=null,newestRetained=null,tfArchives=0,tfRest=0,oldestPageExhausted=false;
     for(;;){
      signal.throwIfAborted();const reply=await candles(ex,symbol,tf,edge,signal,false),archiveMeta=reply.archiveMeta,pageRows=T.sorted(reply),rows=pageRows.filter(b=>b.time*1000<=edge);signal.throwIfAborted();tfPages++;if(archiveMeta){tfArchives++;archiveFiles++;}else tfRest++;if(!rows.length&&pageRows.length)throw Error(tf+' 캔들 API의 과거 커서가 진행되지 않습니다.');
-     if(!rows.length)break;
+     if(!rows.length){oldestPageExhausted=true;break;}
      for(let i=rows.length-1;i>=0;i--){const b=rows[i];if(b.time<warmupStart||T.end(b.time,tf)>end)continue;oldestRetained=b.time;if(newestRetained===null)newestRetained=b.time;
       if(packed){compact.push(b);if(newer!==null&&T.end(b.time,tf)<newer){localGapCount++;if(localGaps.length<2000)localGaps.push({timeframe:tf,from:T.end(b.time,tf),to:newer});}newer=b.time;
        if(b.time>=start){firstInside=b.time;if(lastInside===null)lastInside=b.time;insideCount++;}}
@@ -77,6 +77,13 @@
     const values=packed?compact.finish():[...map.values()].sort((a,b)=>a.time-b.time);if(!values.length)throw Error(tf+'의 해당 기간 캔들 기록을 거래소가 제공하지 않습니다.');
     if(!packed){const inside=values.filter(b=>b.time>=start);if(inside.length){firstInside=inside[0].time;lastInside=inside.at(-1).time;insideCount=inside.length;}}
     if(!insideCount)throw Error(tf+'의 선택 기간에 완성된 캔들이 없습니다.');
+    if(tf==='1m'){
+     const from=Math.floor(options.requestedStartTime??start),listing=options.knownListingTime;
+     // An empty MEXC window does not prove that earlier candles are absent.
+     const reached=oldestRetained<=T.start(start,'1m')||oldestPageExhausted&&ex!=='MEXC';
+     const knownEarlier=Number.isFinite(listing)&&start===listing&&oldestRetained<=listing;
+     minuteCheckedFrom=Math.min(oldestRetained,knownEarlier||reached&&from===Math.floor(start)?from:oldestRetained);
+    }
     timeframeCandles[tf]=values;totalCount+=values.length;gapsCount+=localGapCount;for(const gap of localGaps)if(gaps.length<2000)gaps.push(gap);coverage[tf]={first:firstInside,last:lastInside,count:insideCount,endMissing:T.end(lastInside,tf)<T.start(end,tf),warmup:values.length-insideCount,startMissing:firstInside>T.end(T.start(start,tf),tf)};
    }catch(error){signal.throwIfAborted();if(!options.allowMissing||(options.requireMinuteData&&tf==='1m')||error.name==='RateLimitError'||/초과|반복|진행되지|메모리|순서/.test(error.message))throw error;coverage[tf]={error:error.message};}}
    if(!Object.keys(timeframeCandles).length)throw Error('선택 기간의 캔들을 불러오지 못했습니다.');
@@ -84,7 +91,10 @@
    if(!packed)for(const [tf,rows]of Object.entries(timeframeCandles))for(let i=1;i<rows.length;i++)if(T.end(rows[i-1].time,tf)<rows[i].time){gapsCount++;gaps.push({timeframe:tf,from:T.end(rows[i-1].time,tf),to:rows[i].time});}
    const available=Object.entries(coverage).filter(([,v])=>Number.isFinite(v.first)&&Number.isFinite(v.last)),priceStart=Math.max(start,Math.min(...available.map(([,v])=>v.first))),priceEnd=Math.min(end,Math.max(...available.map(([tf,v])=>T.end(v.last,tf)))),first=fundingRecords[0].time,last=fundingRecords.at(-1).time;let longGaps=0;
    for(let i=1;i<fundingRecords.length;i++)if(fundingRecords[i].time-fundingRecords[i-1].time>86400+60&&fundingRecords[i].time>priceStart&&fundingRecords[i-1].time<priceEnd)longGaps++;
-   return {symbol,exchange:ex,startTime:start,endTime:end,fundingRecords,timeframeCandles,coverage,gaps,gapsCount,source:archiveFiles||seed?.source?.includes('binance-public-archive')?'official-exchange-api+binance-public-archive':'official-exchange-api',fundingCoverage:{first,last,count:fundingRecords.length,startMissing:first>priceStart+2*86400,endMissing:last<priceEnd-2*86400,longGaps}};
+   const fundingCoverage={first,last,count:fundingRecords.length,startMissing:first>priceStart+2*86400,endMissing:last<priceEnd-2*86400,longGaps};
+   const rawTo=coverage['1m']?.last+60,fundFrom=Math.floor(fundingStart),fundTo=Math.floor(fundingEnd);
+   const rawBounds=Number.isFinite(minuteCheckedFrom)&&minuteCheckedFrom<rawTo&&fundFrom<rawTo&&fundTo>=rawTo&&!fundingCoverage.startMissing&&!fundingCoverage.endMissing?{from:minuteCheckedFrom,to:rawTo,fundingFrom:fundFrom,fundingTo:fundTo}:undefined;
+   return {symbol,exchange:ex,startTime:start,endTime:end,fundingRecords,timeframeCandles,coverage,gaps,gapsCount,source:archiveFiles||seed?.source?.includes('binance-public-archive')?'official-exchange-api+binance-public-archive':'official-exchange-api',fundingCoverage,...(rawBounds?{rawBounds}:{})};
   }
   return {loadBacktestDataset};
  }

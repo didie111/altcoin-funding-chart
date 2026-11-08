@@ -23,20 +23,16 @@
   }
   return {method:chosen?.handle?'file':'download',bytes:file.size,pages:payload.pages.length,jobs:payload.jobs.length,favorites:payload.favorites?.length||0,completedResults:payload.completedResults?.entries?.length||0};
  }
- function favoriteLists(payload,current,parseKey){
-  const hasList=payload.favorites!==undefined,keys=hasList?payload.favorites:[];
+ function readFavorites(payload,parseKey){
+  const keys=payload?.favorites;if(keys===undefined)return null;
   if(!Array.isArray(keys)||keys.some(key=>typeof key!=='string'||!parseKey(key)))throw Error('백업 즐겨찾기 목록이 올바르지 않습니다.');
-  const backup=[...new Set(keys)],existing=new Set(current),merged=new Set([...existing,...backup]);
-  return {hasList,backup,existing:existing.size,combined:merged.size,needsChoice:hasList&&existing.size>0&&(existing.size!==backup.length||merged.size!==existing.size)};
+  return [...new Set(keys)];
  }
- async function restore(payload,{store,favorites,parseKey,favoritesMode='keep'}={}){
-  const {hasList,backup:unique}=favoriteLists(payload,favorites.snapshot().keys,parseKey);
-  if(!['keep','replace','merge'].includes(favoritesMode))throw Error('즐겨찾기 복원 방식을 확인하세요.');
-  const result=await store.importAll(payload),before=new Set(favorites.snapshot().keys);
-  if(hasList&&(favoritesMode==='replace'||favoritesMode==='keep'&&!before.size))favorites.replace(unique);
-  else if(hasList&&favoritesMode==='merge')favorites.change(unique,true);
+ async function restore(payload,{store,favorites,parseKey}={}){
+  const keys=readFavorites(payload,parseKey),result=await store.importAll(payload),before=new Set(favorites.snapshot().keys);
+  if(keys!==null)favorites.replace(keys);
   const after=favorites.snapshot();
-  return {...result,backupFavorites:unique.length,localFavorites:after.size,addedFavorites:after.keys.filter(k=>!before.has(k)).length,removedFavorites:before.size-after.keys.filter(k=>before.has(k)).length,favoritesPersistent:after.persistent!==false};
+  return {...result,backupFavorites:keys?.length??null,localFavorites:after.size,addedFavorites:after.keys.filter(k=>!before.has(k)).length,removedFavorites:before.size-after.keys.filter(k=>before.has(k)).length,favoritesPersistent:after.persistent!==false};
  }
- return {filename,blob,save,restore,favoriteLists};
+ return {filename,blob,save,restore,readFavorites};
 });

@@ -30,24 +30,22 @@ test('disk write failure aborts a partial file and is surfaced instead of report
 test('large backups yield between chunks and retain all pages and metadata exactly',async()=>{
  const p={...payload(),pages:Array.from({length:251},(_,i)=>({key:'page-'+i,data:{price:.12345678901234+i}}))};let yields=0;const file=await Backup.blob(p,{yieldControl:async()=>{yields++;}});assert.equal(yields,2);assert.deepEqual(JSON.parse(await file.text()),p);assert.match(Backup.filename(Date.UTC(2026,10,6,16,3,4)),/2026-11-07-01-03-04-KST.dat$/);
 });
-test('backup restores favorites, fixed strategy and progress with exact Float64 data without erasing existing favorites',async()=>{
+test('backup restores favorites, fixed strategy and progress with exact Float64 data and replaces the prior watchlist',async()=>{
  const store=Cache.memory(),favorites=Favorites.create(),target=Cache.memory(),other=Favorites.create();favorites.change(['BINANCE:AKEUSDT','BYBIT:BTCUSDT'],true);other.change(['MEXC:SNTUSDT'],true);
  const bars=[{time:1,open:.000000123456789,high:2,low:0,close:1,volume:100}],config={timeframe:'3m',startTime:100,endTime:200,minFundingRate:-.6,entryCooldownBars:150},job={id:'job',updated:1,status:'paused',config,items:[{exchange:'BINANCE',symbol:'AKEUSDT',status:'done',summary:{netPnl:12}}]};await store.put('bars',Cache.packCandles(bars));await store.saveJob(job);
- const p={...await store.exportAll(),favorites:favorites.snapshot().keys},serialized=JSON.parse(await (await Backup.blob(p)).text());const result=await Backup.restore(serialized,{store:target,favorites:other,parseKey:Favorites.parseKey,favoritesMode:'merge'});assert.equal(result.addedFavorites,2);assert.deepEqual(other.snapshot().keys,['MEXC:SNTUSDT','BINANCE:AKEUSDT','BYBIT:BTCUSDT']);assert.deepEqual(Cache.unpackCandles(await target.get('bars')),bars);assert.deepEqual(await target.latestJob(),job);const before=(await target.info()).bytes;await Backup.restore(serialized,{store:target,favorites:other,parseKey:Favorites.parseKey,favoritesMode:'merge'});assert.equal((await target.info()).bytes,before);assert.equal(other.snapshot().size,3);
+ const p={...await store.exportAll(),favorites:favorites.snapshot().keys},serialized=JSON.parse(await (await Backup.blob(p)).text());const result=await Backup.restore(serialized,{store:target,favorites:other,parseKey:Favorites.parseKey});assert.equal(result.addedFavorites,2);assert.deepEqual(other.snapshot().keys,['BINANCE:AKEUSDT','BYBIT:BTCUSDT']);assert.deepEqual(Cache.unpackCandles(await target.get('bars')),bars);assert.deepEqual(await target.latestJob(),job);const before=(await target.info()).bytes;await Backup.restore(serialized,{store:target,favorites:other,parseKey:Favorites.parseKey});assert.equal((await target.info()).bytes,before);assert.equal(other.snapshot().size,2);
 });
 test('old backups without favorites remain readable; malformed favorites or market pages cannot modify existing data',async()=>{
  const store=Cache.memory(),favorites=Favorites.create();favorites.change(['BINANCE:AKEUSDT'],true);const options={store,favorites,parseKey:Favorites.parseKey},old={...payload()};delete old.favorites;await Backup.restore(old,options);
  await assert.rejects(Backup.restore({...payload(),favorites:['WRONG:BTCUSDT']},options),/즐겨찾기/);await assert.rejects(Backup.restore({...payload(),pages:[{key:'x',data:{kind:'ohlcv-page-v2',count:2,values:[]}}]},options),/캔들/);assert.deepEqual(favorites.snapshot().keys,['BINANCE:AKEUSDT']);assert.deepEqual(await store.keys(),[]);
 });
 
-test('restoring does not add favorites to a populated browser unless merge or replacement is selected',async()=>{
+test('a file replaces the watchlist exactly, including an explicitly empty list, with local undo',async()=>{
  const store=Cache.memory(),favorites=Favorites.create(),options={store,favorites,parseKey:Favorites.parseKey};
- const initial=await Backup.restore(payload(),options);assert.equal(initial.addedFavorites,2);
- favorites.change(['BYBIT:BTCUSDT'],false);favorites.change(['MEXC:SNTUSDT'],true);
- const unchanged=await Backup.restore(payload(),options);assert.equal(unchanged.addedFavorites,0);assert.equal(unchanged.localFavorites,2);assert.deepEqual(favorites.snapshot().keys,['BINANCE:AKEUSDT','MEXC:SNTUSDT']);
- const swapped=await Backup.restore(payload(),{...options,favoritesMode:'replace'});assert.equal(swapped.addedFavorites,1);assert.equal(swapped.removedFavorites,1);assert.deepEqual(favorites.snapshot().keys,payload().favorites);
+ favorites.replace(['BINANCE:AKEUSDT','MEXC:SNTUSDT']);
+ const swapped=await Backup.restore(payload(),options);assert.equal(swapped.addedFavorites,1);assert.equal(swapped.removedFavorites,1);assert.deepEqual(favorites.snapshot().keys,payload().favorites);
  assert.equal(favorites.undo(),true);assert.deepEqual(favorites.snapshot().keys,['BINANCE:AKEUSDT','MEXC:SNTUSDT']);
- await Backup.restore(payload(),{...options,favoritesMode:'merge'});assert.equal(favorites.snapshot().size,3);
+ const cleared=await Backup.restore({...payload(),favorites:[]},options);assert.equal(cleared.localFavorites,0);assert.equal(cleared.removedFavorites,2);
 });
 
 test('twelve new saved views retain the original all-frame result, and restore prefers complete results to a partial attempt',async()=>{
@@ -83,8 +81,8 @@ test('restoring 173 favorites chooses the matching completed run over a selected
  const legacy={id:'older-139',updated:2,status:'done',config,items:items.slice(0,139)},full={...legacy,id:'full-173',updated:1,items};
  favorites.replace(keys.slice(0,139));await store.saveJob(legacy);
  const file={...payload(),activeJobId:legacy.id,jobs:[legacy,full],favorites:keys};
- assert.deepEqual(Backup.favoriteLists(file,favorites.snapshot().keys,Favorites.parseKey),{hasList:true,backup:keys,existing:139,combined:173,needsChoice:true});
- const restored=await Backup.restore(file,{store,favorites,parseKey:Favorites.parseKey,favoritesMode:'replace'});
+ assert.deepEqual(Backup.readFavorites(file,Favorites.parseKey),keys);
+ const restored=await Backup.restore(file,{store,favorites,parseKey:Favorites.parseKey});
  assert.equal(restored.localFavorites,173);assert.equal(restored.addedFavorites,34);assert.equal(restored.restoredJobId,full.id);
  assert.deepEqual(favorites.snapshot().keys,keys);assert.deepEqual(await store.activeJob(),full);assert.deepEqual(await store.getJob(legacy.id),legacy);
 });

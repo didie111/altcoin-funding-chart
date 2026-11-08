@@ -31,13 +31,10 @@ const beginning=Date.UTC(2009,0,1)/1000,actualStart=Date.UTC(2024,0,1)/1000,fini
 const cfg={...BacktestEngine.normalizeConfig({timeframe:'1m',startTime:beginning,endTime:finish,cacheRangeEnd:'latest',rsiPeriod:7,rsiOversold:47,splitCount:1,initialCapital:7000,feePct:.12}),timeframe:'all'};
 function waitFor(test,label){return new Promise((resolve,reject)=>{const obs=new MutationObserver(check),timer=setTimeout(()=>stop(Error(label+' 시간 초과: '+$('btBatchStatus')?.textContent)),12000);function stop(e){clearTimeout(timer);obs.disconnect();e?reject(e):resolve();}function check(){try{if(test())stop();}catch(e){stop(e);}}obs.observe($('chartWorkspace'),{attributes:true,subtree:true,childList:true,characterData:true});check();});}
 function change(id,value){$(id).value=value;$(id).dispatchEvent(new Event('change',{bubbles:true}));}
-async function restore(file,mode){
+async function restore(file){
  const input=$('btBatchImportFile'),data=new DataTransfer();data.items.add(file);input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}));
- const choice=()=>document.querySelector('dialog[open] [data-choice="replace"]');
- await waitFor(choice,'목록 선택');const dialog=choice().closest('dialog');
- assert(dialog.textContent.includes('이 브라우저 139개 · 백업 173개'),'복원 전 목록 수가 올바르지 않습니다.');
- if(mode==='cancel')[...dialog.querySelectorAll('button')].find(b=>b.textContent==='취소').click();else choice().click();
- await waitFor(()=>!$('btBatchImport').disabled&&$('btBatchStatus').textContent.startsWith(mode==='cancel'?'복원을 취소':'데이터 복원 완료'),'백업 복원');
+ await waitFor(()=>!$('btBatchImport').disabled&&$('btBatchStatus').textContent.startsWith('데이터 복원 완료'),'확인창 없는 백업 복원');
+ assert(!document.querySelector('dialog[open]')&&$('btBatchStatus').textContent.includes('즐겨찾기 173개 복원'),'목록을 자동으로 복원하지 않았습니다.');
 }
 async function confirmation(){
  const button=()=>[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='테스트 시작');
@@ -69,9 +66,7 @@ $('qaStart').onclick=async()=>{
   const chartWorkspace={activeMarket:()=>({ex:'BYBIT',symbol:markets[0].symbol,int:'4h'}),activeCell:()=>0,subscribe:()=>()=>{}};
   ChartDashboard.bind({workspace:$('chartWorkspace'),chartWorkspace,backtestData:{},selectMarket(){},onBacktestJump(){}});
   $('backtestMaximize').click();$('btView-batch').click();await waitFor(()=>$('btBatchImport')&&!$('btBatchImport').disabled,'일괄 화면 준비');
-  await restore(file,'cancel');
-  assert(CoinFavorites.store.snapshot().size===139&&(await dest.activeJob()).id===old.id&&(await dest.listJobs()).length===1,'취소했는데 복원 자료가 기록됐습니다.');
-  await restore(file,'replace');
+  await restore(file);
   assert(CoinFavorites.store.snapshot().size===173&&keys.every(k=>CoinFavorites.store.has(k))&&$('btBatchSavedJob').value===basisId,'복원한 173개 대신 예전 활성 작업을 열었습니다.');
   assert($('btBatchPlan').textContent.includes('173개')&&$('btBatchPlan').textContent.includes('5분할 · 최대 5회 진입 · RSI 25'),'복원 과정에서 현재 브라우저의 전략이 변경됐습니다.');
   log('139개 저장소에 173개 복원 · 139개가 파일의 마지막 선택이어도 173개를 엶 · 브라우저 5분할 유지');

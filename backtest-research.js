@@ -48,7 +48,7 @@
  }
  function cacheEntries(cache){return async function*(){for(const key of await cache.keys())yield {key,read:()=>cache.get(key)};};}
 
- async function collect({store,item,from=earliest,to,knownListing=null,candlePage,fundingPage,signal=aborted(),onProgress=()=>{},now=Date.now}){
+ async function collect({store,item,from=earliest,to,knownListing=null,keepFundingFrom=null,candlePage,fundingPage,signal=aborted(),onProgress=()=>{},now=Date.now}){
   const m=S.market(item),ex=m.exchange,symbol=m.symbol,start=T.start(from,'1m'),end=T.start(Math.min(to,now()/1000),'1m');
   if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||start>=end)throw Error('원본을 모을 기간을 확인하세요.');
   let pages=0,fundingPages=0,received=0,settlements=0;
@@ -83,7 +83,7 @@
   // Do not use an unclosed or not-yet-returned last minute as the data cutoff.
   const savedEnd=Math.min(end,state.candles.last+60),scan=intervalAt(state.candles.ranges,savedEnd);
   if(!scan)throw Error('보관한 1분봉의 실제 범위를 확인하지 못했습니다. 원본 수집을 이어서 실행하세요.');
-  const checkedStart=Math.max(start,scan[0]),first=Math.max(checkedStart,state.candles.first),fundingFrom=Math.max(0,first-fundingLookback),gaps=S.missing(state.funding.ranges,fundingFrom,savedEnd);
+  const checkedStart=Math.max(start,scan[0]),first=Math.max(checkedStart,state.candles.first),fundingFrom=Math.max(0,Number.isFinite(keepFundingFrom)?Math.min(first,keepFundingFrom):first-fundingLookback),gaps=S.missing(state.funding.ranges,fundingFrom,savedEnd);
   function reportFunding(){onProgress({phase:'research-funding',pages:fundingPages,count:settlements,text:'공식 펀딩 정산 '+settlements.toLocaleString()+'건 추가 확인 · '+fundingPages.toLocaleString()+'페이지'});}
   async function putFunding(rows,lo,hi){
    if(lo>=hi)return;
@@ -130,20 +130,50 @@
   state=await store.state(m);
   return {market:m,state,requested:{from:start,to:end},pages,fundingPages,received,settlements,incomplete:checkedStart>start||savedEnd<end||state.candles.first>start&&(!listing||state.candles.first!==listing)};
  }
- function scope(state,config,{localOnly=false}={}){
+ function scope(state,config,{localOnly=false,preferSaved=false,strictSnapshot=false}={}){
   const done=state?.completed;if(!done)return null;
-  const start=config.startTime,end=T.start(config.endTime,'1m'),to=localOnly?Math.min(end,done.to):end;
+  const start=config.startTime,end=T.start(config.endTime,'1m'),to=!strictSnapshot&&(localOnly||preferSaved)?Math.min(end,done.to):end;
   if(!Number.isFinite(start)||!Number.isFinite(to)||to<=start||to>done.to)return null;
   // The archived calculation never fetches a missing warmup or funding page.
-  const needsFunding=Math.max(0,start-Math.max(48*3600,Math.min(fundingLookback,Number(config.fundingWindowSeconds)||0))),fundFrom=Math.max(done.fundingFrom,needsFunding),fundTo=Math.min(done.to,to+(config.fundingIntervalBasis==='chart'?48*3600:0));
+  const needsFunding=Math.max(0,start-Math.max(48*3600,Math.min(fundingLookback,Number(config.fundingWindowSeconds)||0))),fundFrom=Math.max(done.fundingFrom,needsFunding),fundTo=Math.min(intervalAt(state.funding.ranges,to)?.[1]??done.to,to+(config.fundingIntervalBasis==='chart'?48*3600:0));
   if(!hasRange(state.candles.ranges,Math.max(done.from,T.start(start,'1m')),to)||!hasRange(state.funding.ranges,fundFrom,fundTo))return null;
   if(!localOnly&&start<done.from)return null;
   return {start,to,fundFrom,fundTo,checkedFrom:done.from,signature:state.signature,cutoffDiffers:to<T.start(config.researchRequestedEnd??config.endTime,'1m')};
  }
- function profile(state,config,{localOnly=false}={}){
-  const period=scope(state,config,{localOnly});if(!period)return null;
+ function profile(state,config,options={}){
+  const period=scope(state,config,options),tf=config.timeframe==='all'?'1m':config.timeframe;
+  if(!period||!state.candles.count||!state.funding.count||!T.closedRange(Math.max(period.start,state.candles.first),period.to,tf).count)return null;
   const cacheRangeEnd=['raw-v1',period.signature,period.checkedFrom,period.fundFrom,period.fundTo,period.to].join(':');
   return {period,config:{...config,endTime:period.to,cacheRangeEnd,cacheMaxEnd:period.to,researchRequestedEnd:config.researchRequestedEnd??config.endTime,precomputeTimeframes:false}};
+ }
+ function executionProfile(state,config,{strictSnapshot=false}={}){
+  return profile(state,config,{localOnly:config.researchOnly===true,preferSaved:config.reuseCompleted!==false,strictSnapshot});
+ }
+ function canExtend(state,config){
+  const done=state?.completed;
+  return Boolean(done&&config.researchOnly!==true&&config.startTime>=done.from&&config.startTime<done.to&&T.start(config.endTime,'1m')>done.to);
+ }
+ async function retainDataset(store,item,data,{signal=aborted(),onProgress=()=>{}}={}){
+  const m=S.market(item),bounds=data.rawBounds,minute=data.timeframeCandles?.['1m'];
+  if(!bounds||!minute?.length||!data.fundingRecords?.length||data.exchange!==m.exchange||data.symbol!==m.symbol)return null;
+  const {from,to,fundingFrom,fundingTo}=bounds,before=await store.state(m);
+  if(!S.missing(before?.candles.ranges,from,to).length&&!S.missing(before?.funding.ranges,fundingFrom,fundingTo).length&&before?.completed?.from<=from&&before.completed.to>=to)return before.completed;
+  // Copy only complete exchange candles, one storage block at a time.
+  let week=null,rows=[],count=0,range=0;const scratch={},covered=before?.candles.ranges||[];
+  async function flush(){if(!rows.length)return;signal.throwIfAborted();await store.put(m,'candles',rows,{preferStored:true});rows=[];onProgress({phase:'research-save',count,total:minute.length,text:'검증한 1분봉을 다음 백테스트용으로 보관 중'});}
+  for(let i=0;i<minute.length;i++){
+   const time=B.time(minute,i);if(time+60>to)break;
+   if(week===null||time>=week+S.week){await flush();week=S.bucket(time);}
+   while(covered[range]?.[1]<=time)range++;
+   if(covered[range]?.[0]<=time&&covered[range][1]>=time+60)continue;
+   rows.push({...B.get(minute,i,scratch)});count++;
+  }
+  await flush();signal.throwIfAborted();
+  await store.put(m,'candles',[],{checked:[[from,to]]});
+  const records=data.fundingRecords.filter(r=>r.time>=fundingFrom&&r.time<fundingTo&&!hasRange(before?.funding.ranges,r.time,r.time+1));
+  await store.put(m,'funding',records,{checked:[[fundingFrom,fundingTo]],preferStored:true});
+  const completed={from,to,fundingFrom};
+  return await store.complete(m,completed)?completed:null;
  }
  function checkBatch(items,states,config){
   const byId=new Map(states.map(state=>[state.id,state])),ready=[],missing=[];
@@ -188,14 +218,15 @@
    sinks.set(tf,{from,sink,finish(){
     sink.flush();if(!inside){coverage[tf]={error:'보관한 원본에서 '+tf+' 완성 캔들을 만들 수 없습니다.'};return;}
     timeframeCandles[tf]=packed.finish();coverage[tf]=coverageOf(packed.length,first,last,inside,start,to,tf);
+    if(stored.candles.first<=start&&!hasRange(stored.candles.ranges,from,T.start(start,tf)))coverage[tf].warmupMissing=true;
    }});
   }
-  const lo=Math.min(...[...sinks.values()].map(v=>v.from)),scratch={};
+  const inputs=[...sinks.values()],lo=Math.min(...inputs.map(v=>v.from)),scratch={},trackMinuteGaps=!sinks.has('1m');
   for await(const {head,values} of store.series(m,'candles',lo,to,{signal})){
    for(let i=0;i<head.count;i++){
     const r=S.rowAt(values,i,scratch);if(r.time<lo||r.time+60>to)continue;
-    if(!sinks.has('1m')&&previousMinute!==null&&r.time>previousMinute+60&&r.time>=start){gapsCount++;if(gaps.length<2000)gaps.push({timeframe:'1m',from:previousMinute+60,to:r.time});}
-    previousMinute=r.time;for(const {sink} of sinks.values())sink.push(r);sourceRows++;
+    if(trackMinuteGaps&&previousMinute!==null&&r.time>previousMinute+60&&r.time>=start){gapsCount++;if(gaps.length<2000)gaps.push({timeframe:'1m',from:previousMinute+60,to:r.time});}
+    previousMinute=r.time;for(let j=0;j<inputs.length;j++)inputs[j].sink.push(r);sourceRows++;
    }
    onProgress({phase:'research-read',text:'보관 원본으로 '+(config.timeframe==='all'?'선택 범위의 주기별 봉':config.timeframe+' 기준 봉')+' 준비 · 읽은 1분봉 '+sourceRows.toLocaleString()+'봉 · 거래소 재조회 없음'});
   }
@@ -208,5 +239,5 @@
   for(let i=1;i<records.length;i++)if(records[i].time-records[i-1].time>day+60&&records[i].time>priceStart&&records[i-1].time<priceEnd)longGaps++;
   return {symbol:m.symbol,exchange:m.exchange,startTime:start,endTime:to,timeframeCandles,coverage,gaps,gapsCount,fundingRecords:records,source:'verified-local-minute-and-funding',fundingCoverage:{first,last,count:records.length,startMissing:first>priceStart+2*day,endMissing:last<priceEnd-2*day,longGaps},research:{through:to,storedThrough:stored.completed.to,checkedFrom:p.checkedFrom,sourceRows,cutoffDiffers:p.cutoffDiffers}};
  }
- return {earliest,carryLegacy,cacheEntries,collect,scope,profile,checkBatch,dataset};
+ return {earliest,carryLegacy,cacheEntries,collect,scope,profile,executionProfile,canExtend,retainDataset,checkBatch,dataset};
 });

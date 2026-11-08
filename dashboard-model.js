@@ -48,7 +48,7 @@
   if(data.exchange!==market.ex||data.symbol!==market.symbol||(mode!=='compare'&&!data.timeframeCandles?.[market.int]?.length))throw Error('수집한 종목·거래소·기준 주기가 실행 대상과 일치하지 않습니다. 다시 실행하세요.');
  }
  function backtestCoverageIssues(meta){
-  const frames=Object.entries(meta?.coverage||{}).filter(([,v])=>v.error||v.startMissing||v.endMissing).map(([tf])=>tf),funding=meta?.fundingCoverage||{},gaps=Number(meta?.gaps)||0,fundingGaps=Number(funding.longGaps)||0;
+  const frames=Object.entries(meta?.coverage||{}).filter(([,v])=>v.error||v.startMissing||v.endMissing||v.warmupMissing).map(([tf])=>tf),funding=meta?.fundingCoverage||{},gaps=Number(meta?.gaps)||0,fundingGaps=Number(funding.longGaps)||0;
   const incomplete=frames.length>0||funding.startMissing===true||funding.endMissing===true||gaps>0;
   return {frames,fundingStart:funding.startMissing===true,fundingEnd:funding.endMissing===true,gaps,fundingGaps,incomplete,hasIssues:incomplete||fundingGaps>0};
  }
