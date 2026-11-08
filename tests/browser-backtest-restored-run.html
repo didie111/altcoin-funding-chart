@@ -54,7 +54,7 @@ async function rerun(tf){
 $('qaStart').onclick=async()=>{
  $('qaStart').disabled=true;$('qaResult').textContent='예제 데이터와 백업 파일 준비 중…';
  const suffix='-qa-restored-run-'+Date.now(),qaDB={open:(name,version)=>indexedDB.open(name+suffix,version)},openJobs=BacktestCache.open,openResults=BacktestResults.open;
- const storageKeys=['funding-chart-backtest-panel-v1','funding-chart-backtest-strategy-v2'],previous=storageKeys.map(k=>localStorage.getItem(k));
+ const storageKeys=['funding-chart-backtest-panel-v1','funding-chart-backtest-strategy-v2','funding-chart-bt-restored-profile-v1'],previous=storageKeys.map(k=>localStorage.getItem(k));
  try{
   const source=BacktestResults.memory(),jobs=await openJobs({indexedDB:qaDB}),results=await openResults({indexedDB:qaDB});assert(jobs.persistent&& (await results.info()).persistent,'IndexedDB 저장 불가');
   const minute=Array.from({length:(end-start)/60},(_,i)=>{const close=100+6*Math.sin(i/10);return {time:start+i*60,open:close,high:close+.5,low:close-.5,close,volume:10+i%7};});

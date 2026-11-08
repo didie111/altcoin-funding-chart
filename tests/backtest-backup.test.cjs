@@ -33,11 +33,29 @@ test('large backups yield between chunks and retain all pages and metadata exact
 test('backup restores favorites, fixed strategy and progress with exact Float64 data without erasing existing favorites',async()=>{
  const store=Cache.memory(),favorites=Favorites.create(),target=Cache.memory(),other=Favorites.create();favorites.change(['BINANCE:AKEUSDT','BYBIT:BTCUSDT'],true);other.change(['MEXC:SNTUSDT'],true);
  const bars=[{time:1,open:.000000123456789,high:2,low:0,close:1,volume:100}],config={timeframe:'3m',startTime:100,endTime:200,minFundingRate:-.6,entryCooldownBars:150},job={id:'job',updated:1,status:'paused',config,items:[{exchange:'BINANCE',symbol:'AKEUSDT',status:'done',summary:{netPnl:12}}]};await store.put('bars',Cache.packCandles(bars));await store.saveJob(job);
- const p={...await store.exportAll(),favorites:favorites.snapshot().keys},serialized=JSON.parse(await (await Backup.blob(p)).text());const result=await Backup.restore(serialized,{store:target,favorites:other,parseKey:Favorites.parseKey});assert.equal(result.addedFavorites,2);assert.deepEqual(other.snapshot().keys,['MEXC:SNTUSDT','BINANCE:AKEUSDT','BYBIT:BTCUSDT']);assert.deepEqual(Cache.unpackCandles(await target.get('bars')),bars);assert.deepEqual(await target.latestJob(),job);const before=(await target.info()).bytes;await Backup.restore(serialized,{store:target,favorites:other,parseKey:Favorites.parseKey});assert.equal((await target.info()).bytes,before);assert.equal(other.snapshot().size,3);
+ const p={...await store.exportAll(),favorites:favorites.snapshot().keys},serialized=JSON.parse(await (await Backup.blob(p)).text());const result=await Backup.restore(serialized,{store:target,favorites:other,parseKey:Favorites.parseKey,favoritesMode:'merge'});assert.equal(result.addedFavorites,2);assert.deepEqual(other.snapshot().keys,['MEXC:SNTUSDT','BINANCE:AKEUSDT','BYBIT:BTCUSDT']);assert.deepEqual(Cache.unpackCandles(await target.get('bars')),bars);assert.deepEqual(await target.latestJob(),job);const before=(await target.info()).bytes;await Backup.restore(serialized,{store:target,favorites:other,parseKey:Favorites.parseKey,favoritesMode:'merge'});assert.equal((await target.info()).bytes,before);assert.equal(other.snapshot().size,3);
 });
 test('old backups without favorites remain readable; malformed favorites or market pages cannot modify existing data',async()=>{
  const store=Cache.memory(),favorites=Favorites.create();favorites.change(['BINANCE:AKEUSDT'],true);const options={store,favorites,parseKey:Favorites.parseKey},old={...payload()};delete old.favorites;await Backup.restore(old,options);
  await assert.rejects(Backup.restore({...payload(),favorites:['WRONG:BTCUSDT']},options),/즐겨찾기/);await assert.rejects(Backup.restore({...payload(),pages:[{key:'x',data:{kind:'ohlcv-page-v2',count:2,values:[]}}]},options),/캔들/);assert.deepEqual(favorites.snapshot().keys,['BINANCE:AKEUSDT']);assert.deepEqual(await store.keys(),[]);
+});
+
+test('restoring does not add favorites to a populated browser unless merge or replacement is selected',async()=>{
+ const store=Cache.memory(),favorites=Favorites.create(),options={store,favorites,parseKey:Favorites.parseKey};
+ const initial=await Backup.restore(payload(),options);assert.equal(initial.addedFavorites,2);
+ favorites.change(['BYBIT:BTCUSDT'],false);favorites.change(['MEXC:SNTUSDT'],true);
+ const unchanged=await Backup.restore(payload(),options);assert.equal(unchanged.addedFavorites,0);assert.equal(unchanged.localFavorites,2);assert.deepEqual(favorites.snapshot().keys,['BINANCE:AKEUSDT','MEXC:SNTUSDT']);
+ const swapped=await Backup.restore(payload(),{...options,favoritesMode:'replace'});assert.equal(swapped.addedFavorites,1);assert.equal(swapped.removedFavorites,1);assert.deepEqual(favorites.snapshot().keys,payload().favorites);
+ assert.equal(favorites.undo(),true);assert.deepEqual(favorites.snapshot().keys,['BINANCE:AKEUSDT','MEXC:SNTUSDT']);
+ await Backup.restore(payload(),{...options,favoritesMode:'merge'});assert.equal(favorites.snapshot().size,3);
+});
+
+test('twelve new saved views retain the original all-frame result, and restore prefers complete results to a partial attempt',async()=>{
+ const store=Cache.memory(),markets=Array.from({length:173},(_,i)=>({exchange:'BYBIT',symbol:'MULTI'+i+'USDT'})),config={timeframe:'all',startTime:100,endTime:200},source={id:'full',status:'done',updated:1,config,items:markets.map(m=>({...m,status:'done',summary:{totalTrades:2,netPnl:1}}))};
+ const partial={...source,id:'partial',updated:2,status:'paused',config:{...config,timeframe:'3m'},items:source.items.map((m,i)=>i?{...m,status:'pending'}:m)};
+ await store.importAll({...payload(),activeJobId:partial.id,jobs:[source,partial]});assert.equal((await store.activeJob()).id,source.id);
+ for(let i=0;i<12;i++)await store.saveJob({...source,id:'view-'+i,updated:i+3,config:{...config,timeframe:'1m'},sourceJobId:source.id});
+ assert.equal((await store.listJobs()).length,3);assert.deepEqual(await store.getJob(source.id),source);assert.equal((await store.activeJob()).id,'view-11');
 });
 
 test('reimporting a 139-coin completed backup opens that run ahead of newer empty or partial attempts',async()=>{

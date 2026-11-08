@@ -25,8 +25,8 @@ let requests=0,workerCount=0,overlay,frame='3m';
 function waitFor(check,label,ms=20000){return new Promise((resolve,reject)=>{const obs=new MutationObserver(done),timer=setTimeout(()=>finish(Error(label+' 시간 초과 · '+$('btStatusMsg')?.textContent+' / '+$('btBatchStatus')?.textContent)),ms);function finish(e){obs.disconnect();clearTimeout(timer);e?reject(e):resolve();}function done(){try{if(check())finish();}catch(error){finish(error);}}obs.observe($('chartWorkspace'),{childList:true,attributes:true,characterData:true,subtree:true});done();});}
 function select(id,value){$(id).value=value;$(id).dispatchEvent(new Event('change',{bubbles:true}));}
 const batch=()=>$('btView-batch').click();
-async function importFile(file){
- batch();const control=$('btBatchImportFile'),transfer=new DataTransfer();transfer.items.add(file);control.files=transfer.files;control.dispatchEvent(new Event('change',{bubbles:true}));
+async function importFile(file,favoritesMode='keep'){
+ batch();$('btBatchRestoreFavorites').value=favoritesMode;const control=$('btBatchImportFile'),transfer=new DataTransfer();transfer.items.add(file);control.files=transfer.files;control.dispatchEvent(new Event('change',{bubbles:true}));
  await waitFor(()=>!$('btBatchImport').disabled&&$('btBatchStatus').textContent.startsWith('데이터 복원 완료'),'파일 복원',30000);
 }
 function rows(from,to){return Array.from({length:(to-from)/60},(_,i)=>{const open=100+7*Math.sin((i-1)/23),close=100+7*Math.sin(i/23);return {time:from+i*60,open,high:Math.max(open,close)+.35,low:Math.min(open,close)-.35,close,volume:1+i%17+.000000012345678};});}
@@ -43,7 +43,7 @@ async function startBatch(expected,label){
 }
 $('qaStart').onclick=async()=>{
  $('qaStart').disabled=true;$('qaResult').textContent='격리 저장소 준비 중…';
- const suffix='-qa-'+Date.now(),storageKeys=['funding-chart-backtest-panel-v1','funding-chart-backtest-strategy-v2','funding-chart-bt-research-only-v1'],previous=storageKeys.map(k=>localStorage.getItem(k));
+ const suffix='-qa-'+Date.now(),storageKeys=['funding-chart-backtest-panel-v1','funding-chart-backtest-strategy-v2','funding-chart-bt-research-only-v1','funding-chart-bt-restored-profile-v1'],previous=storageKeys.map(k=>localStorage.getItem(k));
  try{
   const jobStore=await BacktestCache.open({indexedDB:{open:(n,v)=>indexedDB.open(n+suffix,v)}}),results=await BacktestResults.open({name:'qa-result'+suffix});
   const raw=await BacktestResearchStore.open({dbName:'qa-raw'+suffix}),source=BacktestResearchStore.memory(),makeFile=async(legacy)=>{const parts=[];await BacktestResearchFile.write(source,legacy,{write:p=>parts.push(p)});return new File(parts,'generated-143-raw.dat');};
@@ -78,7 +78,7 @@ $('qaStart').onclick=async()=>{
    await source.put(m,'candles',bars,{checked:[[lo,end]]});await source.put(m,'funding',settled,{checked:[[from,end]]});assert(await source.complete(m,{from:lo,to:end,fundingFrom:from}),'생성 예제 저장 실패');
   }
   const portable=await makeFile({...legacy,favorites:markets.map(m=>m.exchange+':'+m.symbol)});
-  await importFile(portable);
+  await importFile(portable,'replace');
   assert($('btBatchResearchOnly').checked&&$('btBatchPeriod').value==='all'&&(await raw.states()).length===143,'원본 파일·전체 과거 선택 복원 실패');
   log('새 파일 · 143개 실제 저장 블록을 빈 IndexedDB에 복원');
   settings(1,25);

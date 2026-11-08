@@ -17,8 +17,9 @@
   const emit=()=>{for(const fn of listeners)fn(snapshot());};
   function persist(){try{if(storage)storage.setItem(storageKey,JSON.stringify([...values]));else persistent=false;}catch{persistent=false;}emit();}
   function snapshot(){return {keys:[...values],markets:[...values].map(parseKey),size:values.size,canUndo:Boolean(undo),persistent};}
-  function change(keys,on){const clean=[...new Set(keys)].filter(parseKey),before=new Set(values);for(const key of clean)on?values.add(key):values.delete(key);if(before.size===values.size&&[...before].every(k=>values.has(k)))return false;undo=before;persist();return true;}
-  return {snapshot,has:key=>values.has(key),change,clear(){return change([...values],false);},undo(){if(!undo)return false;values=undo;undo=null;persist();return true;},reload(){values=read();undo=null;emit();},subscribe(fn){listeners.add(fn);return ()=>listeners.delete(fn);}};
+  function replace(keys){const next=new Set([...keys].filter(parseKey)),previous=[...values];if(previous.length===next.size&&[...next].every((k,i)=>k===previous[i]))return false;undo=values;values=next;persist();return true;}
+  function change(keys,on){const next=new Set(values);for(const key of keys)if(parseKey(key))on?next.add(key):next.delete(key);return replace(next);}
+  return {snapshot,has:key=>values.has(key),change,replace,clear(){return replace([]);},undo(){if(!undo)return false;values=undo;undo=null;persist();return true;},reload(){values=read();undo=null;emit();},subscribe(fn){listeners.add(fn);return ()=>listeners.delete(fn);}};
  }
  return {storageKey,venues,symbol,marketKey,parseKey,parse,resolve,create};
 });
