@@ -76,3 +76,24 @@ test('a new backup remembers the selected completed run even when another comple
  const first={id:'first',updated:1,status:'done',config,items:[item]};await store.saveJob(first);await store.saveJob({...first,id:'later',updated:2,config:{...config,timeframe:'3m'}});await store.selectJob(first.id);
  const target=Cache.memory(),data=JSON.parse(await (await Backup.blob(await store.exportAll())).text());assert.equal((await target.importAll(data)).restoredJobId,first.id);assert.deepEqual(await target.activeJob(),first);
 });
+
+test('restoring 173 favorites chooses the matching completed run over a selected, completed 139-coin run',async()=>{
+ const store=Cache.memory(),favorites=Favorites.create(),config={timeframe:'all',startTime:100,endTime:200,splitCount:1};
+ const items=Array.from({length:173},(_,i)=>({exchange:'BINANCE',symbol:'COIN'+i+'USDT',status:'done',summary:{totalTrades:i}})),keys=items.map(i=>i.exchange+':'+i.symbol);
+ const legacy={id:'older-139',updated:2,status:'done',config,items:items.slice(0,139)},full={...legacy,id:'full-173',updated:1,items};
+ favorites.replace(keys.slice(0,139));await store.saveJob(legacy);
+ const file={...payload(),activeJobId:legacy.id,jobs:[legacy,full],favorites:keys};
+ assert.deepEqual(Backup.favoriteLists(file,favorites.snapshot().keys,Favorites.parseKey),{hasList:true,backup:keys,existing:139,combined:173,needsChoice:true});
+ const restored=await Backup.restore(file,{store,favorites,parseKey:Favorites.parseKey,favoritesMode:'replace'});
+ assert.equal(restored.localFavorites,173);assert.equal(restored.addedFavorites,34);assert.equal(restored.restoredJobId,full.id);
+ assert.deepEqual(favorites.snapshot().keys,keys);assert.deepEqual(await store.activeJob(),full);assert.deepEqual(await store.getJob(legacy.id),legacy);
+});
+
+test('starting a different strategy after an all-frame replay preserves the original portable run',async()=>{
+ const store=Cache.memory(),config={timeframe:'all',startTime:100,endTime:200,splitCount:1},items=[{exchange:'BYBIT',symbol:'BTCUSDT',status:'done',summary:{totalTrades:1}}];
+ const original={id:'all-original',updated:1,status:'done',config,items};await store.saveJob(original);
+ const replay={...original,id:'all-replay',updated:2,sourceJobId:original.id,items:items.map(i=>({...i,meta:{reuse:{snapshotEnd:200}}}))};await store.saveJob(replay);
+ await store.saveJob({...replay,id:'view-1m',updated:3,config:{...config,timeframe:'1m'}});
+ await store.saveJob({...original,id:'new-10-split',updated:4,status:'paused',config:{...config,splitCount:10},items:items.map(i=>({...i,status:'pending'}))});
+ assert.equal((await store.activeJob()).id,'new-10-split');assert.deepEqual(await store.getJob(original.id),original);
+});

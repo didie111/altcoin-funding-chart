@@ -40,21 +40,21 @@ function row(index){return $('btBatchResults').querySelector('[data-batch-detail
 async function importFile(file){
  showBatch();const input=$('btBatchImportFile'),data=new DataTransfer();data.items.add(file);input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}));
  await waitFor(()=>!$('btBatchImport').disabled&&$('btBatchStatus').textContent.startsWith('데이터 복원 완료'),'백업 복원');
- assert($('btBatchSavedJob').value===batchId&&$('btBatchCount').textContent==='143 / 143'&&$('btBatchFrame').value==='1m'&&$('btBatchPeriod').value==='all','파일의 1분봉 143개를 열지 않았습니다.');
+ assert($('btBatchSavedJob').value===batchId&&$('btBatchCount').textContent==='143 / 143','파일의 1분봉 143개를 열지 않았습니다.');
 }
 async function confirmation(action='테스트 시작'){
  const button=()=>[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent===action);
  await waitFor(button,'실행 확인창');return button();
 }
 async function rerun(tf){
- showBatch();const previous=$('btBatchSavedJob').value,label=DashboardModel.labels[tf];select('btBatchFrame',tf);$('btBatchStart').click();const accept=await confirmation();
+ showBatch();const previous=$('btBatchSavedJob').value,label=DashboardModel.labels[tf];select('btBatchFrame',tf);$('btBatchUseSaved').click();const accept=await confirmation();
  const begin=performance.now();accept.click();await waitFor(()=>!$('btBatchStart').disabled&&$('btBatchCount').textContent==='143 / 143'&&$('btBatchStatus').textContent.includes('143개 저장 결과 재사용')&&$('btBatchSavedJob').value!==previous&&$('btBatchSavedJob').selectedOptions[0]?.textContent.startsWith(label+' ·'),'저장 실행의 '+tf+' 재사용');
  log('143개 '+DashboardModel.labels[tf]+' 재실행: '+(performance.now()-begin).toFixed(1)+'ms');
 }
 $('qaStart').onclick=async()=>{
  $('qaStart').disabled=true;$('qaResult').textContent='예제 데이터와 백업 파일 준비 중…';
  const suffix='-qa-restored-run-'+Date.now(),qaDB={open:(name,version)=>indexedDB.open(name+suffix,version)},openJobs=BacktestCache.open,openResults=BacktestResults.open;
- const storageKeys=['funding-chart-backtest-panel-v1','funding-chart-backtest-strategy-v2','funding-chart-bt-restored-profile-v1'],previous=storageKeys.map(k=>localStorage.getItem(k));
+ const storageKeys=['funding-chart-backtest-panel-v1','funding-chart-backtest-strategy-v2','funding-chart-bt-run-options-v1'],previous=storageKeys.map(k=>localStorage.getItem(k));
  try{
   const source=BacktestResults.memory(),jobs=await openJobs({indexedDB:qaDB}),results=await openResults({indexedDB:qaDB});assert(jobs.persistent&& (await results.info()).persistent,'IndexedDB 저장 불가');
   const minute=Array.from({length:(end-start)/60},(_,i)=>{const close=100+6*Math.sin(i/10);return {time:start+i*60,open:close,high:close+.5,low:close-.5,close,volume:10+i%7};});
@@ -75,7 +75,7 @@ $('qaStart').onclick=async()=>{
   BacktestCache.open=async()=>jobs;BacktestResults.getDefault=async()=>results;CoinFavorites.store=CoinFavorites.create();
   window.Worker=function(){workers++;throw Error('저장된 자료를 열 때 계산 작업이 시작됐습니다.');};MarketAPI.json=async()=>{requests++;throw Error('저장 자료의 원본 재조회');};
   localStorage.setItem(storageKeys[0],JSON.stringify({open:true,start:'2025-01-10',end:'2025-01-20',capital:10000,orderSize:10,commission:.05,slippage:.03,executionVersion:2}));
-  localStorage.setItem(storageKeys[1],JSON.stringify(strategy));
+  localStorage.setItem(storageKeys[1],JSON.stringify(strategy));localStorage.removeItem(storageKeys[2]);
   const chartWorkspace={activeMarket:()=>({ex:exchange,symbol:markets[0].symbol,int:'1m'}),activeCell:()=>0,subscribe:()=>()=>{},setBacktest:value=>{lastOverlay=value;}};
   ChartDashboard.bind({workspace:$('chartWorkspace'),chartWorkspace,backtestData:{},selectMarket(){},onBacktestJump(){}});
   $('backtestMaximize').click();showBatch();await waitFor(()=>$('btBatchSavedJob').value==='newer-empty-1m','새로운 빈 실행 확인');
@@ -109,7 +109,7 @@ $('qaStart').onclick=async()=>{
    const finish=()=>this.onmessage?.({data:{id,output:{summary:items[0].summary,meta:{market:{ex:market.exchange,symbol:market.symbol,int:c.timeframe},config:c,endTime:c.endTime}}}});
    if(processed.length===1){firstPending=finish;this.onmessage?.({data:{id,progress:{phase:'prepare',timeframe:c.timeframe}}});}else queueMicrotask(finish);
   };};
-  select('btBatchFrame','3m');begin=performance.now();$('btBatchUseSaved').click();const expand=await confirmation(),preview=performance.now()-begin;
+  select('btBatchFrame','1m');begin=performance.now();$('btBatchUseSaved').click();const expand=await confirmation(),preview=performance.now()-begin;
   assert(expand.closest('dialog').textContent.includes('저장 결과 143개 재사용 · 새 계산 30개')&&expand.closest('dialog').textContent.includes('RSI 50')&&workers===0,'저장한 설정과 신규 코인 수를 정확히 미리 표시하지 않았습니다.');
   begin=performance.now();expand.click();await waitFor(()=>firstPending&&$('btBatchCount').textContent==='143 / 173','저장 결과 먼저 표시');
   const initial=performance.now()-begin;log('173개 실행 확인: '+preview.toFixed(1)+'ms · 저장 결과 143개, 새 계산 30개');log('첫 새 코인 계산 중 · 143/173 먼저 표시: '+initial.toFixed(1)+'ms');

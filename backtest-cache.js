@@ -15,7 +15,16 @@
  const completionRank=job=>{const done=completedCount(job);return done&&done===job.items.length?2:done?1:0;};
  const recent=(a,b)=>(b.updated||0)-(a.updated||0)||b.id.localeCompare(a.id);
  const bestComplete=(a,b)=>completionRank(b)-completionRank(a)||completedCount(b)-completedCount(a)||recent(a,b);
- function bestMultiFrame(jobs){return jobs.filter(j=>j.config?.timeframe==='all'&&completedCount(j)>0).sort(bestComplete)[0]??null;}
+ function bestMultiFrame(jobs){
+  const best=jobs.filter(j=>j.config?.timeframe==='all'&&completedCount(j)>0).sort(bestComplete)[0];
+  const basis=best?.sourceJobId&&jobs.find(j=>j.id===best.sourceJobId&&j.config?.timeframe==='all'&&completionRank(j)===2&&j.items.length===best.items.length);
+  // A replay of the same completed results must not evict its original when an unrelated job starts.
+  if(basis&&best.items.every(i=>i.meta?.reuse)){
+   const keys=new Set(basis.items.map(i=>i.exchange+':'+i.symbol));
+   if(best.items.every(i=>keys.has(i.exchange+':'+i.symbol)))return basis;
+  }
+  return best??null;
+ }
  function retainedJobs(existing, incoming, activeId, importing=false){
   const rows=new Map(existing.map(job=>[job.id,job]));
   for(const job of incoming){const old=rows.get(job.id);if(!importing||!old||completedCount(job)>completedCount(old)||completedCount(job)===completedCount(old)&&recent(job,old)<0)rows.set(job.id,job);}
@@ -24,7 +33,14 @@
   const ordered=[active,basis,bestMultiFrame(ranked),...ranked].filter(Boolean);
   return [...new Map(ordered.map(j=>[j.id,j])).values()].slice(0,3);
  }
- function preferredRestore(jobs,id){const explicit=jobs.find(job=>job.id===id),best=[...jobs].sort(bestComplete)[0];if(completionRank(explicit)===2||completedCount(explicit)&&completionRank(best)<2)return explicit.id;return best?.id??null;}
+ function preferredRestore(jobs,id,favorites){
+  const wanted=new Set(Array.isArray(favorites)?favorites:[]);
+  const covering=wanted.size?jobs.filter(j=>completedCount(j)>0&&new Set(j.items.map(i=>i.exchange+':'+i.symbol).filter(k=>wanted.has(k))).size===wanted.size):[];
+  const exact=covering.filter(j=>j.items.length===wanted.size),candidates=exact.length?exact:covering.length?covering:jobs;
+  const explicit=candidates.find(job=>job.id===id),best=[...candidates].sort(bestComplete)[0];
+  if(completionRank(explicit)===2||completedCount(explicit)&&completionRank(best)<2)return explicit.id;
+  return best?.id??null;
+ }
  function backupPages(payload){
   if(payload?.app!=='funding-chart-batch-v1'||payload.version!==1||!Array.isArray(payload.pages)||!Array.isArray(payload.jobs))throw Error('지원하지 않는 백업 파일 형식입니다.');
   const entries=new Map();for(const p of payload.pages){if(typeof p.key!=='string'||p.key.length>2048)throw Error('시장자료 키가 올바르지 않습니다.');const data=deserializeData(p.data);if(data?.kind==='ohlcv-page-v2'&&!unpackCandles(data))throw Error('백업 캔들 값이 올바르지 않습니다.');entries.set(p.key,{key:p.key,data,expires:Number.isFinite(p.expires)?p.expires:Date.now()+30*86400000,bytes:estimateBytes(data,p.key)});}
@@ -33,7 +49,7 @@
  }
  async function restoreBackup(store,payload){
   const pages=backupPages(payload);for(const p of pages)if(p.expires>=Date.now())await store.put(p.key,p.data,{expires:p.expires,bytes:p.bytes});
-  const restoredJobId=preferredRestore(payload.jobs,payload.activeJobId);if(restoredJobId)await store.importJobs(payload.jobs,restoredJobId);
+  const restoredJobId=preferredRestore(payload.jobs,payload.activeJobId,payload.favorites);if(restoredJobId)await store.importJobs(payload.jobs,restoredJobId);
   const keptJobs=new Set((await store.listJobs()).map(j=>j.id)),retained=new Set(await store.keys());return {restoredJobId,importedPages:pages.filter(p=>retained.has(p.key)).length,importedJobs:new Set(payload.jobs.filter(j=>keptJobs.has(j.id)).map(j=>j.id)).size,skippedPages:pages.filter(p=>!retained.has(p.key)).length};
  }
  function packCandles(rows){

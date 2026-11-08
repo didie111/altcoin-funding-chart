@@ -31,10 +31,13 @@ const beginning=Date.UTC(2009,0,1)/1000,actualStart=Date.UTC(2024,0,1)/1000,fini
 const cfg={...BacktestEngine.normalizeConfig({timeframe:'1m',startTime:beginning,endTime:finish,cacheRangeEnd:'latest',rsiPeriod:7,rsiOversold:47,splitCount:1,initialCapital:7000,feePct:.12}),timeframe:'all'};
 function waitFor(test,label){return new Promise((resolve,reject)=>{const obs=new MutationObserver(check),timer=setTimeout(()=>stop(Error(label+' 시간 초과: '+$('btBatchStatus')?.textContent)),12000);function stop(e){clearTimeout(timer);obs.disconnect();e?reject(e):resolve();}function check(){try{if(test())stop();}catch(e){stop(e);}}obs.observe($('chartWorkspace'),{attributes:true,subtree:true,childList:true,characterData:true});check();});}
 function change(id,value){$(id).value=value;$(id).dispatchEvent(new Event('change',{bubbles:true}));}
-async function restore(file,mode='keep'){
- change('btBatchRestoreFavorites',mode);
+async function restore(file,mode){
  const input=$('btBatchImportFile'),data=new DataTransfer();data.items.add(file);input.files=data.files;input.dispatchEvent(new Event('change',{bubbles:true}));
- await waitFor(()=>!$('btBatchImport').disabled&&$('btBatchStatus').textContent.startsWith('데이터 복원 완료'),'백업 복원');
+ const choice=()=>document.querySelector('dialog[open] [data-choice="replace"]');
+ await waitFor(choice,'목록 선택');const dialog=choice().closest('dialog');
+ assert(dialog.textContent.includes('이 브라우저 139개 · 백업 173개'),'복원 전 목록 수가 올바르지 않습니다.');
+ if(mode==='cancel')[...dialog.querySelectorAll('button')].find(b=>b.textContent==='취소').click();else choice().click();
+ await waitFor(()=>!$('btBatchImport').disabled&&$('btBatchStatus').textContent.startsWith(mode==='cancel'?'복원을 취소':'데이터 복원 완료'),'백업 복원');
 }
 async function confirmation(){
  const button=()=>[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='테스트 시작');
@@ -42,7 +45,7 @@ async function confirmation(){
 }
 $('qaStart').onclick=async()=>{
  $('qaStart').disabled=true;$('qaResult').textContent='173개 원래 실행과 별도의 복원 저장소 준비 중…';
- const storageKeys=['funding-chart-backtest-panel-v1','funding-chart-backtest-strategy-v2','funding-chart-bt-restored-profile-v1'],previous=storageKeys.map(k=>localStorage.getItem(k));
+ const storageKeys=['funding-chart-backtest-panel-v1','funding-chart-backtest-strategy-v2','funding-chart-bt-restored-profile-v1','funding-chart-bt-run-options-v1'],previous=storageKeys.map(k=>localStorage.getItem(k));
  try{
   const source=BacktestCache.memory(),openJobs=BacktestCache.open,suffix='-cross-'+Date.now(),scopedDB={open:(name,version)=>indexedDB.open(name+suffix,version)};
   const dest=await openJobs({indexedDB:scopedDB}),details=await BacktestResults.open({indexedDB:scopedDB});assert(dest.persistent&&(await details.info()).persistent,'실제 IndexedDB 필요');
@@ -54,37 +57,52 @@ $('qaStart').onclick=async()=>{
   const all={id:basisId,created:1,updated:1,status:'done',allHistory:true,config:cfg,items};
   await source.saveJob(all);
   await source.saveJob({...all,id:'newer-incomplete',updated:2,status:'paused',config:{...cfg,timeframe:'3m',rsiOversold:31},items:items.map((m,i)=>i?{exchange:m.exchange,symbol:m.symbol,status:'pending'}:{...m,meta:undefined})});
-  const file=new File([await BacktestBackup.blob({...await source.exportAll(),favorites:markets.map(m=>m.exchange+':'+m.symbol)})],'chrome-saved-all.dat');
+  const old={...all,id:'old-browser-139',updated:3,items:items.slice(0,139)};
+  await source.saveJob(old);
+  const keys=markets.map(m=>m.exchange+':'+m.symbol);
+  const file=new File([await BacktestBackup.blob({...await source.exportAll(),favorites:keys})],'chrome-saved-all.dat');
   BacktestCache.open=async()=>dest;BacktestResults.getDefault=async()=>details;CoinFavorites.store=CoinFavorites.create();
-  CoinFavorites.store.change(['OKX:EXTRAUSDT'],true);
+  CoinFavorites.store.replace(keys.slice(0,139));await dest.saveJob(old);
   let workers=0,requests=0;window.Worker=function(){workers++;throw Error('복원된 결과에 계산 작업을 만들면 안 됩니다.');};MarketAPI.json=async()=>{requests++;throw Error('저장 결과에서 거래소 조회 발생');};
   localStorage.setItem(storageKeys[0],JSON.stringify({open:true,start:'2025-01-03',end:'2025-01-11',capital:20000,orderSize:25,commission:.05,slippage:.03,executionVersion:2}));
-  localStorage.setItem(storageKeys[1],JSON.stringify({timeframe:'4h',rsiPeriod:14,rsiOversold:25,splitCount:5}));localStorage.removeItem(storageKeys[2]);
+  localStorage.setItem(storageKeys[1],JSON.stringify({timeframe:'4h',rsiPeriod:14,rsiOversold:25,splitCount:5}));localStorage.setItem(storageKeys[2],old.id);localStorage.removeItem(storageKeys[3]);
   const chartWorkspace={activeMarket:()=>({ex:'BYBIT',symbol:markets[0].symbol,int:'4h'}),activeCell:()=>0,subscribe:()=>()=>{}};
   ChartDashboard.bind({workspace:$('chartWorkspace'),chartWorkspace,backtestData:{},selectMarket(){},onBacktestJump(){}});
   $('backtestMaximize').click();$('btView-batch').click();await waitFor(()=>$('btBatchImport')&&!$('btBatchImport').disabled,'일괄 화면 준비');
-  await restore(file);
-  assert(CoinFavorites.store.snapshot().size===1&&$('btBatchStatus').textContent.includes('백업 목록 173개'),'기존 즐겨찾기에 자동 병합됐습니다.');
+  await restore(file,'cancel');
+  assert(CoinFavorites.store.snapshot().size===139&&(await dest.activeJob()).id===old.id&&(await dest.listJobs()).length===1,'취소했는데 복원 자료가 기록됐습니다.');
   await restore(file,'replace');
-  assert(CoinFavorites.store.snapshot().size===173&&!CoinFavorites.store.has('OKX:EXTRAUSDT')&&$('btBatchSavedProfile').checked&&$('btBatchPeriod').value==='all'&&$('btBatchSavedJob').value===basisId,'정확한 목록·완료 실행·전략 복원 실패');
-  log('기존 목록 유지 확인 · 명시적으로 바꿀 때만 173개 적용 · 다른 PC의 기본 전략 대신 저장 전략 사용');
+  assert(CoinFavorites.store.snapshot().size===173&&keys.every(k=>CoinFavorites.store.has(k))&&$('btBatchSavedJob').value===basisId,'복원한 173개 대신 예전 활성 작업을 열었습니다.');
+  assert($('btBatchPlan').textContent.includes('173개')&&$('btBatchPlan').textContent.includes('5분할 · 최대 5회 진입 · RSI 25'),'복원 과정에서 현재 브라우저의 전략이 변경됐습니다.');
+  log('139개 저장소에 173개 복원 · 139개가 파일의 마지막 선택이어도 173개를 엶 · 브라우저 5분할 유지');
   const times=[];
   for(const tf of ['all',...frames]){
-   change('btBatchFrame',tf);const before=$('btBatchSavedJob').value,t=performance.now();$('btBatchStart').click();
+   change('btBatchFrame',tf);const before=$('btBatchSavedJob').value,t=performance.now();$('btBatchUseSaved').click();
    const accept=await confirmation(),message=accept.closest('dialog').textContent;
    assert(message.includes('저장 결과 173개 재사용 · 새 계산 0개')&&message.includes('RSI 47')&&message.includes('7,000 USDT'),tf+'의 저장 결과 또는 전략을 놓쳤습니다.');
    accept.click();await waitFor(()=>!$('btBatchStart').disabled&&$('btBatchCount').textContent==='173 / 173'&&$('btBatchSavedJob').value!==before&&$('btBatchStatus').textContent.includes('173개 저장 결과 재사용'),tf+' 완료');
    times.push(performance.now()-t);const saved=await dest.activeJob();assert(saved.config.timeframe===tf&&saved.config.endTime===finish&&saved.sourceJobId===basisId&&saved.items.every(i=>i.meta.reuse.snapshotEnd===finish),tf+' 원래 실행 종료 시점이 바뀌었습니다.');
   }
   const reopened=await openJobs({indexedDB:scopedDB});
-  assert((await reopened.getJob(basisId)).items.length===173&&(await reopened.listJobs()).length===3&&localStorage.getItem(storageKeys[2])===basisId,'전체 주기 기록이 최근 개별 실행에 의해 삭제됐습니다.');
+  assert((await reopened.getJob(basisId)).items.length===173&&(await reopened.listJobs()).length===3,'전체 주기 기록이 최근 개별 실행에 의해 삭제됐습니다.');
   log('전체 주기 + 개별 11주기: 매번 173/173 저장 결과 재사용 · 가장 느린 '+Math.max(...times).toFixed(1)+'ms');
-  $('backtestSettings').click();$('btRsiOversold').value='24';$('backtestSettingsForm').requestSubmit();
-  assert(!$('backtestSettingsDialog').open&&!$('btBatchSavedProfile').checked,'직접 변경한 전략을 적용하지 않았습니다.');
-  $('btBatchStart').click();const current=await confirmation();assert(current.closest('dialog').textContent.includes('저장 결과 0개 · 새 계산 173개')&&current.closest('dialog').textContent.includes('RSI 24'),'바뀐 전략에 원래 결과가 섞였습니다.');
-  [...current.closest('dialog').querySelectorAll('button')].find(b=>b.textContent==='취소').click();
-  assert(workers===0&&requests===0,'복원된 결과를 검토하는 동안 재계산 또는 네트워크 조회가 발생했습니다.');
-  log('통과 · 원래 전체 주기 보존 · 다른 전략은 새 계산으로 표시 · 새 Worker 0회, 거래소 요청 0회');document.documentElement.dataset.qa='pass';
+  for(const [split,rsi] of [[5,25],[10,24]]){
+   if(split===10){$('backtestSettings').click();$('btSplitCount').value='10';$('btRsiOversold').value='24';$('backtestSettingsForm').requestSubmit();assert(!$('backtestSettingsDialog').open,'10분할 저장 실패');}
+   for(const tf of ['all',...frames]){
+    change('btBatchFrame',tf);$('btBatchStart').click();
+    const accept=await confirmation(),dialog=accept.closest('dialog');
+    assert(dialog.textContent.includes('173개 거래소·코인')&&dialog.textContent.includes('저장 결과 0개 · 새 계산 173개')&&dialog.textContent.includes('현재 설정 · '+split+'분할 · 최대 '+split+'회 진입 / RSI '+rsi),tf+' · '+split+'분할 대신 예전 전략 또는 예전 목록을 선택했습니다.');
+    [...dialog.querySelectorAll('button')].find(b=>b.textContent==='취소').click();
+   }
+  }
+  assert(workers===0&&requests===0,'미리 보기 또는 완료 결과 재사용에 새 계산이나 거래소 요청이 발생했습니다.');
+  let sent;window.Worker=function(){this.terminate=()=>{};this.postMessage=task=>{sent=task;this.onmessage?.({data:{id:task.id,progress:{phase:'prepare',timeframe:task.config.timeframe}}});};};
+  change('btBatchFrame','all');$('btBatchStart').click();(await confirmation()).click();
+  await waitFor(()=>sent&&$('btBatchCount').textContent==='0 / 173','현재 10분할 전체 주기 작업 전달');
+  assert(sent.config.splitCount===10&&sent.config.rsiOversold===24&&sent.config.timeframe==='all'&&sent.config.initialCapital===20000&&sent.config.allocationPerTradePct===25,'Worker에 전달한 실제 전략이 다릅니다.');
+  $('btBatchPause').click();await waitFor(()=>!$('btBatchStart').disabled,'검증 작업 중지');
+  assert((await reopened.getJob(basisId)).items.length===173&&requests===0,'이전 전체 주기 결과가 손상됐습니다.');
+  log('통과 · 전체/개별 11주기 모두 현재 5·10분할 확인 · 실제 Worker 요청 10분할·173개 · 원래 결과 보존');document.documentElement.dataset.qa='pass';
  }catch(error){log('실패 · '+error.message);document.documentElement.dataset.qa='fail';}
  finally{storageKeys.forEach((k,i)=>previous[i]===null?localStorage.removeItem(k):localStorage.setItem(k,previous[i]));}
 };

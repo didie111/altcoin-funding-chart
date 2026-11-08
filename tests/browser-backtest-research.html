@@ -26,7 +26,8 @@ function waitFor(check,label,ms=20000){return new Promise((resolve,reject)=>{con
 function select(id,value){$(id).value=value;$(id).dispatchEvent(new Event('change',{bubbles:true}));}
 const batch=()=>$('btView-batch').click();
 async function importFile(file,favoritesMode='keep'){
- batch();$('btBatchRestoreFavorites').value=favoritesMode;const control=$('btBatchImportFile'),transfer=new DataTransfer();transfer.items.add(file);control.files=transfer.files;control.dispatchEvent(new Event('change',{bubbles:true}));
+ batch();const control=$('btBatchImportFile'),transfer=new DataTransfer();transfer.items.add(file);control.files=transfer.files;control.dispatchEvent(new Event('change',{bubbles:true}));
+ if(favoritesMode==='replace'){const choice=()=>document.querySelector('dialog[open] [data-choice="replace"]');await waitFor(choice,'즐겨찾기 교체 확인');choice().click();}
  await waitFor(()=>!$('btBatchImport').disabled&&$('btBatchStatus').textContent.startsWith('데이터 복원 완료'),'파일 복원',30000);
 }
 function rows(from,to){return Array.from({length:(to-from)/60},(_,i)=>{const open=100+7*Math.sin((i-1)/23),close=100+7*Math.sin(i/23);return {time:from+i*60,open,high:Math.max(open,close)+.35,low:Math.min(open,close)-.35,close,volume:1+i%17+.000000012345678};});}
@@ -43,7 +44,7 @@ async function startBatch(expected,label){
 }
 $('qaStart').onclick=async()=>{
  $('qaStart').disabled=true;$('qaResult').textContent='격리 저장소 준비 중…';
- const suffix='-qa-'+Date.now(),storageKeys=['funding-chart-backtest-panel-v1','funding-chart-backtest-strategy-v2','funding-chart-bt-research-only-v1','funding-chart-bt-restored-profile-v1'],previous=storageKeys.map(k=>localStorage.getItem(k));
+ const suffix='-qa-'+Date.now(),storageKeys=['funding-chart-backtest-panel-v1','funding-chart-backtest-strategy-v2','funding-chart-bt-research-only-v1','funding-chart-bt-run-options-v1'],previous=storageKeys.map(k=>localStorage.getItem(k));
  try{
   const jobStore=await BacktestCache.open({indexedDB:{open:(n,v)=>indexedDB.open(n+suffix,v)}}),results=await BacktestResults.open({name:'qa-result'+suffix});
   const raw=await BacktestResearchStore.open({dbName:'qa-raw'+suffix}),source=BacktestResearchStore.memory(),makeFile=async(legacy)=>{const parts=[];await BacktestResearchFile.write(source,legacy,{write:p=>parts.push(p)});return new File(parts,'generated-143-raw.dat');};
@@ -56,13 +57,13 @@ $('qaStart').onclick=async()=>{
   const legacy={...await fragment.exportAll(),jobs:[archivedJob],favorites:markets.slice(0,139).map(m=>m.exchange+':'+m.symbol)};
   BacktestCache.open=async()=>jobStore;BacktestResearchStore.getDefault=async()=>raw;BacktestResults.getDefault=async()=>results;CoinFavorites.store=CoinFavorites.create();
   const NativeWorker=window.Worker;window.Worker=function(url,options){workerCount++;return new NativeWorker(String(url).includes('backtest-batch-worker')?'browser-research-fixture-worker.js?db='+encodeURIComponent(suffix):'../'+url,options);};MarketAPI.json=async()=>{requests++;throw Error('검증 중 예상하지 않은 거래소 요청');};
-  localStorage.setItem(storageKeys[0],JSON.stringify({open:true,start:'2025-01-01',end:'2025-12-31',capital:10000,orderSize:10,commission:.05,slippage:.03,executionVersion:2}));localStorage.setItem(storageKeys[1],JSON.stringify(strategy));localStorage.setItem(storageKeys[2],'false');
+  localStorage.setItem(storageKeys[0],JSON.stringify({open:true,start:'2025-01-01',end:'2025-12-31',capital:10000,orderSize:10,commission:.05,slippage:.03,executionVersion:2}));localStorage.setItem(storageKeys[1],JSON.stringify(strategy));localStorage.setItem(storageKeys[2],'false');localStorage.removeItem(storageKeys[3]);
   let notify;
   const workspace={activeMarket:()=>({ex:m0.exchange,symbol:m0.symbol,int:frame}),activeCell:()=>0,subscribe:cb=>{notify=cb;return()=>{};},setBacktest:o=>{overlay=o;}};
   ChartDashboard.bind({workspace:$('chartWorkspace'),chartWorkspace:workspace,backtestData:{},selectMarket(){},onBacktestJump(){}});
   $('backtestMaximize').click();batch();await waitFor(()=>$('btBatchStatus')&&!$('btBatchImport').disabled,'일괄 화면 준비');
   await importFile(new File([JSON.stringify(legacy)],'generated-old-139.dat'));
-  assert($('btBatchPeriod').value==='all'&&$('btBatchFrame').value==='all','복원 후 전체 과거 또는 전체 주기 선택이 달라졌습니다.');
+  select('btBatchPeriod','all');select('btBatchFrame','all');
   settings(1,30);$('btBatchResearchOnly').click();$('btBatchStart').click();
   await waitFor(()=>$('btResearchPanel').open&&$('btBatchStatus').textContent.includes('원본 0 / 139개 준비'),'준비되지 않은 원본 검사');
   assert($('btBatchCount').textContent==='139 / 139'&&$('btBatchSavedJob').value===archivedJob.id&&workerCount===0&&requests===0&&(await jobStore.listJobs()).length===1,'원본이 없는데 기존 결과를 덮거나 새 검토를 시작했습니다.');
@@ -79,10 +80,10 @@ $('qaStart').onclick=async()=>{
   }
   const portable=await makeFile({...legacy,favorites:markets.map(m=>m.exchange+':'+m.symbol)});
   await importFile(portable,'replace');
-  assert($('btBatchResearchOnly').checked&&$('btBatchPeriod').value==='all'&&(await raw.states()).length===143,'원본 파일·전체 과거 선택 복원 실패');
+  assert(!$('btBatchResearchOnly').checked&&$('btBatchPeriod').value==='all'&&(await raw.states()).length===143,'복원 원본이나 현재 실행 범위가 달라졌습니다.');$('btBatchResearchOnly').click();
   log('새 파일 · 143개 실제 저장 블록을 빈 IndexedDB에 복원');
   settings(1,25);
-  assert($('btBatchPlan').textContent.includes('1회 진입 · RSI 25'),'새 일괄 설정이 예전 10분할을 사용합니다.');
+  assert($('btBatchPlan').textContent.includes('진입 1회 · RSI 25'),'새 일괄 설정이 예전 10분할을 사용합니다.');
   const cold=await runOriginal();
   assert(overlay?.config.timeframe==='3m'&&overlay.config.rsiOversold===25&&overlay.config.splitCount===1&&overlay.trades.length>0&&overlay.trades.every(t=>t.entries.length===1),'선택한 3분봉·1회 진입·RSI 25 실제 적용 실패');
   const n=overlay.trades.length;settings(1,45);const warm=await runOriginal();
