@@ -119,6 +119,17 @@ test('an explicit fresh backtest extends a portable archive with only the missin
  const state=await archive.state(m);assert.equal(state.completed.to,tail);assert.equal(state.candles.count,(tail-start)/60);assert.equal(state.funding.last,end);
 });
 
+test('ordinary one-minute execution fills only the gaps in restored legacy candle and funding fragments',async()=>{
+ const archive=S.memory(),ready=start+2*day,end=ready+6*60,from=start-10*day,io=source(candles(start,end),funding(from,ready+3600));
+ await archive.put(m,'candles',candles(start,ready),{checked:[[start,ready]]});
+ await archive.put(m,'funding',funding(from,ready),{checked:[[from,ready]]});
+ assert.equal((await archive.state(m)).completed,null);
+ const worker=realWorker(archive,R.memory(),io),out=await worker.run({...base,timeframe:'1m',endTime:end,researchOnly:false,precomputeTimeframes:false});
+ assert.equal(out.error,undefined,out.error?.message);assert.equal(out.output.meta.research.gapsFilled,true);
+ assert.deepEqual(worker.calls,{network:0,datasets:1,compute:1});assert.deepEqual(io.calls.map(c=>c.tf),['1m','funding']);assert.ok(io.calls.every(c=>c.edge>=ready*1000));
+ assert.equal((await archive.state(m)).candles.count,(end-start)/60);
+});
+
 test('ordinary 1m downloads can be kept and transferred as verified raw source instead of downloading twice',async()=>{
  const end=start+day,price=candles(start,end),settled=funding(start-2*day,end),io=source(price,settled),adapter=D.create(io);
  const data=await adapter.loadBacktestDataset(m.symbol,{exchange:m.exchange,intervals:['1m'],packed:true,startTime:start,endTime:end});
