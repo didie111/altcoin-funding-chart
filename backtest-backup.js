@@ -23,12 +23,15 @@
   }
   return {method:chosen?.handle?'file':'download',bytes:file.size,pages:payload.pages.length,jobs:payload.jobs.length,favorites:payload.favorites?.length||0,completedResults:payload.completedResults?.entries?.length||0};
  }
- async function restore(payload,{store,favorites,parseKey}={}){
-  const keys=payload.favorites===undefined?[]:payload.favorites;
+ async function restore(payload,{store,favorites,parseKey,favoritesMode='keep'}={}){
+  const hasList=payload.favorites!==undefined,keys=hasList?payload.favorites:[];
   if(!Array.isArray(keys)||keys.some(key=>typeof key!=='string'||!parseKey(key)))throw Error('백업 즐겨찾기 목록이 올바르지 않습니다.');
-  const before=new Set(favorites.snapshot().keys),result=await store.importAll(payload),unique=[...new Set(keys)];
-  if(unique.length)favorites.change(unique,true);
-  return {...result,addedFavorites:unique.filter(key=>!before.has(key)).length,favoritesPersistent:favorites.snapshot().persistent!==false};
+  if(!['keep','replace','merge'].includes(favoritesMode))throw Error('즐겨찾기 복원 방식을 확인하세요.');
+  const result=await store.importAll(payload),before=new Set(favorites.snapshot().keys),unique=[...new Set(keys)];
+  if(hasList&&(favoritesMode==='replace'||favoritesMode==='keep'&&!before.size))favorites.replace(unique);
+  else if(hasList&&favoritesMode==='merge')favorites.change(unique,true);
+  const after=favorites.snapshot();
+  return {...result,backupFavorites:unique.length,localFavorites:after.size,addedFavorites:after.keys.filter(k=>!before.has(k)).length,removedFavorites:before.size-after.keys.filter(k=>before.has(k)).length,favoritesPersistent:after.persistent!==false};
  }
  return {filename,blob,save,restore};
 });

@@ -43,7 +43,7 @@ async function startBatch(expected,label){
 }
 $('qaStart').onclick=async()=>{
  $('qaStart').disabled=true;$('qaResult').textContent='격리 저장소 준비 중…';
- const suffix='-qa-'+Date.now(),storageKeys=['funding-chart-backtest-panel-v1','funding-chart-backtest-strategy-v2','funding-chart-bt-research-only-v1'],previous=storageKeys.map(k=>localStorage.getItem(k));
+ const suffix='-qa-'+Date.now(),storageKeys=['funding-chart-backtest-panel-v1','funding-chart-backtest-strategy-v2','funding-chart-bt-research-only-v1','funding-chart-bt-restored-profile-v1'],previous=storageKeys.map(k=>localStorage.getItem(k));
  try{
   const jobStore=await BacktestCache.open({indexedDB:{open:(n,v)=>indexedDB.open(n+suffix,v)}}),results=await BacktestResults.open({name:'qa-result'+suffix});
   const raw=await BacktestResearchStore.open({dbName:'qa-raw'+suffix}),source=BacktestResearchStore.memory(),makeFile=async(legacy)=>{const parts=[];await BacktestResearchFile.write(source,legacy,{write:p=>parts.push(p)});return new File(parts,'generated-143-raw.dat');};

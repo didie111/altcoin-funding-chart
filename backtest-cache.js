@@ -14,13 +14,17 @@
  const completedCount=job=>(job?.items||[]).filter(item=>item.status==='done').length;
  const completionRank=job=>{const done=completedCount(job);return done&&done===job.items.length?2:done?1:0;};
  const recent=(a,b)=>(b.updated||0)-(a.updated||0)||b.id.localeCompare(a.id);
+ const bestComplete=(a,b)=>completionRank(b)-completionRank(a)||completedCount(b)-completedCount(a)||recent(a,b);
+ function bestMultiFrame(jobs){return jobs.filter(j=>j.config?.timeframe==='all'&&completedCount(j)>0).sort(bestComplete)[0]??null;}
  function retainedJobs(existing, incoming, activeId, importing=false){
   const rows=new Map(existing.map(job=>[job.id,job]));
   for(const job of incoming){const old=rows.get(job.id);if(!importing||!old||completedCount(job)>completedCount(old)||completedCount(job)===completedCount(old)&&recent(job,old)<0)rows.set(job.id,job);}
-  const ranked=[...rows.values()].sort((a,b)=>Number(b.id===activeId)-Number(a.id===activeId)||completionRank(b)-completionRank(a)||recent(a,b));
-  return ranked.slice(0,3);
+  const active=rows.get(activeId),basis=rows.get(active?.sourceJobId),ranked=[...rows.values()].sort((a,b)=>completionRank(b)-completionRank(a)||recent(a,b));
+  // Viewing one saved timeframe must not evict the run that holds the other ten.
+  const ordered=[active,basis,bestMultiFrame(ranked),...ranked].filter(Boolean);
+  return [...new Map(ordered.map(j=>[j.id,j])).values()].slice(0,3);
  }
- function preferredRestore(jobs,id){const explicit=jobs.find(job=>job.id===id);if(explicit&&completedCount(explicit))return explicit.id;return [...jobs].sort((a,b)=>completionRank(b)-completionRank(a)||completedCount(b)-completedCount(a)||recent(a,b))[0]?.id??null;}
+ function preferredRestore(jobs,id){const explicit=jobs.find(job=>job.id===id),best=[...jobs].sort(bestComplete)[0];if(completionRank(explicit)===2||completedCount(explicit)&&completionRank(best)<2)return explicit.id;return best?.id??null;}
  function backupPages(payload){
   if(payload?.app!=='funding-chart-batch-v1'||payload.version!==1||!Array.isArray(payload.pages)||!Array.isArray(payload.jobs))throw Error('지원하지 않는 백업 파일 형식입니다.');
   const entries=new Map();for(const p of payload.pages){if(typeof p.key!=='string'||p.key.length>2048)throw Error('시장자료 키가 올바르지 않습니다.');const data=deserializeData(p.data);if(data?.kind==='ohlcv-page-v2'&&!unpackCandles(data))throw Error('백업 캔들 값이 올바르지 않습니다.');entries.set(p.key,{key:p.key,data,expires:Number.isFinite(p.expires)?p.expires:Date.now()+30*86400000,bytes:estimateBytes(data,p.key)});}
@@ -106,5 +110,5 @@
   return {candlePage:(ex,symbol,tf,end,signal)=>page('candles',[ex,symbol,tf,end,signal],()=>candlePage(ex,symbol,tf,end,signal)),fundingPage:(ex,symbol,cursor,number,signal)=>page('funding',[ex,symbol,cursor,number,signal],()=>fundingPage(ex,symbol,cursor,number,signal))};
  }
  const backupHistoryEntries=payload=>(payload.pages||[]).map(p=>({key:p.key,read:()=>deserializeData(p.data)}));
- return {maxBytes,memory,open,adapter,packCandles,unpackCandles,estimateBytes,backupHistoryEntries};
+ return {maxBytes,memory,open,adapter,packCandles,unpackCandles,estimateBytes,backupHistoryEntries,bestMultiFrame};
 });
