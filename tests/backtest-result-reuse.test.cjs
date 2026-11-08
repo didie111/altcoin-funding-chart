@@ -24,6 +24,24 @@ test('every engine strategy value participates in saved result identity and vali
  }
 });
 
+test('legacy single-entry aliases restore existing summaries and full detail without crossing real strategy or date changes',async()=>{
+ const startTime=Date.UTC(2009,0,1)/1000,endTime=config.endTime,saved={...config,startTime,endTime,cacheRangeEnd:endTime,splitCount:0},o=computed(saved);
+ const source=R.memory();assert.equal(await source.save(market,saved,o.result,o.meta),true);
+ const restored=R.memory();assert.deepEqual(await restored.importAll(await source.exportAll()),{imported:1,skipped:0});
+ const current={...saved,splitCount:1};
+ assert.notEqual(R.requestKey(market,saved),R.requestKey(market,current));
+ const detail=await R.openIndividual(restored,market,current,{sameRange:true});
+ assert.deepEqual(detail.result.trades,o.result.trades);assert.equal(detail.meta.reuse.networkRequests,0);
+ assert.equal(await restored.find(market,{...current,splitCount:5}),null);
+ const job={id:'legacy-full-window',status:'done',allHistory:true,config:{...saved,timeframe:'all'},items:[{...market,status:'done',summary:{...o.result.summary,timeframe:'all',bestTimeframe:'1m'},comparison:[{...o.result.summary,timeframe:'1m'}],meta:{...o.meta,market:{ex:market.exchange,symbol:market.symbol,int:'all'}}}]};
+ for(const timeframe of ['1m','all']){
+  const req={...current,timeframe,endTime:endTime+86400,cacheRangeEnd:'latest'};
+  const cached=(await R.findBatch(R.memory(),[job],[market],req))[0];assert.equal(cached.meta.reuse.snapshotEnd,endTime);assert.equal(cached.meta.market.int,timeframe);
+  assert.deepEqual(await R.findBatch(R.memory(),[job],[market],{...req,splitCount:5}),[null]);
+  assert.deepEqual(await R.findBatch(R.memory(),[job],[market],{...req,cacheRangeEnd:req.endTime}),[null]);
+ }
+});
+
 test('snapshot reuse is explicit and distinguishes the saved cutoff from a newer requested end',async()=>{
  const store=R.memory(),o=computed();await store.save(market,config,o.result,o.meta);const newer={...config,endTime:config.endTime+3600};assert.equal(await store.find(market,newer,{snapshot:false}),null);assert.ok(await store.find(market,newer));const saved=await R.fromHeads(store,await store.find(market,newer),newer,{detail:true});assert.equal(saved.result.config.endTime,config.endTime);assert.equal(saved.meta.reuse.snapshotEnd,config.endTime);
 });
@@ -42,7 +60,7 @@ test('a seed dataset resamples real minute bars without reloading funding or min
  const derived=await source.loadBacktestDataset(market.symbol,{...opts,intervals:['3m','1h'],fastResample:true,seedDataset:seed});assert.ok(!calls.slice(before).includes('1m')&&!calls.slice(before).includes('funding'));const native=await source.loadBacktestDataset(market.symbol,{...opts,intervals:['3m','1h']});for(const tf of ['3m','1h'])assert.deepEqual(E.runBacktest(derived.timeframeCandles[tf],derived.fundingRecords,{...config,timeframe:tf}),E.runBacktest(native.timeframeCandles[tf],native.fundingRecords,{...config,timeframe:tf}));
  await assert.rejects(source.loadBacktestDataset('ETHUSDT',{...opts,intervals:['3m'],seedDataset:seed}),/종목·기간/);
 });
-function worker(cache,{precompute=false,detail=false,fresh=false,tf='1m',settings={},alterResult=x=>x}={}){let resolve,loads=0,calculations=0;const done=new Promise(r=>resolve=r),source=D.create({candlePage:async(ex,s,t,edge)=>(t==='1m'?rows:T.resample(rows,t)).filter(r=>r.time*1000<=edge).slice(-1000),fundingPage:async(ex,s,edge,p)=>p===1?funding:[]}),scope={importScripts(){},postMessage(v){if(v.output||v.error)resolve(v);},AbortController,Date,TimeframeEngine:T,BacktestResults:{...R,getDefault:async()=>cache},BacktestCache:{open:async()=>C.memory(),adapter:()=>({})},MarketAPI:{},BacktestData:{create:()=>({loadBacktestDataset:(s,o)=>{loads++;return source.loadBacktestDataset(s,o);}})},DashboardModel:M,BacktestEngine:{...E,runBacktest(...args){calculations++;return alterResult(E.runBacktest(...args));}},BacktestBars:B};vm.createContext(scope);vm.runInContext(fs.readFileSync(require.resolve('../backtest-batch-worker.js'),'utf8'),scope);scope.onmessage({data:{id:1,market,config:{...config,...settings,timeframe:tf,precomputeTimeframes:precompute,reuseCompleted:!fresh},detail}});return done.then(v=>({...v,loads,calculations}));}
+function worker(cache,{precompute=false,detail=false,fresh=false,tf='1m',settings={},frameReuse,alterResult=x=>x}={}){let resolve,loads=0,calculations=0;const done=new Promise(r=>resolve=r),source=D.create({candlePage:async(ex,s,t,edge)=>(t==='1m'?rows:T.resample(rows,t)).filter(r=>r.time*1000<=edge).slice(-1000),fundingPage:async(ex,s,edge,p)=>p===1?funding:[]}),scope={importScripts(){},postMessage(v){if(v.output||v.error)resolve(v);},AbortController,Date,TimeframeEngine:T,BacktestResults:{...R,getDefault:async()=>cache},BacktestCache:{open:async()=>C.memory(),adapter:()=>({})},MarketAPI:{},BacktestData:{create:()=>({loadBacktestDataset:(s,o)=>{loads++;return source.loadBacktestDataset(s,o);}})},DashboardModel:M,BacktestEngine:{...E,runBacktest(...args){calculations++;return alterResult(E.runBacktest(...args));}},BacktestBars:B};vm.createContext(scope);vm.runInContext(fs.readFileSync(require.resolve('../backtest-batch-worker.js'),'utf8'),scope);scope.onmessage({data:{id:1,market:{...market,frameReuse},config:{...config,...settings,timeframe:tf,precomputeTimeframes:precompute,reuseCompleted:!fresh},detail}});return done.then(v=>({...v,loads,calculations}));}
 test('a new worker opens saved detail without loading data or recalculating, while latest refresh really recalculates',async()=>{
  const cache=R.memory(),first=await worker(cache);assert.ok(!first.error,first.error?.message);assert.ok(first.loads&&first.calculations);const detail=await worker(cache,{detail:true});assert.ok(!detail.error,detail.error?.message);assert.equal(detail.loads,0);assert.equal(detail.calculations,0);assert.ok(detail.output.result.trades.length);const fresh=await worker(cache,{detail:true,fresh:true});assert.ok(fresh.loads&&fresh.calculations);
 });
@@ -68,6 +86,31 @@ test('single-frame and full-frame workers really fill 5 and 10 entries and rejec
  }
  const empty=R.memory(),bad=await worker(empty,{detail:true,settings:{...setup,splitCount:5},alterResult:r=>({...r,trades:r.trades.map(t=>({...t,splitTarget:1}))})});
  assert.match(bad.error?.message||'',/전략|분할/);assert.equal(await empty.find(market,{...config,...setup,splitCount:5}),null);
+});
+
+test('an all-timeframe retry calculates only its missing frame; after that the entire comparison reopens without any data work',async()=>{
+ const original=R.memory(),initial=await worker(original,{tf:'all',detail:true});
+ assert.equal(initial.error,undefined,initial.error?.message);
+ const backup=await original.exportAll();assert.equal(backup.entries.length,R.frames.length);
+ const missing='3m',filtered={...backup,entries:backup.entries.filter(e=>e.head.timeframe!==missing)},restored=R.memory();
+ await restored.importAll(filtered);
+ const request={...config,timeframe:'all'},[prepared]=await R.findBatch(restored,[],[market],request,{withPartial:true});
+ assert.deepEqual(prepared.frameReuse.missing,[missing]);assert.equal(prepared.frameReuse.rows.length,R.frames.length-1);
+ const second=await worker(restored,{tf:'all',detail:true,frameReuse:prepared.frameReuse});
+ assert.equal(second.error,undefined,second.error?.message);assert.equal(second.calculations,1);assert.equal(second.loads,1);
+ assert.equal(second.output.meta.carriedFrames,R.frames.length-1);
+ assert.deepEqual(Array.from(second.output.comparison,r=>[r.timeframe,r.netPnl]).sort(),Array.from(initial.output.comparison,r=>[r.timeframe,r.netPnl]).sort());
+ const [done]=await R.findBatch(restored,[],[market],request,{withPartial:true});assert.equal(done.meta.reuse.recalculated,false);
+ const repeat=await worker(restored,{tf:'all',detail:true});assert.equal(repeat.error,undefined,repeat.error?.message);assert.equal(repeat.loads,0);assert.equal(repeat.calculations,0);
+ const unfinished={id:'interrupted-frames',config:request,items:[{...market,status:'done',...initial.output,comparison:initial.output.comparison.filter(r=>r.timeframe!==missing),meta:{...initial.output.meta,unverifiedFrames:[missing]}}]};
+ const [retry]=await R.findBatch(null,[unfinished],[market],request,{withPartial:true});
+ assert.ok(retry.frameReuse.missing.includes(missing));assert.equal(retry.summary,undefined);
+});
+
+test('frame reuse never fills one comparison with results from different snapshots or accepts unverified rows',()=>{
+ const c={...config,timeframe:'all'},row=(tf,cutoff)=>({timeframe:tf,snapshotEnd:cutoff,success:true,summary:{timeframe:tf,totalTrades:2,netPnl:1},meta:{market:{ex:market.exchange,symbol:market.symbol,int:tf},config:{...config,timeframe:tf,endTime:cutoff},endTime:cutoff}}),a=row('1m',c.endTime),b=row('3m',c.endTime-3600);
+ const safe=R.framePlan([a,b,{...a,timeframe:'5m'},{...a,meta:null}],market,c);
+ assert.deepEqual(safe.rows.map(r=>[r.timeframe,r.snapshotEnd]),[[a.timeframe,a.snapshotEnd]]);assert.ok(safe.missing.includes('3m')&&safe.missing.includes('5m'));
 });
 
 test('a minute captured before its close never reappears as a completed cached candle after the clock crosses the boundary',async()=>{

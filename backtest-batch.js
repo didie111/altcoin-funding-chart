@@ -18,7 +18,7 @@
   function createJob(markets,config,{allHistory=false,fixedRange=null}={}){const map=new Map();for(const m of markets)map.set(m.exchange+':'+m.symbol,{exchange:m.exchange,symbol:m.symbol});if(!map.size)throw Error('즐겨찾기 코인을 먼저 추가하세요.');const endTime=fixedRange?Math.min(fixedRange.endTime,Math.floor(now()/1000)):allHistory?Math.floor(now()/1000):Math.min(config.endTime,Math.floor(now()/1000)),startTime=fixedRange?fixedRange.startTime:allHistory?Date.UTC(2009,0,1)/1000:config.startTime;if(!Number.isFinite(startTime)||!Number.isFinite(endTime)||startTime>=endTime)throw Error('백테스트 기간을 확인하세요.');return {id:'batch-'+now()+'-'+Math.random().toString(36).slice(2,8),version:1,created:now(),updated:now(),status:'ready',allHistory,config:{...clone(config),cacheMaxEnd:fixedRange?endTime:undefined,cacheRangeEnd:fixedRange?fixedRange.cacheRangeEnd:allHistory?'latest':config.cacheRangeEnd??config.endTime,startTime,endTime},items:[...map.values()].map(m=>({...m,status:'pending'}))};}
   async function run(){
    if(abort||!job)return;abort=new AbortController();const signal=abort.signal;job.status='running';await persist();let sinceSave=0,lastSave=now();
-   try{for(const item of job.items){if(['done','error','deferred'].includes(item.status))continue;signal.throwIfAborted();item.status='running';active=item;onUpdate(clone(job));try{const output=await execute(clone(item),clone(job.config),signal,p=>{if(!signal.aborted)onProgress({item:clone(item),progress:p});});signal.throwIfAborted();if(!sameMarket(output,item,job.config))throw Error('실행 대상과 다른 코인·주기 결과를 받았습니다.');if(!sameSetup(output,job.config))throw Error('실행에 설정한 전략과 다른 결과를 받았습니다.');Object.assign(item,{...output,status:'done'});delete item.error;}
+   try{for(const item of job.items){if(['done','error','deferred'].includes(item.status))continue;signal.throwIfAborted();item.status='running';active=item;onUpdate(clone(job));try{const output=await execute(clone(item),clone(job.config),signal,p=>{if(!signal.aborted)onProgress({item:clone(item),progress:p});});signal.throwIfAborted();if(!sameMarket(output,item,job.config))throw Error('실행 대상과 다른 코인·주기 결과를 받았습니다.');if(!sameSetup(output,job.config))throw Error('실행에 설정한 전략과 다른 결과를 받았습니다.');Object.assign(item,{...output,status:'done'});delete item.error;delete item.frameReuse;}
      catch(error){if(signal.aborted){item.status='pending';throw signal.reason;}if(error.name==='RateLimitError'){item.status='pending';job.status='paused';job.message=error.message;job.retryAt=error.retryAt||now()+60000;await persist();return;}item.status='error';item.error=error.message;
       if(error.name==='MarketServiceError'||/연결 실패:|HTTP (?:403|451|5\d\d)/.test(error.message))for(const next of job.items)if(next.status==='pending'&&next.exchange===item.exchange){next.status='deferred';next.error='거래소 연결 문제로 조회 보류 · '+error.message;}
      }
@@ -31,7 +31,7 @@
    const next=createJob(markets,config,options);
    if(lookup&&config.reuseCompleted!==false){
     const results=await lookup(next.items,next.config);
-    for(const [i,item] of next.items.entries()){const out=results[i];if(sameMarket(out,item,next.config)&&sameSetup(out,next.config))Object.assign(item,out,{status:'done'});}
+    for(const [i,item] of next.items.entries()){const out=results[i];if(sameMarket(out,item,next.config)&&sameSetup(out,next.config))Object.assign(item,out,{status:'done'});else if(next.config.timeframe==='all'&&out?.frameReuse?.rows?.length&&out.frameReuse.missing?.length)item.frameReuse=out.frameReuse;}
    }
    return next;
   }

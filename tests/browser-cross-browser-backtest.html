@@ -28,7 +28,7 @@ html,body{height:100%;margin:0}body{display:flex;flex-direction:column;backgroun
 const $=id=>document.getElementById(id),assert=(v,m)=>{if(!v)throw Error(m);},log=m=>{$('qaResult').textContent+='\n'+m;};
 const frames=Object.keys(TimeframeEngine.seconds),count=173,markets=Array.from({length:count},(_,i)=>({exchange:i%2?'BINANCE':'BYBIT',symbol:'CROSS'+String(i+1).padStart(3,'0')+'USDT'}));
 const beginning=Date.UTC(2009,0,1)/1000,actualStart=Date.UTC(2024,0,1)/1000,finish=Date.UTC(2024,4,1)/1000,basisId='chrome-all-173';
-const cfg={...BacktestEngine.normalizeConfig({timeframe:'1m',startTime:beginning,endTime:finish,cacheRangeEnd:'latest',rsiPeriod:7,rsiOversold:47,splitCount:1,initialCapital:7000,feePct:.12}),timeframe:'all'};
+const cfg={...BacktestEngine.normalizeConfig({timeframe:'1m',startTime:beginning,endTime:finish,cacheRangeEnd:finish,rsiPeriod:7,rsiOversold:47,splitCount:0,initialCapital:7000,feePct:.12}),timeframe:'all'};
 function waitFor(test,label){return new Promise((resolve,reject)=>{const obs=new MutationObserver(check),timer=setTimeout(()=>stop(Error(label+' 시간 초과: '+$('btBatchStatus')?.textContent)),12000);function stop(e){clearTimeout(timer);obs.disconnect();e?reject(e):resolve();}function check(){try{if(test())stop();}catch(e){stop(e);}}obs.observe($('chartWorkspace'),{attributes:true,subtree:true,childList:true,characterData:true});check();});}
 function change(id,value){$(id).value=value;$(id).dispatchEvent(new Event('change',{bubbles:true}));}
 async function restore(file){
@@ -97,7 +97,32 @@ $('qaStart').onclick=async()=>{
   assert(sent.config.splitCount===10&&sent.config.rsiOversold===24&&sent.config.timeframe==='all'&&sent.config.initialCapital===20000&&sent.config.allocationPerTradePct===25,'Worker에 전달한 실제 전략이 다릅니다.');
   $('btBatchPause').click();await waitFor(()=>!$('btBatchStart').disabled,'검증 작업 중지');
   assert((await reopened.getJob(basisId)).items.length===173&&requests===0,'이전 전체 주기 결과가 손상됐습니다.');
-  log('통과 · 전체/개별 11주기 모두 현재 5·10분할 확인 · 실제 Worker 요청 10분할·173개 · 원래 결과 보존');document.documentElement.dataset.qa='pass';
+  $('backtestSettings').click();$('btSplitCount').value='1';$('btRsiPeriod').value='7';$('btRsiOversold').value='47';
+  const form=$('backtestSettingsForm');form.elements.capital.value='7000';form.elements.orderSize.value='100';form.elements.commission.value='.12';form.requestSubmit();
+  assert(!$('backtestSettingsDialog').open,'현재 1회 진입 전략 설정 실패');
+  change('btBatchPeriod','all');let unexpected=0;
+  window.Worker=function(){unexpected++;throw Error('조건이 맞는 저장 결과에 Worker를 만들었습니다.');};
+  const direct=[];
+  for(const tf of ['all',...frames]){
+   change('btBatchFrame',tf);const before=$('btBatchSavedJob').value,started=performance.now();$('btBatchStart').click();
+   await waitFor(()=>!$('btBatchStart').disabled&&$('btBatchCount').textContent==='173 / 173'&&$('btBatchSavedJob').value!==before&&$('btBatchStatus').textContent.includes('173개 저장 결과 재사용'),'현재 설정으로 '+tf+' 즉시 표시');
+   direct.push(performance.now()-started);
+   assert(!document.querySelector('dialog[open]')&&unexpected===0,'일치하는 결과에 새 실행 확인 또는 Worker가 발생했습니다.');
+   if(tf==='all')assert($('btBatchResults').querySelector('.bt-batch-best')?.textContent.includes('최고: '),'저장된 최고 주기 배지가 사라졌습니다.');
+  }
+  log('0분할 백업 → 현재 1회 진입으로 실행 · 전체 + 11주기마다 173/173 · 최대 '+Math.max(...direct).toFixed(1)+'ms · 새 Worker 0회');
+  const added=['EXTRA1USDT','EXTRA2USDT','EXTRA3USDT'];CoinFavorites.store.replace([...keys.slice(0,170),...added.map(s=>'BYBIT:'+s)]);
+  let finishFirst;const submitted=[];
+  window.Worker=function(){this.terminate=()=>{};this.postMessage=task=>{
+   submitted.push(task);const m=task.market,c=task.config,done=()=>this.onmessage?.({data:{id:task.id,output:{summary:items[0].comparison.find(r=>r.timeframe===c.timeframe),meta:{...metaBase,market:{ex:m.exchange,symbol:m.symbol,int:c.timeframe},config:c}}}});
+   if(submitted.length===1){finishFirst=done;this.onmessage?.({data:{id:task.id,progress:{phase:'prepare',timeframe:c.timeframe}}});}else queueMicrotask(done);
+  };};
+  change('btBatchFrame','3m');$('btBatchStart').click();
+  await waitFor(()=>finishFirst&&$('btBatchCount').textContent==='170 / 173','처음 170개 완료 먼저 표시');
+  assert(!document.querySelector('dialog[open]')&&submitted.length===1,'저장한 170개가 재작업에 들어갔습니다.');
+  finishFirst();await waitFor(()=>!$('btBatchStart').disabled&&$('btBatchCount').textContent==='173 / 173','없는 3개만 새 작업');
+  assert(submitted.length===3&&submitted.every(t=>added.includes(t.market.symbol)&&t.config.splitCount===1&&t.config.timeframe==='3m')&&requests===0,'새 대상 또는 현재 설정이 달라졌습니다.');
+  log('통과 · 170/173 먼저 표시 · 결과 없는 3개만 작업에 넘김 · 최고 주기 표시 유지');document.documentElement.dataset.qa='pass';
  }catch(error){log('실패 · '+error.message);document.documentElement.dataset.qa='fail';}
  finally{storageKeys.forEach((k,i)=>previous[i]===null?localStorage.removeItem(k):localStorage.setItem(k,previous[i]));}
 };

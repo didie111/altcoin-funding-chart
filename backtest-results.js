@@ -3,8 +3,10 @@
  // Bump this whenever data interpretation or the trading engine changes.
  const equityPoints=512,version=1,maxBytes=64*1048576,maxRawBytes=64*1048576,frames=Object.keys(T.seconds),decoder=new TextDecoder(),encoder=new TextEncoder();
  const strategyFields=Object.keys(E.defaultStrategyConfig).sort();
- function strategyValues(c,tf){const normalized=E.normalizeConfig({...c,timeframe:tf});return strategyFields.map(k=>[k,normalized[k]]);}
- function sameStrategy(a,b,tf=a?.timeframe){if(!a||!b)return false;const frame=tf==='all'?'1m':tf;try{return JSON.stringify(strategyValues(a,frame))===JSON.stringify(strategyValues(b,frame));}catch{return false;}}
+ function strategyValues(c,tf,effective=false){const normalized=E.normalizeConfig({...c,timeframe:tf});return strategyFields.map(k=>[k,effective&&k==='splitCount'?Math.max(1,normalized[k]):normalized[k]]);}
+ // The engine gives 0 and 1 the same single entry. Preserve both legacy file keys.
+ const strategySignature=(c,tf)=>JSON.stringify(strategyValues(c,tf,true));
+ function sameStrategy(a,b,tf=a?.timeframe){if(!a||!b)return false;const frame=tf==='all'?'1m':tf;try{return strategySignature(a,frame)===strategySignature(b,frame);}catch{return false;}}
  function identity(m,c,tf=c.timeframe){return [version,m.exchange||m.ex,m.symbol,strategyValues(c,tf),c.startTime,c.cacheRangeEnd??c.endTime];}
  const requestKey=(m,c,tf)=>JSON.stringify(identity(m,c,tf));
  const scopeKey=parts=>JSON.stringify([parts[0],...parts.slice(3)]);
@@ -34,13 +36,28 @@
   const writes=[...imported.values()].filter(row=>kept.has(row.head.key));return {kept,writes,total,imported:writes.length,skipped:imported.size-writes.length};
  }
  function wrap(backend){
-  async function findMany(markets,c,{snapshot=true,maxEnd=c.cacheMaxEnd??Infinity,targeted=false}={}){
-   const wanted=c.timeframe==='all'?frames:[c.timeframe],profiles=wanted.map(tf=>{const parts=identity({},c,tf);return {parts:parts.slice(3),scope:scopeKey(parts),end:T.start(c.endTime,tf)};}),queries=markets.flatMap(m=>profiles.map(p=>{const parts=[version,m.exchange||m.ex,m.symbol,...p.parts];return {request:JSON.stringify(parts),key:JSON.stringify([...parts,p.end]),scope:p.scope};})),groups=await backend.find(queries,snapshot,maxEnd,targeted);
-   return markets.map((m,i)=>{const rows=groups.slice(i*wanted.length,(i+1)*wanted.length);return rows.every(Boolean)?rows:null;});
+  async function findPairs(pairs,{snapshot=true,maxEnd=Infinity,targeted=false,partial=false}={}){
+   const queries=[],profiles=new Map();
+   const groups=pairs.map(pair=>!pair?[]:(pair.config.timeframe==='all'?frames:[pair.config.timeframe]).map(tf=>{
+    const c=pair.config,at=queries.length;let byFrame=profiles.get(c);if(!byFrame)profiles.set(c,byFrame=new Map());
+    let descriptors=byFrame.get(tf);if(!descriptors){
+     const parts=identity({},c,tf),split=parts[3].find(([name])=>name==='splitCount')[1];
+     const versions=split<=1?[parts,identity({},{...c,splitCount:1-split},tf)]:[parts],end=T.start(c.endTime,tf);
+     descriptors=versions.map(row=>({parts:row.slice(3),scope:scopeKey(row),end}));byFrame.set(tf,descriptors);
+    }
+    for(const p of descriptors){const parts=[version,pair.market.exchange||pair.market.ex,pair.market.symbol,...p.parts];queries.push({request:JSON.stringify(parts),key:JSON.stringify([...parts,p.end]),scope:p.scope});}
+    return [at,queries.length];
+   }));
+   const found=queries.length?await backend.find(queries,snapshot,maxEnd,targeted):[];
+   return groups.map(group=>{
+    const hits=group.map(([a,b])=>{let best=null;for(let i=a;i<b;i++){const h=found[i];if(h&&(!best||h.snapshotEnd>best.snapshotEnd))best=h;}return best;});
+    return hits.some(Boolean)&&(partial||hits.every(Boolean))?hits:null;
+   });
   }
+  function findMany(markets,c,options={}){return findPairs(markets.map(market=>({market,config:c})),{maxEnd:c.cacheMaxEnd??Infinity,...options});}
   return {
    findMany,async find(m,c,options){return (await findMany([m],c,options))[0];},
-   async findConfigured(pairs){const queries=[],groups=pairs.map(p=>{const at=queries.length;if(p){const {market,config}=p;for(const tf of config.timeframe==='all'?frames:[config.timeframe]){const parts=identity(market,config,tf);queries.push({request:JSON.stringify(parts),key:JSON.stringify([...parts,T.start(config.endTime,tf)]),scope:scopeKey(parts)});}}return [at,queries.length];});const found=queries.length?await backend.find(queries,false,Infinity):[];return groups.map(([a,b])=>{const hits=found.slice(a,b);return hits.length&&hits.every(Boolean)?hits:null;});},
+   async findConfigured(pairs,options={}){return findPairs(pairs,{snapshot:false,...options});},
    async save(m,c,result,meta){if(!sameStrategy(c,result.config,result.config.timeframe))return false;const payload=await encode(result);if(!payload)return false;const tf=result.config.timeframe,identityParts=identity(m,c,tf),head={scope:scopeKey(identityParts),version,priority:c.timeframe===tf||c.timeframe==='all'?1:0,key:key(m,{...c,endTime:meta.endTime},tf),requestKey:requestKey(m,c,tf),timeframe:tf,snapshotEnd:meta.endTime,created:Date.now(),success:result.success,reason:result.reason,summary:clone(result.summary),meta:clone({...meta,market:{ex:m.exchange||m.ex,symbol:m.symbol,int:tf},config:result.config})};head.bytes=storageBytes(head,payload);return backend.put(head,payload);},
    async read(head){if(!valid(head))throw Error('완료 결과의 거래소·종목·주기를 확인하세요.');const payload=await backend.read(head.key);if(!payload)return null;const result=await decode(payload);if(!matchesResult(head,result))throw Error('완료 결과와 실행 조건이 일치하지 않습니다.');return {result,summary:result.summary,meta:{...clone(head.meta),reuse:{kind:'completed-result',snapshotEnd:head.snapshotEnd,networkRequests:0,recalculated:false}}};},
    info:()=>backend.info(),clear:()=>backend.clear(),
@@ -80,47 +97,92 @@
   if(!job?.config||item?.status!=='done')return null;
   const market={ex:item.exchange,symbol:item.symbol,int:tf},previous=item.meta?.market;
   if(previous&&(previous.ex!==market.ex||previous.symbol!==market.symbol))return null;
-  const endTime=item.meta?.snapshotByTimeframe?.[tf]??item.comparison?.find(r=>r.timeframe===tf)?.snapshotEnd??item.meta?.endTime??job.config.endTime;
-  const config={...job.config,...item.meta?.config,timeframe:tf,endTime,cacheRangeEnd:item.meta?.config?.cacheRangeEnd??job.config.cacheRangeEnd??(job.allHistory?'latest':job.config.endTime)};
+  const frameRange=item.meta?.frameRanges?.[tf],endTime=frameRange?.endTime??item.meta?.snapshotByTimeframe?.[tf]??item.comparison?.find(r=>r.timeframe===tf)?.snapshotEnd??item.meta?.endTime??job.config.endTime;
+  const config={...job.config,...item.meta?.config,...frameRange,timeframe:tf,endTime,cacheRangeEnd:frameRange?.cacheRangeEnd??item.meta?.config?.cacheRangeEnd??job.config.cacheRangeEnd??(job.allHistory?'latest':job.config.endTime)};
   if(!Number.isFinite(config.startTime)||!Number.isFinite(endTime)||endTime<=config.startTime)return null;
   let summary=job.config.timeframe===tf?item.summary:job.config.timeframe==='all'?item.comparison?.find(r=>r.timeframe===tf):null;
   if(tf==='all'&&job.config.timeframe==='all'&&!usableSummary(summary)&&Array.isArray(item.comparison)){const valid=item.comparison.filter(usableSummary),best=valid.find(r=>r.timeframe===summary?.bestTimeframe)||valid.slice().sort((a,b)=>(b.totalReturnPct??b.netPnl)-(a.totalReturnPct??a.netPnl))[0];if(best)summary={...best,timeframe:'all',bestTimeframe:best.timeframe};}
   const meta={...item.meta,market,config,startTime:item.meta?.startTime??config.startTime,endTime,coverage:item.meta?.coverage||{},fundingCoverage:item.meta?.fundingCoverage||{},gaps:item.meta?.gaps||0};
-  return {market,config,meta,summary,comparison:tf==='all'?item.comparison:undefined};
+  return {market,config,meta,summary,sourceJobId:job.sourceJobId||job.id,comparison:tf==='all'?item.comparison:undefined};
  }
  function batchCandidates(jobs,market,c,{sameRange=false,allowJobRange=c.researchOnly!==true}={}){
-  const tf=c.timeframe==='all'?'1m':c.timeframe,signature=JSON.stringify(strategyValues(c,tf)),rows=[];
+  const tf=c.timeframe==='all'?'1m':c.timeframe,signature=strategySignature(c,tf),rows=[];
   for(const job of jobs||[]){
    const item=job.items?.find(i=>i.exchange===(market.exchange||market.ex)&&i.symbol===market.symbol&&i.status==='done'),row=batchCandidate(job,item,c.timeframe);if(!row)continue;
-   try{if(JSON.stringify(strategyValues(row.config,tf))!==signature)continue;}catch{continue;}
+   try{if(strategySignature(row.config,tf)!==signature)continue;}catch{continue;}
    const requestEnd=c.cacheRangeEnd??c.endTime,originalEnd=job.config.cacheRangeEnd??(job.allHistory?'latest':job.config.endTime);
-   const rangeMatches=row.config.startTime===c.startTime&&row.config.cacheRangeEnd===requestEnd||allowJobRange&&job.config.startTime===c.startTime&&originalEnd===requestEnd;
+   const sameWholeHistory=requestEnd==='latest'&&(job.allHistory===true||originalEnd==='latest');
+   const rangeMatches=row.config.startTime===c.startTime&&row.config.cacheRangeEnd===requestEnd||allowJobRange&&job.config.startTime===c.startTime&&(originalEnd===requestEnd||sameWholeHistory);
    if((!sameRange||rangeMatches)&&row.config.endTime<=(c.cacheMaxEnd??Infinity))rows.push({...row,rangeMatches});
   }
   return rows.sort((a,b)=>Number(b.rangeMatches)-Number(a.rangeMatches));
  }
  const usableSummary=value=>Number.isSafeInteger(value?.totalTrades)&&Number.isFinite(value.netPnl);
  function savedSummary(row){
-  if(!usableSummary(row?.summary))return null;
-  return {summary:row.summary,comparison:row.comparison,summaryOnly:true,detailRequest:{market:row.market,config:row.config},meta:{...row.meta,reuse:{kind:'batch-summary',snapshotEnd:row.meta.endTime,rangeDiffers:row.rangeMatches===false,networkRequests:0,recalculated:false}}};
+  if(!usableSummary(row?.summary)||row.summary.timeframe&&row.summary.timeframe!==row.market.int)return null;
+  return {summary:row.summary,comparison:row.comparison,summaryOnly:true,detailRequest:{market:row.market,config:row.config},meta:{...row.meta,reuse:{kind:'batch-summary',sourceJobId:row.sourceJobId,snapshotEnd:row.meta.endTime,rangeDiffers:row.rangeMatches===false,networkRequests:0,recalculated:false}}};
  }
- async function findBatch(store,jobs,markets,c,{archivedPairs}={}){
-  const request={...c,cacheMaxEnd:c.cacheMaxEnd??c.endTime},results=markets.map(m=>{
+ const knownUnavailable=reason=>typeof reason==='string'&&/완성(?:된)? 캔들|완성 봉|캔들 기록을 거래소가 제공하지|RSI 계산을 위한 캔들 데이터가 부족/.test(reason)&&!/HTTP|연결 실패|API |진행되지/.test(reason);
+ function frameRecord(out){
+  const meta=out?.meta,tf=meta?.market?.int;
+  if(!frames.includes(tf)||meta.config?.timeframe!==tf||!Number.isFinite(meta.endTime)||meta.config.endTime!==meta.endTime)return null;
+  const reason=out.reason??meta.coverage?.[tf]?.error,success=out.success!==false&&usableSummary(out.summary)&&(!out.summary.timeframe||out.summary.timeframe===tf);
+  return success||knownUnavailable(reason)?{timeframe:tf,snapshotEnd:meta.endTime,success,summary:success?out.summary:null,reason,meta}:null;
+ }
+ function framePlan(records,market,c){
+  const ex=market.exchange||market.ex,groups=new Map(),limit=Math.min(c.endTime,c.cacheMaxEnd??Infinity);
+  for(const input of Array.isArray(records)?records:[]){
+   const row=frameRecord(input);if(!row||row.timeframe!==input.timeframe||row.snapshotEnd!==input.snapshotEnd||!frames.includes(row.timeframe)||row.snapshotEnd>limit||row.snapshotEnd<=c.startTime||row.meta.config.startTime!==c.startTime||row.meta.market.ex!==ex||row.meta.market.symbol!==market.symbol||!sameStrategy(c,row.meta.config,row.timeframe))continue;
+   let group=groups.get(row.snapshotEnd);if(!group)groups.set(row.snapshotEnd,group=new Map());
+   if(!group.has(row.timeframe)||!group.get(row.timeframe).success&&row.success)group.set(row.timeframe,row);
+  }
+  const ranked=[...groups].filter(([,group])=>[...group.values()].some(row=>row.success)).sort((a,b)=>b[1].size-a[1].size||b[0]-a[0]);
+  if(!ranked.length)return null;const [snapshotEnd,group]=ranked[0],missing=frames.filter(tf=>!group.has(tf));
+  return {snapshotEnd,missing,rows:frames.map(tf=>group.get(tf)).filter(Boolean)};
+ }
+ function combineFrames(records,c,{detail=false,reused=false,carried=0}={}){
+  records=[...records].sort((a,b)=>frames.indexOf(a.timeframe)-frames.indexOf(b.timeframe));
+  const comparisonResult=compare(records),best=comparisonResult.bestByTotalReturn||comparisonResult.bestByWinRate||comparisonResult.comparison[0];
+  if(!best)return null;
+  const first=records.find(row=>row.timeframe===best.timeframe),{reuse:previous,...base}=first.meta;
+  const frameRanges=Object.fromEntries(records.map(r=>[r.timeframe,{startTime:r.meta.config.startTime,endTime:r.snapshotEnd,cacheRangeEnd:r.meta.config.cacheRangeEnd??r.meta.config.endTime}]));
+  const meta={...base,market:{...base.market,int:'all'},config:{...base.config,timeframe:'all'},coverage:Object.assign({},...records.map(r=>r.meta.coverage)),snapshotByTimeframe:Object.fromEntries(records.map(r=>[r.timeframe,r.snapshotEnd])),frameRanges,...(reused?{reuse:{kind:'completed-frames',snapshotEnd:first.snapshotEnd,networkRequests:0,recalculated:false}}:{}),...(carried?{carriedFrames:carried}:{})};
+  return {summary:{...best,timeframe:'all',bestTimeframe:best.timeframe},meta,comparison:comparisonResult.comparison,comparisonResult:detail?comparisonResult:undefined};
+ }
+ async function findBatch(store,jobs,markets,c,{archivedPairs,withPartial=false}={}){
+  const request={...c,cacheMaxEnd:c.cacheMaxEnd??c.endTime},isAll=c.timeframe==='all',records=markets.map(()=>[]),results=markets.map(m=>{
    for(const row of batchCandidates(jobs,m,request,{sameRange:true,allowJobRange:true})){
+    if(isAll&&row.meta.unverifiedFrames?.length)continue;
     const saved=savedSummary(row);if(saved)return {summary:saved.summary,meta:saved.meta,comparison:saved.comparison};
    }
    return null;
   });
   const remaining=()=>results.flatMap((out,i)=>out?[]:[i]);
   async function fill(indices,heads,configs){
-   await Promise.all(indices.map(async(index,i)=>{const rows=heads[i],config=configs?.[i]??request;
-    if(rows?.some(h=>h.success&&usableSummary(h.summary))&&rows.every(h=>h.success||config.timeframe==='all'&&h.reason))results[index]=await fromHeads(store,rows,config);
+   await Promise.all(indices.map(async(index,i)=>{
+    const rows=heads[i],config=configs?.[i]??request;if(!rows)return;
+    if(!isAll){if(rows[0]?.success&&usableSummary(rows[0].summary))results[index]=await fromHeads(store,rows,config);return;}
+    for(const h of rows)if(h){const row=frameRecord(h);if(row)records[index].push(row);}
+    const plan=framePlan(records[index],markets[index],request);
+    if(plan&&!plan.missing.length)results[index]=combineFrames(plan.rows,request,{reused:true});
    }));
   }
-  let missing=remaining();if(!store||!missing.length)return results;
-  const heads=await store.findMany(missing.map(i=>markets[i]),request,{targeted:missing.length*2<=markets.length});
-  await fill(missing,heads);
-  missing=remaining();if(archivedPairs&&missing.length){const pairs=await archivedPairs(missing.map(i=>markets[i]));await fill(missing,await store.findConfigured(pairs),pairs.map(p=>p?.config));}
+  let missing=remaining();
+  if(store&&missing.length){
+   const heads=await store.findMany(missing.map(i=>markets[i]),request,{targeted:missing.length*2<=markets.length,partial:isAll});
+   await fill(missing,heads);
+   missing=remaining();if(archivedPairs&&missing.length){const pairs=await archivedPairs(missing.map(i=>markets[i]));await fill(missing,await store.findConfigured(pairs,{partial:isAll}),pairs.map(p=>p?.config));}
+  }
+  if(isAll)for(const index of remaining()){
+   const market=markets[index];
+   for(const tf of frames){
+    for(const row of batchCandidates(jobs,market,{...request,timeframe:tf},{sameRange:true,allowJobRange:true})){
+     const saved=frameRecord(row);if(saved)records[index].push(saved);
+    }
+   }
+   const plan=framePlan(records[index],market,request);
+   if(plan)results[index]=!plan.missing.length?combineFrames(plan.rows,request,{reused:true}):withPartial?{frameReuse:plan}:null;
+  }
   return results;
  }
  async function readDetail(store,market,c,snapshot=true){
@@ -139,5 +201,5 @@
   for(const row of candidates){const output=await openBatchResult(store,row);signal?.throwIfAborted();if(output&&!output.summaryOnly)return output;summary??=output;}
   return summary;
  }
- let shared;return {readyFor,equityPoints,version,maxBytes,frames,key,requestKey,sameStrategy,matchesExecution,memory,open,output,compare,fromHeads,batchCandidate,batchCandidates,savedSummary,findBatch,openBatchResult,openIndividual,getDefault:()=>shared??=open()};
+ let shared;return {readyFor,equityPoints,version,maxBytes,frames,key,requestKey,sameStrategy,matchesExecution,memory,open,output,compare,fromHeads,frameRecord,framePlan,combineFrames,batchCandidate,batchCandidates,savedSummary,findBatch,openBatchResult,openIndividual,getDefault:()=>shared??=open()};
 });

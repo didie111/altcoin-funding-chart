@@ -88,3 +88,5 @@
 .bt-research-actions button:disabled{opacity:.45;cursor:not-allowed}.bt-research progress{width:100%;height:6px;margin-top:8px;accent-color:#66d1aa}
 .bt-research ul{margin:6px 0 0;padding-left:20px;max-height:160px;overflow:auto;line-height:1.8}.bt-research details>summary{cursor:pointer;color:#abc9ea}
 #btResearchRun{border-color:#427b76;color:#a9ead4}
+
+.bt-table td small.bt-batch-best{color:#8bc5ff;font-weight:600}

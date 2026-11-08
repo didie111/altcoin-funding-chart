@@ -128,7 +128,7 @@
   const completed={from:checkedStart,to:savedEnd,fundingFrom};
   if(!await store.complete(m,completed))throw Error('선택 범위에서 계산에 사용할 실제 정산 이력이 부족합니다. 보관한 캔들은 유지합니다.');
   state=await store.state(m);
-  return {market:m,state,requested:{from:start,to:end},pages,fundingPages,received,settlements,incomplete:checkedStart>start||savedEnd<end||state.candles.first>start&&(!listing||state.candles.first!==listing)};
+  return {market:m,state,verified:completed,requested:{from:start,to:end},pages,fundingPages,received,settlements,incomplete:checkedStart>start||savedEnd<end||state.candles.first>start&&(!listing||state.candles.first!==listing)};
  }
  function scope(state,config,{localOnly=false,preferSaved=false,strictSnapshot=false}={}){
   const done=state?.completed;if(!done)return null;
@@ -152,6 +152,10 @@
  function canExtend(state,config){
   const done=state?.completed;
   return Boolean(done&&config.researchOnly!==true&&config.startTime>=done.from&&config.startTime<done.to&&T.start(config.endTime,'1m')>done.to);
+ }
+ function hasStoredMinutes(state,config){
+  const from=T.start(config.startTime,'1m'),to=T.start(config.endTime,'1m'),saved=state?.candles;
+  return Boolean(saved?.count&&saved.first<to&&saved.last>=from&&saved.ranges.some(([a,b])=>a<to&&b>from));
  }
  async function retainDataset(store,item,data,{signal=aborted(),onProgress=()=>{}}={}){
   const m=S.market(item),bounds=data.rawBounds,minute=data.timeframeCandles?.['1m'];
@@ -202,10 +206,10 @@
    flush
   };
  }
- async function dataset(store,item,config,{state,period,signal=aborted(),onProgress=()=>{},maxBars=B.recommendedMaxBars()}={}){
+ async function dataset(store,item,config,{state,period,intervals,allowEmpty=false,signal=aborted(),onProgress=()=>{},maxBars=B.recommendedMaxBars()}={}){
   const m=S.market(item),stored=state||await store.state(m),p=period||scope(stored,config,{localOnly:true});
   if(!p)throw Error('이 코인·기간에 확인된 원본이 없습니다. 즐겨찾기에서 원본 수집·이어서를 실행하세요.');
-  const selected=config.timeframe==='all'?frames:[config.timeframe],required=[...new Set([...selected,...(config.splitTrigger==='rsi_cross_up_1m'?['1m']:[])])];
+  const selected=config.timeframe==='all'?(intervals??frames):[config.timeframe],required=[...new Set([...selected,...(config.splitTrigger==='rsi_cross_up_1m'?['1m']:[])])];
   if(required.some(tf=>!Object.hasOwn(T.seconds,tf)))throw Error('보관 원본으로 계산할 주기를 확인하세요.');
   const {start,to,fundFrom,fundTo}=p,timeframeCandles={},coverage={},gaps=[],sinks=new Map();let total=0,gapsCount=0,sourceRows=0,previousMinute=null;
   for(const tf of required){
@@ -231,13 +235,13 @@
    onProgress({phase:'research-read',text:'보관 원본으로 '+(config.timeframe==='all'?'선택 범위의 주기별 봉':config.timeframe+' 기준 봉')+' 준비 · 읽은 1분봉 '+sourceRows.toLocaleString()+'봉 · 거래소 재조회 없음'});
   }
   for(const {finish} of sinks.values())finish();
-  if(!Object.keys(timeframeCandles).length||config.timeframe!=='all'&&!timeframeCandles[config.timeframe]?.length||config.splitTrigger==='rsi_cross_up_1m'&&!timeframeCandles['1m']?.length)throw Error(coverage[config.timeframe]?.error||'보관한 원본에서 필요한 완성 캔들을 만들 수 없습니다.');
+  if(!allowEmpty&&!Object.keys(timeframeCandles).length||config.timeframe!=='all'&&!timeframeCandles[config.timeframe]?.length||config.splitTrigger==='rsi_cross_up_1m'&&!timeframeCandles['1m']?.length)throw Error(coverage[config.timeframe]?.error||'보관한 원본에서 필요한 완성 캔들을 만들 수 없습니다.');
   const records=[];for await(const {values} of store.series(m,'funding',fundFrom,fundTo,{signal}))for(const r of values)if(r.time>=fundFrom&&r.time<fundTo)records.push(r);
   if(!records.length)throw Error('보관한 원본에 해당 기간의 공식 펀딩 정산 기록이 없습니다.');
-  const available=Object.entries(coverage).filter(([,v])=>Number.isFinite(v.first)),priceStart=Math.min(...available.map(([,v])=>v.first)),priceEnd=Math.max(...available.map(([tf,v])=>T.end(v.last,tf)));
+  const available=Object.entries(coverage).filter(([,v])=>Number.isFinite(v.first)),priceStart=available.length?Math.min(...available.map(([,v])=>v.first)):start,priceEnd=available.length?Math.max(...available.map(([tf,v])=>T.end(v.last,tf))):to;
   const first=records[0].time,last=records.at(-1).time;let longGaps=0;
   for(let i=1;i<records.length;i++)if(records[i].time-records[i-1].time>day+60&&records[i].time>priceStart&&records[i-1].time<priceEnd)longGaps++;
   return {symbol:m.symbol,exchange:m.exchange,startTime:start,endTime:to,timeframeCandles,coverage,gaps,gapsCount,fundingRecords:records,source:'verified-local-minute-and-funding',fundingCoverage:{first,last,count:records.length,startMissing:first>priceStart+2*day,endMissing:last<priceEnd-2*day,longGaps},research:{through:to,storedThrough:stored.completed.to,checkedFrom:p.checkedFrom,sourceRows,cutoffDiffers:p.cutoffDiffers}};
  }
- return {earliest,carryLegacy,cacheEntries,collect,scope,profile,executionProfile,canExtend,retainDataset,checkBatch,dataset};
+ return {earliest,carryLegacy,cacheEntries,collect,scope,profile,executionProfile,canExtend,hasStoredMinutes,retainDataset,checkBatch,dataset};
 });

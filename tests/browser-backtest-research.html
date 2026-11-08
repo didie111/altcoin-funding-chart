@@ -34,10 +34,10 @@ function funding(from,to){return Array.from({length:(to-from)/3600},(_,i)=>({tim
 function readySingle(){const s=$('btStatusMsg');if(s.classList.contains('bt-error'))throw Error(s.textContent);return s.textContent.startsWith('완료 ·')&&!$('btResearchRun').disabled;}
 async function runOriginal(){const began=performance.now();$('btRunBtn').click();await waitFor(readySingle,'일반 실행으로 보관 원본 계산');return performance.now()-began;}
 function settings(split,rsi){$('backtestSettings').click();select('btSplitCount',String(split));$('btRsiOversold').value=String(rsi);$('backtestSettingsForm').requestSubmit();assert(!$('backtestSettingsDialog').open,'설정 저장 실패: '+$('backtestSettingsError').textContent);}
-async function startBatch(expected,label){
+async function startBatch(expected,label,{reused=false}={}){
  batch();const prev=$('btBatchSavedJob').value,confirm=()=>[...document.querySelectorAll('dialog[open] button')].find(b=>b.textContent==='테스트 시작');
- $('btBatchStart').click();await waitFor(confirm,'일괄 실행 확인창');const accept=confirm(),details=accept.closest('dialog').textContent;
- const began=performance.now();accept.click();
+ const began=performance.now();$('btBatchStart').click();let details;
+ if(!reused){await waitFor(confirm,'일괄 실행 확인창');const accept=confirm();details=accept.closest('dialog').textContent;accept.click();}
  await waitFor(()=>!$('btBatchStart').disabled&&$('btBatchCount').textContent===expected+' / '+expected&&$('btBatchSavedJob').value!==prev&&$('btBatchStatus').textContent.includes('전체 처리 완료'),label,45000);
  return {ms:performance.now()-began,details};
 }
@@ -68,7 +68,7 @@ $('qaStart').onclick=async()=>{
   assert($('btBatchCount').textContent==='139 / 139'&&$('btBatchSavedJob').value===archivedJob.id&&workerCount===0&&requests===0&&(await jobStore.listJobs()).length===1,'원본이 없는데 기존 결과를 덮거나 새 검토를 시작했습니다.');
   log('기존 파일의 원본 조각만 있음 · 0/139 준비를 먼저 안내 · 완료 결과 139/139 유지');
   $('btBatchResearchOnly').click();settings(10,30);
-  const saved=await startBatch(139,'기존 전체 주기 결과 재사용');
+  const saved=await startBatch(139,'기존 전체 주기 결과 재사용',{reused:true});
   assert(workerCount===0&&requests===0,'저장한 전체 주기 결과를 여는데 새 작업이 시작됐습니다.');
   log('기존 139개 전체 주기 · 전체 과거 유지 · 새 작업 0회 · '+saved.ms.toFixed(1)+'ms');
 
@@ -99,7 +99,7 @@ $('qaStart').onclick=async()=>{
   const trade=$('btBatchResults').querySelector('[data-batch-detail="0"]'),began=performance.now();trade.click();
   await waitFor(()=>$('btView-trades').getAttribute('aria-selected')==='true'&&!$('btRunBtn').disabled,'거래 보기');
   log('새로 계산한 코인 거래 보기 '+(performance.now()-began).toFixed(1)+'ms');
-  const again=await startBatch(173,'173개 동일 원본·설정 재사용');assert((await jobStore.activeJob()).items.every(i=>i.meta.reuse),'같은 원본·조건을 다시 계산했습니다.');log('173개 동일 조건 재사용 '+again.ms.toFixed(1)+'ms');
+  const again=await startBatch(173,'173개 동일 원본·설정 재사용',{reused:true});assert((await jobStore.activeJob()).items.every(i=>i.meta.reuse),'같은 원본·조건을 다시 계산했습니다.');log('173개 동일 조건 재사용 '+again.ms.toFixed(1)+'ms');
 
   const written=[];let closed=false;window.showSaveFilePicker=async()=>({createWritable:async()=>({write:p=>written.push(p),close:()=>{closed=true;},abort:()=>{written.length=0;}})});
   $('btBatchExport').click();
