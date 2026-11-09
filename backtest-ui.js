@@ -20,12 +20,21 @@
   const select=(label,id,options)=>'<label for="'+id+'">'+label+'<select id="'+id+'">'+options.map(([value,text])=>'<option value="'+value+'">'+text+'</option>').join('')+'</select></label>';
   const extra=doc.createElement('fieldset');extra.className='bt-settings-strategy';extra.innerHTML='<legend>음펀비 + RSI 분할 매수</legend><label class="bt-check"><input id="btFollowChart" type="checkbox">거래소·코인 심볼 따라가기</label><label class="bt-check"><input id="btFollowTimeframe" type="checkbox">타임프레임 따라가기</label><div class="research-field-row">'+select('거래소','btExchangeSelect',Object.entries(M.exchanges))+field('코인 심볼','btSymbolInput','text','maxlength="32" placeholder="BTCUSDT"')+'</div>'+select('타임프레임','btTimeframeSelect',Object.entries(M.labels))+'<div class="bt-quick-coins"><span>종목 입력 예시</span><button type="button" data-coin="IOSTUSDT">IOST</button><button type="button" data-coin="ARKUSDT">ARK</button><button type="button" data-coin="ERAUSDT">ERA</button></div>'+select('펀딩 주기 판단 기준','btIntervalBasis',[['known','당시 확인된 정산 간격 · 기본'],['chart','과거 차트 관측 간격 · 사후 비교']])+'<small>사후 비교는 뒤에 발생한 정산 기록으로 과거 간격을 확인합니다. 당시 알 수 없던 주기 정보가 포함되므로 실전 성과로 해석하지 마세요.</small><div class="research-field-row">'+select('RSI 신호 시점의 펀딩 주기','btIntervalHours',[[0,'모든 주기'],[1,'1시간'],[2,'2시간'],[4,'4시간'],[8,'8시간'],[12,'12시간'],[24,'24시간']])+field('정산 후 신호 유효 · 분','btFundingWindow','number','min="0" max="14400" step="1" required')+'</div><small>기준을 충족한 음펀딩은 설정한 유효시간 동안 유지합니다. 그 안에서 RSI 마감 시점까지 확인된 펀딩 주기를 검사합니다. 0분은 해당 음펀딩 정산 간격만큼 유효합니다.</small><div class="research-field-row">'+field('펀딩비 진입 기준 · % 이하','btMinFunding','number','min="-100" max="0" step="any" required')+field('RSI 과매도선','btRsiOversold','number','min="1" max="99" step="1" required')+'</div><div class="research-field-row">'+field('RSI 기간','btRsiPeriod','number','min="2" max="200" step="1" required')+select('첫 진입 신호','btEntryTrigger',[['rsi_cross_up','과매도선 상향 돌파 마감'],['rsi_oversold','과매도 이하 마감']])+'</div><div class="research-field-row">'+select('총 분할 진입 수','btSplitCount',Array.from({length:11},(_,i)=>[i,i===0?'0분할 · 1회 진입':i===1?'1회 진입':i+'분할 · '+i+'회 진입']))+select('분할 금액 배분','btDcaMethod',[['equal','균등 배분'],['martingale','마틴게일 · 1, 1, 2, 4…'],['cumulative','회차별 배수']])+'</div>'+select('추가 진입 신호','btSplitTrigger',[['step_pct','직전 진입가 대비 추가 하락'],['rsi_cross_up','현재 주기 RSI 과매도선 상향 돌파 마감'],['rsi_cross_up_1m','1분봉 고정 RSI 과매도선 상향 돌파 마감'],['rsi_oversold','과매도 이하 마감마다'],['bar','완성된 봉마다']])+'<small id="btSplitHelp"></small>'+field('추가 하락 간격 · %','btSplitStepPct','number','min="0.01" max="99" step="any" required')+select('진입 금액 기준','btSizing',[['budget','거래당 자본 비중으로 자동 배분'],['first_entry','첫 진입 금액 고정']])+field('첫 진입 금액 · USDT','btFirstAmount','number','min="0.01" max="1000000000000" step="any" required')+'<p id="btAllocationPreview" class="bt-allocation-preview" role="status"></p>'+select('손절 감시 시작','btStopLossMode',[['immediate','첫 진입 체결 직후부터'],['after_all_dca','모든 분할 진입 체결 후부터']])+'<div class="research-field-row">'+field('평단 대비 익절 · %','btTakeProfit','number','min="0" max="10000" step="any" required')+field('평단 대비 손절 · %','btStopLoss','number','min="0" max="99.99" step="any" required')+'</div><small>0%는 해당 기준을 사용하지 않습니다. 익절은 매 체결 후의 수량 가중평단을 따릅니다.</small>'+select('청산 방식','btExitType',[['tp_sl','익절 + 손절'],['rsi_rebound','RSI 반등 + 손절'],['settle_exit','정산 후 양봉 + 손절'],['composite','익절 또는 RSI 반등 + 손절']])+'<div class="research-field-row">'+field('청산 RSI','btRsiExit','number','min="1" max="99" step="1" required')+field('최대 보유 봉 · 0은 제한 없음','btMaxHold','number','min="0" max="1000000" step="1" required')+'</div><label class="bt-check"><input id="btIncludeFunding" type="checkbox">보유 중 모든 실제 정산의 수취·지급 반영</label>';
   body.append(extra);
+  const dcaOptions=Array.from({length:10},(_,i)=>[i+1,(i+1)+'배']);
   const dcaPlan=doc.createElement('section');dcaPlan.className='bt-dca-plan';dcaPlan.hidden=true;dcaPlan.setAttribute('aria-labelledby','btDcaTitle');
-  dcaPlan.innerHTML='<strong id="btDcaTitle">회차별 진입 계획</strong><small id="btDcaHelp"></small><div class="bt-dca-rounds"></div>';
+  dcaPlan.innerHTML=`<div class="bt-dca-heading"><strong id="btDcaTitle">회차별 진입 계획</strong>
+    <div class="bt-dca-actions"><button id="btDcaReset" type="button" title="숨겨진 회차까지 2~10회차 배수 초기화">모두 1배로</button><button id="btDcaUndo" type="button" title="마지막 일괄 변경 되돌리기" disabled>되돌리기</button></div></div>
+   <small id="btDcaHelp"></small>
+   <div id="btDcaBulk" class="bt-dca-bulk">${select('일괄 배수','btDcaBulkValue',dcaOptions)}<button id="btDcaApplyAll" type="button">표시된 회차에 적용</button></div>
+   <details id="btDcaList" class="bt-dca-list"><summary>배수 목록 복사·붙여넣기</summary>
+    <div class="bt-dca-list-body"><label for="btDcaPattern">배수 목록 · 2회차부터<textarea id="btDcaPattern" rows="2" maxlength="180" spellcheck="false" placeholder="예: 2, 4, 4, 2" aria-describedby="btDcaPatternHint"></textarea></label>
+    <small id="btDcaPatternHint"></small><div class="bt-dca-actions"><button id="btDcaCopy" type="button">현재 배수 복사</button><button id="btDcaApplyList" type="button">목록 적용</button></div></div>
+   </details>
+   <p id="btDcaFeedback" class="bt-dca-feedback" role="status"></p><div class="bt-dca-rounds"></div>`;
   $('btAllocationPreview').before(dcaPlan);
-  const dcaOptions=Array.from({length:10},(_,i)=>[i+1,(i+1)+'배']),dcaCards=Array.from({length:10},(_,i)=>{
+  const dcaCards=Array.from({length:10},(_,i)=>{
    const card=doc.createElement('div');card.className='bt-dca-round';card.dataset.dcaRound=i+1;
-   card.innerHTML=i?select((i+1)+'회차 배수','btDcaMultiplier'+(i+1),dcaOptions):'<span>1회차</span><small>첫 진입</small>';
+   card.innerHTML=i?select((i+1)+'회차 배수','btDcaMultiplier'+(i+1),dcaOptions):'<span>1회차</span><small id="btDcaFirstKind">첫 진입</small>';
    const amount=doc.createElement('strong');amount.className='bt-dca-amount';card.append(amount);dcaPlan.querySelector('.bt-dca-rounds').append(card);
    return {card,amount,input:card.querySelector('select')};
   }),dcaInputs=dcaCards.slice(1).map(c=>c.input);
@@ -34,16 +43,53 @@
   const readMultipliers=()=>dcaInputs.map(input=>Number(input.value));
   const persistStrategy=()=>{try{root.localStorage.setItem(key,JSON.stringify({...strategy,dcaMultiplierDraft:dcaDraft,target:custom,follow,followTimeframe}));}catch{}};
   const tinyAllocation=new Intl.NumberFormat('en-US',{maximumSignificantDigits:4});
+  const dcaPattern=$('btDcaPattern'),activeDcaCount=()=>Math.max(0,Number($('btSplitCount').value)-1);
+  let dcaUndo=null;
+  function dcaFeedback(text='',error=false){
+   $('btDcaFeedback').textContent=text;$('btDcaFeedback').classList.toggle('bt-error',error);
+  }
+  function setDcaMultipliers(values){
+   dcaInputs.forEach((input,i)=>input.value=String(values[i]));
+   $('backtestSettingsError').textContent='';previewAllocation();
+  }
+  function applyDcaMultipliers(values,text){
+   const before=readMultipliers();
+   if(before.every((value,i)=>value===values[i])){dcaFeedback('이미 같은 배수가 설정되어 있습니다.');return;}
+   dcaUndo=before;setDcaMultipliers(values);dcaFeedback(text);
+  }
+  $('btDcaReset').onclick=()=>applyDcaMultipliers(dcaInputs.map(()=>1),'2~10회차 배수를 모두 1배로 바꿨습니다.');
+  $('btDcaUndo').onclick=()=>{if(!dcaUndo)return;const before=dcaUndo;dcaUndo=null;setDcaMultipliers(before);dcaFeedback('마지막 일괄 변경을 되돌렸습니다.');};
+  $('btDcaApplyAll').onclick=()=>{
+   const count=activeDcaCount(),value=Number($('btDcaBulkValue').value);
+   if(count)applyDcaMultipliers(readMultipliers().map((v,i)=>i<count?value:v),'2~'+(count+1)+'회차에 '+value+'배를 적용했습니다.');
+  };
+  $('btDcaCopy').onclick=async()=>{
+   const values=readMultipliers().slice(0,activeDcaCount());if(!values.length)return;
+   const text=values.join(', ');dcaPattern.value=text;
+   try{await root.navigator.clipboard.writeText(text);dcaFeedback('현재 배수 목록을 복사했습니다.');}
+   catch{dcaPattern.focus();dcaPattern.select();dcaFeedback('배수 목록을 선택했습니다. 복사 단축키 또는 터치 메뉴로 복사하세요.');}
+  };
+  $('btDcaApplyList').onclick=()=>{
+   const count=activeDcaCount();if(!count)return;
+   const values=dcaPattern.value.replaceAll('->','→').trim().split(/[\s,;→]+/).filter(Boolean).map(v=>v.replace(/^[×x]/i,'').replace(/배$/,''));
+   if(values.length!==count||values.some(v=>!/^(?:[1-9]|10)$/.test(v))){dcaFeedback('2회차부터 사용할 1~10 사이 정수 '+count+'개를 입력하세요.',true);return;}
+   applyDcaMultipliers(readMultipliers().map((v,i)=>i<count?Number(values[i]):v),'배수 목록을 2~'+(count+1)+'회차에 적용했습니다.');
+  };
+  dialog.addEventListener('close',()=>{dcaUndo=null;dcaPattern.value='';$('btDcaList').open=false;dcaFeedback();});
   function previewAllocation(){
    const count=Math.max(1,Number($('btSplitCount').value)),method=$('btDcaMethod').value,positionSizing=$('btSizing').value,fixed=positionSizing==='first_entry',customPlan=method==='cumulative';
    const initialCapital=Number(form.elements.capital.value),allocationPerTradePct=Number(form.elements.orderSize.value),firstEntryAmount=Number($('btFirstAmount').value),preview=$('btAllocationPreview');
+   const multipliers=readMultipliers();
    $('btFirstAmount').disabled=!fixed;dcaPlan.hidden=!customPlan;
+   $('btDcaBulk').hidden=count<=1;$('btDcaList').hidden=count<=1;$('btDcaReset').disabled=multipliers.every(v=>v===1);$('btDcaUndo').disabled=!dcaUndo;
+   $('btDcaPatternHint').textContent='1~10 사이의 배수 '+(count-1)+'개를 쉼표, 공백 또는 줄바꿈으로 구분하세요.';
    for(const [i,c]of dcaCards.entries()){c.card.hidden=i>=count;if(c.input)c.input.disabled=!customPlan||i>=count;}
-   $('btDcaHelp').textContent='2회차부터 직전 진입금액에 선택한 배수를 곱합니다. '+(fixed?'첫 진입금액은 그대로 유지하며, 전체 계획을 감당할 자본이 필요합니다.':'선택한 거래 예산에 맞춰 첫 진입금액을 계산합니다.');
-   const plan=initialCapital>0&&(fixed?firstEntryAmount>0:allocationPerTradePct>0)?E.getAllocationPlan({splitCount:count,dcaMethod:method,dcaMultipliers:readMultipliers(),positionSizing,initialCapital,allocationPerTradePct,firstEntryAmount}):null;
+   $('btDcaFirstKind').textContent=fixed?'고정 금액':'자동 계산';
+   $('btDcaHelp').textContent=(fixed?'첫 회차는 지정한 금액으로 시작합니다.':'첫 회차는 거래 예산과 배수에 맞춰 다시 계산합니다.')+' 2회차부터 직전 회차의 진입금액(USDT)에 배수를 곱합니다.';
+   const plan=initialCapital>0&&(fixed?firstEntryAmount>0:allocationPerTradePct>0)?E.getAllocationPlan({splitCount:count,dcaMethod:method,dcaMultipliers:multipliers,positionSizing,initialCapital,allocationPerTradePct,firstEntryAmount}):null;
    if(customPlan)for(const [i,c]of dcaCards.entries()){const v=plan?.amounts[i];c.amount.textContent=v===undefined?'—':(v>0&&v<.0001?tinyAllocation.format(v):money(v))+' USDT';c.card.classList.toggle('bt-dca-excess',Boolean(plan?.excessStep)&&i+1>=plan.excessStep);}
    preview.classList.toggle('bt-allocation-error',Boolean(plan?.excessStep));
-   preview.textContent=!plan?'초기 자본과 진입 금액 기준을 확인하세요.':customPlan?(plan.message||'첫 거래 계획 · 총 '+money(plan.budget)+' USDT / 자본 '+money(initialCapital)+' USDT · 진입 수수료 포함'):'예상 투입: '+plan.amounts.map(money).join(' → ')+' USDT · 총 '+money(plan.budget)+' / 자본 '+money(initialCapital)+' USDT';
+   preview.textContent=!plan?'초기 자본과 진입 금액 기준을 확인하세요.':customPlan?(plan.message?plan.message+' 정한 예산 안에서 나누려면 자동 배분을 선택하세요.':(fixed?'첫 진입 고정':'자동 배분')+' · 첫 거래 총 '+money(plan.budget)+' USDT / 자본 '+money(initialCapital)+' USDT · 진입 수수료 포함'):'예상 투입: '+plan.amounts.map(money).join(' → ')+' USDT · 총 '+money(plan.budget)+' / 자본 '+money(initialCapital)+' USDT';
   }
   const reentry=doc.createElement('div');reentry.className='bt-funding-reentry';reentry.innerHTML='<label class="bt-check"><input id="btOneEntryPerFunding" type="checkbox" aria-describedby="btFundingReentryHelp">같은 펀딩 정산으로 재진입 금지</label><small id="btFundingReentryHelp">첫 BUY에 사용한 정산 기록은 청산 후에도 다시 사용하지 않습니다. 더 나중의 정산 기록이 펀딩률·주기 조건을 충족해야 다음 첫 BUY를 허용합니다. 진행 중인 분할매수는 기존 조건을 따릅니다.</small>';$('btFundingWindow').closest('.research-field-row').nextElementSibling.after(reentry);
   const cooldown=doc.createElement('div');cooldown.className='bt-entry-cooldown';cooldown.innerHTML=field('첫 BUY 후 신호 대기 · 캔들 수','btEntryCooldownBars','number','min="0" max="1000000" step="1" required aria-describedby="btEntryCooldownHelp"')+'<label class="bt-check"><input id="btFreshFundingAfterCooldown" type="checkbox">대기 종료 후 새 펀딩 조건만 사용</label><small>켜면 대기 종료 전에 확정된 펀딩 정산은 유효시간이 남아 있어도 제외합니다. 이후의 새 정산이 펀딩률·주기 조건을 충족해야 하며, RSI는 기존 정산 후 신호 유효 시간 안에서 검사합니다.</small><small id="btEntryCooldownHelp"></small>';reentry.after(cooldown);
@@ -62,7 +108,13 @@
    return {strategy:E.normalizeConfig(raw),dcaMultiplierDraft,target:t,follow:$('btFollowChart').checked,followTimeframe:$('btFollowTimeframe').checked};
   }
   function settingsSaved(next,{periodChanged=false}={}){const changed=Object.keys(E.defaultStrategyConfig).some(k=>k!=='timeframe'&&strategy[k]!==next.strategy[k])||strategy.dcaMultipliers?.join(',')!==next.strategy.dcaMultipliers?.join(',');strategy=next.strategy;dcaDraft=next.dcaMultiplierDraft;follow=next.follow;followTimeframe=next.followTimeframe;custom=next.target;persistStrategy();if(changed||periodChanged)batchUI?.useCurrentSettings({periodChanged});updateTarget();}
-  const refreshPreview=()=>{if(dialog.open){$('backtestSettingsError').textContent='';preview();}};form.addEventListener('input',refreshPreview);form.addEventListener('change',event=>{if(event.target.tagName==='SELECT')refreshPreview();});$('btFollowChart').onchange=()=>{if($('btFollowChart').checked){const m=chartWorkspace.activeMarket();$('btExchangeSelect').value=m.ex;$('btSymbolInput').value=m.symbol;}toggleTarget();preview();};$('btFollowTimeframe').onchange=()=>{if($('btFollowTimeframe').checked)$('btTimeframeSelect').value=chartWorkspace.activeMarket().int;toggleTarget();preview();};
+  const refreshPreview=event=>{
+   if(!dialog.open||event.target===$('btDcaBulkValue'))return;
+   if(event.target===dcaPattern){dcaFeedback();return;}
+   if(dcaInputs.includes(event.target)){dcaUndo=null;dcaFeedback();}
+   $('backtestSettingsError').textContent='';preview();
+  };
+  form.addEventListener('input',refreshPreview);form.addEventListener('change',event=>{if(event.target.tagName==='SELECT')refreshPreview(event);});$('btFollowChart').onchange=()=>{if($('btFollowChart').checked){const m=chartWorkspace.activeMarket();$('btExchangeSelect').value=m.ex;$('btSymbolInput').value=m.symbol;}toggleTarget();preview();};$('btFollowTimeframe').onchange=()=>{if($('btFollowTimeframe').checked)$('btTimeframeSelect').value=chartWorkspace.activeMarket().int;toggleTarget();preview();};
   for(const button of extra.querySelectorAll('[data-coin]'))button.onclick=()=>{$('btFollowChart').checked=false;$('btSymbolInput').value=button.dataset.coin;toggleTarget();};
   const symbolInput=$('btSymbolInput'),matches=doc.createElement('div'),searchStatus=doc.createElement('small'),catalog=root.MarketCatalog?.create();
   matches.id='btSymbolMatches';matches.className='bt-symbol-matches';matches.setAttribute('role','listbox');matches.setAttribute('aria-label','검색한 USDT 무기한 종목');matches.hidden=true;
