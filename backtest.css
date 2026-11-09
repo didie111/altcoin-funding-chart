@@ -91,7 +91,10 @@
 .bt-batch-content .bt-batch-range{font-size:12px}.bt-batch-content .bt-batch-snapshot{font-size:11px;margin:8px 0 12px}.bt-batch-method{font-size:12px}.bt-batch-setup{align-items:center}.bt-batch-setup label{font-size:11px}
 .bt-batch-inspection{display:grid;gap:4px;font-size:10px;color:#b7cde9;margin-bottom:6px}.bt-batch-inspection select{max-width:100%;border:1px solid #496b91;border-radius:4px;background:#162940;color:#deedff;padding:5px;font:inherit}
 .bt-batch-comparison{font-size:11px;margin-top:8px;min-width:125px}.bt-batch-comparison ul{list-style:none;padding:0;margin:6px 0}.bt-batch-comparison li{display:grid;gap:3px;padding:7px 0;border-bottom:1px solid #334d6c}.bt-batch-comparison span{color:#a5bddb;white-space:nowrap}
-#backtestDock[data-view=batch] .bt-runbar,#backtestDock[data-view=batch] .bt-progress-row{display:none}
+.backtest-bar #btStrategySettings{flex:none;margin-left:8px;padding:5px 8px;gap:5px;border:1px solid #405675;border-radius:5px;background:#23334c;font-size:11px;white-space:nowrap;cursor:pointer}
+.backtest-bar #btStrategySettings:hover{background:#2f4669;color:#fff}.backtest-bar #btStrategySettings:focus-visible{outline:2px solid #79aefe;outline-offset:1px}
+#backtestDock[data-open=false] .backtest-bar #btStrategySettings,#backtestDock[data-view=batch] .bt-runbar,#backtestDock[data-view=batch] .bt-progress-row{display:none}
+@media(max-width:420px){#backtestDock[data-view=batch] .backtest-bar{gap:4px;padding-inline:6px}.backtest-bar #btStrategySettings{margin-left:0;padding-inline:5px;gap:4px}}
 #backtestDock[data-open=true][data-view=batch]:not([data-user-sized=true]){flex-basis:clamp(0px,max(var(--backtest-height,280px),55%),72%)}
 @container batch (max-width:800px){.bt-batch-monitor{gap:8px 12px;padding:10px 12px 0;grid-template-columns:auto minmax(0,1fr)}.bt-batch-monitor-actions{grid-column:1/-1;justify-content:flex-start}.bt-batch-counter strong{font-size:20px}.bt-batch-activity{font-size:11px}.bt-batch-content{padding:0 10px 10px}}
 @container batch (max-width:620px){
