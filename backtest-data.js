@@ -28,7 +28,7 @@
    if(!Number.isFinite(start)||!Number.isFinite(end)||start>=end||start<0)throw Error('테스트 기간을 확인하세요.');symbol=String(symbol).trim().toUpperCase().replace(/[-_]/g,'').replace(/USDT$/,'')+'USDT';if(!/^[A-Z0-9]{1,28}USDT$/.test(symbol))throw Error('코인 심볼을 확인하세요.');
    for(const tf of intervals)T.plan(ex,tf);signal.throwIfAborted();const expected=estimate({...options,exchange:ex,intervals,startTime:start,endTime:end});
    const seed=options.seedDataset;if(seed&&(seed.exchange!==ex||seed.symbol!==symbol||seed.startTime!==start||seed.endTime!==end))throw Error('재사용할 원본의 종목·기간이 다릅니다.');
-   const timeframeCandles={},coverage={},allFunding=new Map((seed?.fundingRecords||[]).map(r=>[r.time,r])),fundingStart=Math.max(0,start-Math.max(48*3600,Math.min(864000,Number(options.fundingWindowSeconds)||0))),fundingEnd=Math.min(Date.now()/1000,end+(options.fundingIntervalBasis==='chart'?48*3600:0));let minuteCheckedFrom=seed?.rawBounds?.from,totalCount=0,pages=0,cursor=ex==='BINANCE'?fundingStart*1000:Math.floor(fundingEnd*1000)-1,page=1;
+   const timeframeCandles={},coverage={},oldestProvided={},allFunding=new Map((seed?.fundingRecords||[]).map(r=>[r.time,r])),fundingStart=Math.max(0,start-Math.max(48*3600,Math.min(864000,Number(options.fundingWindowSeconds)||0))),fundingEnd=Math.min(Date.now()/1000,end+(options.fundingIntervalBasis==='chart'?48*3600:0));let minuteCheckedFrom=seed?.rawBounds?.from,totalCount=0,pages=0,cursor=ex==='BINANCE'?fundingStart*1000:Math.floor(fundingEnd*1000)-1,page=1;
    if(!seed)for(;;){
     signal.throwIfAborted();const rows=F.merge(await funding(ex,symbol,cursor,page,signal));signal.throwIfAborted();pages++;
     for(const r of rows)if(r.time>=fundingStart&&r.time<fundingEnd)allFunding.set(r.time,r);
@@ -55,6 +55,7 @@
       if(totalCount+combined.length>maxBars)throw Error('현재 환경의 메모리 보호 기준을 초과합니다. 일부만 계산하지 않고 중단했습니다.');
       timeframeCandles[tf]=packed?B.pack(combined):combined;totalCount+=combined.length;
       const firstInside=inside[0].time,lastInside=inside.at(-1).time;
+      if(options.verifyLatest&&oldestProvided['1m'])oldestProvided[tf]=true;
       coverage[tf]={first:firstInside,last:lastInside,count:inside.length,endMissing:T.end(lastInside,tf)<T.start(end,tf),warmup:combined.length-inside.length,startMissing:firstInside>T.end(T.start(start,tf),tf),resampled:true};
       if(packed)for(let i=1;i<combined.length;i++)if(T.end(combined[i-1].time,tf)<combined[i].time){gapsCount++;if(gaps.length<2000)gaps.push({timeframe:tf,from:T.end(combined[i-1].time,tf),to:combined[i].time});}
       onProgress({phase:'candles',timeframe:tf,pages:warmupPages,count:combined.length,exchange:ex,expectedCount:expected.frames[tf].totalCount,expectedPages:warmupPages,archiveFiles:0,restPages:warmupPages,startTime:start,endTime:end,first:combined[0].time,last:combined.at(-1).time,synthesized:true});continue;
@@ -84,6 +85,7 @@
      const knownEarlier=Number.isFinite(listing)&&start===listing&&oldestRetained<=listing;
      minuteCheckedFrom=Math.min(oldestRetained,knownEarlier||reached&&from===Math.floor(start)?from:oldestRetained);
     }
+    if(options.verifyLatest&&oldestPageExhausted&&ex!=='MEXC')oldestProvided[tf]=true;
     timeframeCandles[tf]=values;totalCount+=values.length;gapsCount+=localGapCount;for(const gap of localGaps)if(gaps.length<2000)gaps.push(gap);coverage[tf]={first:firstInside,last:lastInside,count:insideCount,endMissing:T.end(lastInside,tf)<T.start(end,tf),warmup:values.length-insideCount,startMissing:firstInside>T.end(T.start(start,tf),tf)};
    }catch(error){signal.throwIfAborted();if(!options.allowMissing||(options.requireMinuteData&&tf==='1m')||error.name==='RateLimitError'||/초과|반복|진행되지|메모리|순서/.test(error.message))throw error;coverage[tf]={error:error.message};}}
    if(!Object.keys(timeframeCandles).length)throw Error('선택 기간의 캔들을 불러오지 못했습니다.');
@@ -94,7 +96,7 @@
    const fundingCoverage={first,last,count:fundingRecords.length,startMissing:first>priceStart+2*86400,endMissing:last<priceEnd-2*86400,longGaps};
    const rawTo=coverage['1m']?.last+60,fundFrom=Math.floor(fundingStart),fundTo=Math.floor(fundingEnd);
    const rawBounds=Number.isFinite(minuteCheckedFrom)&&minuteCheckedFrom<rawTo&&fundFrom<rawTo&&fundTo>=rawTo&&!fundingCoverage.startMissing&&!fundingCoverage.endMissing?{from:minuteCheckedFrom,to:rawTo,fundingFrom:fundFrom,fundingTo:fundTo}:undefined;
-   return {symbol,exchange:ex,startTime:start,endTime:end,fundingRecords,timeframeCandles,coverage,gaps,gapsCount,source:archiveFiles||seed?.source?.includes('binance-public-archive')?'official-exchange-api+binance-public-archive':'official-exchange-api',fundingCoverage,...(rawBounds?{rawBounds}:{})};
+   return {symbol,exchange:ex,startTime:start,endTime:end,fundingRecords,timeframeCandles,coverage,gaps,gapsCount,...(options.verifyLatest?{oldestProvided}:{}),source:archiveFiles||seed?.source?.includes('binance-public-archive')?'official-exchange-api+binance-public-archive':'official-exchange-api',fundingCoverage,...(rawBounds?{rawBounds}:{})};
   }
   return {loadBacktestDataset};
  }

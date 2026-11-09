@@ -49,13 +49,16 @@
  }
  function cacheEntries(cache){return async function*(){for(const key of await cache.keys())yield {key,read:()=>cache.get(key)};};}
 
- async function collect({store,item,from=earliest,to,knownListing=null,keepFundingFrom=null,candlePage,fundingPage,signal=aborted(),onProgress=()=>{},now=Date.now}){
+ function repairRanges(covered,from,to,repair=[]){
+  return S.ranges([...S.missing(covered,from,to),...repair.map(([a,b])=>[Math.max(from,a),Math.min(to,b)]).filter(([a,b])=>a<b)]);
+ }
+ async function collect({store,item,from=earliest,to,knownListing=null,keepFundingFrom=null,candlePage,fundingPage,repair,signal=aborted(),onProgress=()=>{},now=Date.now}){
   const m=S.market(item),ex=m.exchange,symbol=m.symbol,start=T.start(from,'1m'),end=T.start(Math.min(to,now()/1000),'1m');
   if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||start>=end)throw Error('원본을 모을 기간을 확인하세요.');
   let pages=0,fundingPages=0,received=0,settlements=0;
   const listing=Number.isFinite(knownListing)&&knownListing>=start&&knownListing<end?Math.ceil(knownListing/60)*60:null;
   if(listing>start)await store.put(m,'candles',[],{checked:[[start,listing]]});
-  const gapPlan=S.missing((await store.state(m))?.candles.ranges,start,end).reverse();
+  const gapPlan=repairRanges((await store.state(m))?.candles.ranges,start,end,repair?.candles).reverse();
   let staged=[],checked=[];
   async function flush(){if(staged.length||checked.length){await store.put(m,'candles',staged,{checked});staged=[];checked=[];}}
   for(const [lo,hi] of gapPlan){
@@ -84,7 +87,7 @@
   // Do not use an unclosed or not-yet-returned last minute as the data cutoff.
   const savedEnd=Math.min(end,state.candles.last+60),scan=intervalAt(state.candles.ranges,savedEnd);
   if(!scan)throw Error('보관한 1분봉의 실제 범위를 확인하지 못했습니다. 원본 수집을 이어서 실행하세요.');
-  const checkedStart=Math.max(start,scan[0]),first=Math.max(checkedStart,state.candles.first),fundingFrom=Math.max(0,Number.isFinite(keepFundingFrom)?Math.min(first,keepFundingFrom):first-fundingLookback),gaps=S.missing(state.funding.ranges,fundingFrom,savedEnd);
+  const checkedStart=Math.max(start,scan[0]),first=Math.max(checkedStart,state.candles.first),fundingFrom=Math.max(0,Number.isFinite(keepFundingFrom)?Math.min(first,keepFundingFrom):first-fundingLookback),gaps=repairRanges(state.funding.ranges,fundingFrom,savedEnd,repair?.funding);
   function reportFunding(){onProgress({phase:'research-funding',pages:fundingPages,count:settlements,text:'공식 펀딩 정산 '+settlements.toLocaleString()+'건 추가 확인 · '+fundingPages.toLocaleString()+'페이지'});}
   async function putFunding(rows,lo,hi){
    if(lo>=hi)return;
@@ -212,7 +215,7 @@
   if(!p)throw Error('이 코인·기간에 확인된 원본이 없습니다. 즐겨찾기에서 원본 수집·이어서를 실행하세요.');
   const selected=config.timeframe==='all'?(intervals??frames):[config.timeframe],required=[...new Set([...selected,...(config.splitTrigger==='rsi_cross_up_1m'?['1m']:[])])];
   if(required.some(tf=>!Object.hasOwn(T.seconds,tf)))throw Error('보관 원본으로 계산할 주기를 확인하세요.');
-  const {start,to,fundFrom,fundTo}=p,timeframeCandles={},coverage={},gaps=[],sinks=new Map();let total=0,gapsCount=0,sourceRows=0,previousMinute=null;
+  const {start,to,fundFrom,fundTo}=p,timeframeCandles={},coverage={},gaps=[],minuteGaps=[],sinks=new Map();let total=0,gapsCount=0,sourceRows=0,firstMinute=null,previousMinute=null,minuteGapCount=0;
   for(const tf of required){
    const from=Math.max(0,T.shift(T.start(start,tf),tf,-Math.max(80,(config.rsiPeriod||14)*3))),packed=B.builder({ascending:true});let first=null,last=null,inside=0,previous=null;
    const sink=candleSink(tf,from,to,r=>{
@@ -230,19 +233,69 @@
   for await(const {head,values} of store.series(m,'candles',lo,to,{signal})){
    for(let i=0;i<head.count;i++){
     const r=S.rowAt(values,i,scratch);if(r.time<lo||r.time+60>to)continue;
-    if(trackMinuteGaps&&previousMinute!==null&&r.time>previousMinute+60&&r.time>=start){gapsCount++;if(gaps.length<2000)gaps.push({timeframe:'1m',from:previousMinute+60,to:r.time});}
-    previousMinute=r.time;for(let j=0;j<inputs.length;j++)inputs[j].sink.push(r);sourceRows++;
+    if(previousMinute!==null&&r.time>previousMinute+60){
+     if(config.verifyLatest){minuteGapCount++;if(minuteGaps.length<2000)minuteGaps.push([previousMinute+60,r.time]);}
+     if(trackMinuteGaps&&r.time>=start){gapsCount++;if(gaps.length<2000)gaps.push({timeframe:'1m',from:previousMinute+60,to:r.time});}
+    }
+    firstMinute??=r.time;previousMinute=r.time;for(let j=0;j<inputs.length;j++)inputs[j].sink.push(r);sourceRows++;
    }
-   onProgress({phase:'research-read',text:'보관 원본으로 '+(config.timeframe==='all'?'선택 범위의 주기별 봉':config.timeframe+' 기준 봉')+' 준비 · 읽은 1분봉 '+sourceRows.toLocaleString()+'봉 · 거래소 재조회 없음'});
+   onProgress({phase:'research-read',text:'보관 원본으로 '+(config.timeframe==='all'?'선택 범위의 주기별 봉':config.timeframe+' 기준 봉')+' 준비 · 읽은 1분봉 '+sourceRows.toLocaleString()+'봉'+(config.verifyLatest?'':' · 거래소 재조회 없음')});
   }
   for(const {finish} of sinks.values())finish();
-  if(!allowEmpty&&!Object.keys(timeframeCandles).length||config.timeframe!=='all'&&!timeframeCandles[config.timeframe]?.length||config.splitTrigger==='rsi_cross_up_1m'&&!timeframeCandles['1m']?.length)throw Error(coverage[config.timeframe]?.error||'보관한 원본에서 필요한 완성 캔들을 만들 수 없습니다.');
+  if(!config.verifyLatest&&(!allowEmpty&&!Object.keys(timeframeCandles).length||config.timeframe!=='all'&&!timeframeCandles[config.timeframe]?.length||config.splitTrigger==='rsi_cross_up_1m'&&!timeframeCandles['1m']?.length))throw Error(coverage[config.timeframe]?.error||'보관한 원본에서 필요한 완성 캔들을 만들 수 없습니다.');
   const records=[];for await(const {values} of store.series(m,'funding',fundFrom,fundTo,{signal}))for(const r of values)if(r.time>=fundFrom&&r.time<fundTo)records.push(r);
-  if(!records.length)throw Error('보관한 원본에 해당 기간의 공식 펀딩 정산 기록이 없습니다.');
+  if(!config.verifyLatest&&!records.length)throw Error('보관한 원본에 해당 기간의 공식 펀딩 정산 기록이 없습니다.');
   const available=Object.entries(coverage).filter(([,v])=>Number.isFinite(v.first)),priceStart=available.length?Math.min(...available.map(([,v])=>v.first)):start,priceEnd=available.length?Math.max(...available.map(([tf,v])=>T.end(v.last,tf))):to;
-  const first=records[0].time,last=records.at(-1).time;let longGaps=0;
+  const first=records[0]?.time,last=records.at(-1)?.time;let longGaps=0;
   for(let i=1;i<records.length;i++)if(records[i].time-records[i-1].time>day+60&&records[i].time>priceStart&&records[i-1].time<priceEnd)longGaps++;
-  return {symbol:m.symbol,exchange:m.exchange,startTime:start,endTime:to,timeframeCandles,coverage,gaps,gapsCount,fundingRecords:records,source:'verified-local-minute-and-funding',fundingCoverage:{first,last,count:records.length,startMissing:first>priceStart+2*day,endMissing:last<priceEnd-2*day,longGaps},research:{through:to,storedThrough:stored.completed.to,checkedFrom:p.checkedFrom,sourceRows,cutoffDiffers:p.cutoffDiffers}};
+  return {symbol:m.symbol,exchange:m.exchange,startTime:start,endTime:to,timeframeCandles,coverage,gaps,gapsCount,fundingRecords:records,source:'verified-local-minute-and-funding',fundingCoverage:{first,last,count:records.length,startMissing:first>priceStart+2*day,endMissing:last<priceEnd-2*day,longGaps},research:{through:to,storedThrough:stored.completed.to,checkedFrom:p.checkedFrom,sourceRows,cutoffDiffers:p.cutoffDiffers},...(config.verifyLatest?{minuteAudit:{from:lo,first:firstMinute,last:previousMinute,gaps:minuteGaps,count:minuteGapCount}}:{})};
  }
- return {earliest,carryLegacy,cacheEntries,collect,scope,profile,executionProfile,canExtend,hasStoredMinutes,retainDataset,checkBatch,dataset};
+ // A verified run never substitutes a saved cutoff. Only supported funding
+ // cadences count as evidence; a cadence change by itself is not a missing record.
+ function verifySnapshot(data,config,{state,knownListing,through=T.start(config.endTime,'1m')}={}){
+  const errors=[],candles=[],funding=[],selected=config.timeframe==='all'?frames:[...new Set([config.timeframe,...(config.splitTrigger==='rsi_cross_up_1m'?['1m']:[])])],rows=data.fundingRecords,coverage=data.coverage||{},minute=data.minuteAudit;
+  if(data.endTime!==through)errors.push('요청한 확정 시점까지 원본이 도착하지 않았습니다.');
+  if(minute){
+   candles.push(...minute.gaps);
+   if(Number.isFinite(minute.first)&&state?.candles.first<minute.first&&minute.first>minute.from)candles.push([Math.max(minute.from,state.candles.first),minute.first]);
+   if(Number.isFinite(minute.last)&&minute.last+60<through)candles.push([minute.last+60,through]);
+   if(minute.count>minute.gaps.length)errors.push('확인해야 할 1분봉 공백이 많습니다.');
+   if(!Number.isFinite(minute.first)){errors.push('확인할 실제 1분봉이 없습니다.');const from=Math.max(minute.from,state?.candles.first??Infinity);if(from<through)candles.push([from,through]);}
+   if(data.research.checkedFrom>T.start(config.startTime,'1m'))errors.push('요청 시작 시점까지 원본을 확인하지 못했습니다.');
+  }else if(data.gapsCount>0)errors.push('공식 캔들에 '+data.gapsCount+'곳의 공백이 있습니다.');
+  const available=Object.values(coverage).filter(v=>Number.isFinite(v.first));
+  const priceStart=Math.max(config.startTime,minute?.first??(Number.isFinite(coverage['1m']?.first)?coverage['1m'].first:available.length?Math.min(...available.map(v=>v.first)):config.startTime));
+  for(const tf of selected){
+   const range=coverage[tf];
+   if(!range){errors.push(tf+' 원본 범위를 확인하지 못했습니다.');continue;}
+   // No completed higher timeframe after a new listing is not a raw-data gap.
+   if(range.error&&(!minute&&!Number.isFinite(coverage['1m']?.first)||priceStart<through&&T.closedRange(priceStart,through,tf).count))errors.push(tf+' 확정 캔들을 확인하지 못했습니다.');
+   if(range.endMissing)errors.push(tf+' 마지막 확정 캔들이 부족합니다.');
+   if(range.warmupMissing){
+    errors.push(tf+' RSI 준비 구간이 부족합니다.');
+    if(minute&&state){const warmupFrom=Math.max(0,T.shift(T.start(config.startTime,tf),tf,-Math.max(80,(config.rsiPeriod||14)*3)));candles.push(...S.missing(state.candles.ranges,warmupFrom,T.start(config.startTime,tf)));}
+   }
+   const bucket=T.start(config.startTime,tf),firstExpected=bucket<config.startTime?T.end(bucket,tf):bucket;
+   if(!minute&&range.first>firstExpected&&!(config.allHistory&&data.oldestProvided?.[tf])&&!(Number.isFinite(knownListing)&&knownListing>=config.startTime&&range.first<=T.end(T.start(knownListing,tf),tf)))errors.push(tf+' 요청 시작 구간이 부족합니다.');
+  }
+  const interval=row=>row?.intervalSource==='official-history'&&Number.isFinite(row.intervalHours)&&row.intervalHours>0?Math.round(row.intervalHours*3600):null;
+  const step=(a,b)=>[3600,7200,14400,21600,28800,43200,86400].find(s=>Math.abs(b-a-s)<=60)??null;
+  const fundFrom=Math.max(0,Math.floor(config.startTime-Math.max(48*3600,Math.min(fundingLookback,Number(config.fundingWindowSeconds)||0))));
+  const fundGap=(a,b)=>{a=Math.max(a,fundFrom);b=Math.min(b,through);if(a<b)funding.push([a,b]);};
+  for(let i=1;i<rows.length;i++){
+   const before=rows[i-1].time,at=rows[i].time;if(at<=fundFrom||before>=through)continue;
+   const left=i>=2?step(rows[i-2].time,before):null,right=i+1<rows.length?step(at,rows[i+1].time):null;
+   const expected=interval(rows[i])??(left&&left===right?left:null);
+   if(expected&&at-before>expected+60)fundGap(before+expected-60,at);
+   else if(at-before>day+60)fundGap(before+1,at);
+  }
+  const past=rows.filter(r=>r.time<through),last=past.at(-1),prior=past.at(-2),older=past.at(-3),near=prior&&last?step(prior.time,last.time):null,preceding=older&&prior?step(older.time,prior.time):null;
+  const tail=interval(last)??(near&&near===preceding?near:null);
+  if(last&&tail&&last.time+tail+60<through)fundGap(last.time+tail-60,through);
+  if(data.fundingCoverage?.startMissing&&rows.length)fundGap(priceStart,rows[0].time);
+  if(data.fundingCoverage?.endMissing&&last)fundGap(last.time+1,through);
+  if(!last){errors.push('확정 펀딩 정산을 확인하지 못했습니다.');fundGap(Math.max(fundFrom,data.research?.checkedFrom??fundFrom),through);}
+  return {candles:S.ranges(candles),funding:S.ranges(funding),errors};
+ }
+ return {earliest,carryLegacy,cacheEntries,collect,scope,profile,executionProfile,canExtend,hasStoredMinutes,retainDataset,checkBatch,dataset,verifySnapshot};
 });

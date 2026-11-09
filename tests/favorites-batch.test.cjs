@@ -33,6 +33,35 @@ test('batch snapshots symbols, exchange, timeframe and end time, runs only one c
 test('cancel preserves completed results; resume recalculates only the interrupted and remaining coins',async()=>{
  let calls=[],b;const store=Cache.memory();b=Batch.create({store,execute:async(m,c,s)=>{calls.push(m.symbol);if(m.symbol==='BIRBUSDT'&&calls.length===2){b.pause();s.throwIfAborted();}return output(m,c);}});await b.start(markets,config);assert.equal(b.snapshot().status,'paused');assert.equal(b.snapshot().items[0].status,'done');await b.resume();assert.deepEqual(calls,['AKEUSDT','BIRBUSDT','BIRBUSDT','1000TOSHIUSDT']);assert.equal(b.snapshot().status,'done');
 });
+test('verified favorites overlap only two eligible calculations and keep the serial outcomes and order',async()=>{
+ const seen=[];let peak=0,active=0;
+ const execute=async(m,c)=>{
+  seen.push(m.symbol);active++;peak=Math.max(active,peak);
+  if(m.symbol===markets[2].symbol)assert.equal(active,1);
+  await tick();active--;
+  return {summary:{totalTrades:1,netPnl:m.symbol.length*c.splitCount},meta:{market:{ex:m.exchange,symbol:m.symbol,int:c.timeframe},config:c}};
+ };
+ const run=c=>Batch.create({store:Cache.memory(),execute,validateStrategy:(c,result)=>c.splitCount===result.splitCount,parallelPlan:c});
+ const settings={...config,verifyLatest:true,reuseCompleted:false,splitCount:7},serial=run();
+ await serial.start(markets,settings);assert.equal(peak,1);seen.length=0;
+ const fast=run(items=>items.slice(0,2).map(m=>m.exchange+':'+m.symbol));
+ await fast.start(markets,settings);assert.equal(peak,2);assert.deepEqual(seen,markets.map(m=>m.symbol));
+ assert.deepEqual(fast.snapshot().items,serial.snapshot().items);
+});
+test('a rate limit in a parallel group cancels its peer, preserves prior results and honors retryAt',async()=>{
+ let now=1000000,limited=true,cancelled=false;const calls=[];
+ const b=Batch.create({store:Cache.memory(),now:()=>now,parallelPlan:items=>items.slice(1).map(m=>m.exchange+':'+m.symbol),execute:async(m,c,s)=>{
+  calls.push(m.symbol);
+  if(limited&&m.symbol===markets[1].symbol){await tick();throw Object.assign(Error('quota'),{name:'RateLimitError',retryAt:now+60000});}
+  if(limited&&m.symbol===markets[2].symbol)await new Promise((resolve,reject)=>s.addEventListener('abort',()=>{cancelled=true;reject(s.reason);},{once:true}));
+  return output(m,c);
+ }});
+ await b.start(markets,config);assert.equal(cancelled,true);assert.equal(b.snapshot().status,'paused');
+ assert.deepEqual(b.snapshot().items.map(i=>i.status),['done','pending','pending']);
+ await assert.rejects(b.resume(),/대기/);
+ limited=false;now+=60001;await b.resume();
+ assert.equal(b.snapshot().status,'done');assert.deepEqual(calls,[...markets,...markets.slice(1)].map(m=>m.symbol));
+});
 test('rate limits pause the entire queue and honor retryAt; API errors do not become zero-trade successes',async()=>{
  let now=1000000,limited=true,calls=0;const b=Batch.create({store:Cache.memory(),now:()=>now,execute:async(m,c)=>{calls++;if(limited)throw Object.assign(Error('quota'),{name:'RateLimitError',retryAt:now+60000});return output(m,c);}});await b.start(markets,config);assert.equal(calls,1);assert.equal(b.snapshot().status,'paused');assert.equal(b.snapshot().items[0].status,'pending');await assert.rejects(b.resume(),/대기/);limited=false;now+=60001;await b.resume();assert.equal(b.snapshot().status,'done');
  const fail=Batch.create({store:Cache.memory(),execute:async()=>{throw Error('real API failure');}});await fail.start(markets,config);assert.equal(fail.snapshot().status,'partial');assert.ok(fail.snapshot().items.every(i=>i.status==='error'&&!i.summary));

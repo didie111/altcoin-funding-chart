@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict'),test=require('node:test'),fs=require('node:fs'),vm=require('node:vm');
 const S=require('../backtest-research-store.js'),H=require('../backtest-research.js'),File=require('../backtest-research-file.js'),C=require('../backtest-cache.js'),R=require('../backtest-results.js'),Batch=require('../backtest-batch.js'),B=require('../backtest-bars.js'),T=require('../timeframes.js'),E=require('../backtest-engine.js'),D=require('../backtest-data.js'),M=require('../dashboard-model.js');
 const day=86400,start=Date.UTC(2025,0,1)/1000,m={exchange:'BYBIT',symbol:'AKEUSDT'},base=E.normalizeConfig({timeframe:'3m',startTime:start,endTime:start+7*day,rsiPeriod:6,rsiOversold:30,splitCount:1,positionSizing:'budget',splitTrigger:'step_pct',stopLossPct:0});
-const minute=(time,i)=>{const open=100+6*Math.sin((i-1)/13),close=100+6*Math.sin(i/13);return {time,open,high:Math.max(open,close)+.3,low:Math.min(open,close)-.3,close,volume:1+i%17+.000000123456789};};
+const minute=(time,i)=>{const open=100+6*Math.sin((i-1)/13),close=100+6*Math.sin(i/13);return {time,open,high:Math.max(open,close)+.3,low:Math.min(open,close)-.3,close,volume:1+(i%17+17)%17+.000000123456789};};
 const candles=(from,to)=>Array.from({length:(to-from)/60},(_,i)=>minute(from+i*60,(from-start)/60+i));
 const funding=(from,to)=>Array.from({length:Math.floor((to-from)/3600)},(_,i)=>({time:from+i*3600,rate:i%3?-.61:-.51321,markPrice:101.00000123456789,intervalHours:1,intervalSource:'official-history'}));
 function source(rows,records){
@@ -128,6 +128,81 @@ test('an explicit fresh backtest extends a portable archive with only the missin
  assert.equal(outcome.output.meta.research.tailRefreshed,true);assert.deepEqual(worker.calls,{network:0,datasets:1,compute:1});
  assert.deepEqual(io.calls.map(c=>c.tf),['1m','funding']);assert.ok(io.calls.every(c=>c.edge>=end*1000));
  const state=await archive.state(m);assert.equal(state.completed.to,tail);assert.equal(state.candles.count,(tail-start)/60);assert.equal(state.funding.last,end);
+});
+
+test('verified archived execution keeps all trades, balances and current strategy and reuses an identical verified run',async()=>{
+ const archive=S.memory(),results=R.memory(),end=start+day,from=start-6*3600;
+ await seed(archive,m,from,end);
+ const worker=realWorker(archive,results),settings={...base,endTime:end,rsiOversold:50,splitCount:3,splitTrigger:'bar',dcaMethod:'cumulative',dcaMultipliers:[2,4],takeProfitPct:0,maxHoldBars:12,positionSizing:'first_entry',firstEntryAmount:300,feePct:.05,slippagePct:.03};
+ const original=await worker.run(settings);
+ const verified=await worker.run({...settings,researchOnly:false,verifyLatest:true});
+ assert.equal(original.error,undefined,original.error?.message);assert.equal(verified.error,undefined,verified.error?.message);
+ const a=original.output.result,b=verified.output.result;
+ assert.ok(a.trades.some(t=>t.entries.length===3));assert.deepEqual(b.trades.find(t=>t.entries.length===3).entries.map(e=>e.cost),[300,600,2400]);
+ for(const key of ['trades','signals','summary','equityCurve','warnings'])assert.deepEqual(b[key],a[key],key);
+ assert.equal(verified.output.meta.verification.through,end);
+ assert.deepEqual(worker.calls,{network:0,datasets:2,compute:2});
+ const repeated=await worker.run({...settings,researchOnly:false,verifyLatest:true});
+ assert.equal(repeated.error,undefined,repeated.error?.message);
+ assert.equal(repeated.output.meta.reuse.networkRequests,0);assert.equal(repeated.output.meta.verification.through,end);
+ assert.deepEqual(repeated.output.result.trades,b.trades);assert.deepEqual(worker.calls,{network:0,datasets:2,compute:2});
+});
+
+test('verified execution repairs actual archived candle and settlement gaps without downloading the whole history',async()=>{
+ const archive=S.memory(),complete=S.memory(),end=start+day,from=start-6*3600,candleGap=start+192*60,fundingGap=start+7*3600;
+ const {bars,records}=await seed(complete,m,from,end);
+ await seed(archive,m,from,end,{bars:bars.filter(r=>r.time!==candleGap),records:records.filter(r=>r.time!==fundingGap)});
+ const io=source(bars,records),worker=realWorker(archive,R.memory(),io),config={...base,endTime:end,researchOnly:false,verifyLatest:true};
+ const expected=await realWorker(complete,R.memory()).run(config),repaired=await worker.run(config);
+ assert.equal(expected.error,undefined,expected.error?.message);assert.equal(repaired.error,undefined,repaired.error?.message);
+ assert.deepEqual(repaired.output.result.trades,expected.output.result.trades);
+ assert.deepEqual(repaired.output.result.summary,expected.output.result.summary);
+ assert.equal(repaired.output.meta.research.gapsFilled,true);
+ assert.deepEqual(io.calls.map(c=>[c.tf,c.edge]),[['1m',(candleGap+60)*1000-1],['funding',(fundingGap+3600)*1000-1]]);
+ assert.deepEqual(worker.calls,{network:0,datasets:2,compute:1});
+ assert.equal((await archive.state(m)).candles.count,bars.length);
+ assert.equal((await archive.state(m)).funding.count,records.length);
+});
+
+test('verified execution preserves the requested cutoff and never publishes a result for a persistent raw-data gap',async()=>{
+ const archive=S.memory(),results=R.memory(),end=start+day,from=start-6*3600,gap=start+180*60;
+ const {bars,records}=await seed(archive,m,from,end,{bars:candles(from,end).filter(r=>r.time!==gap)});
+ const io=source(bars,records),worker=realWorker(archive,results,io),config={...base,endTime:end,researchOnly:false,verifyLatest:true};
+ const saved=await worker.run({...config,verifyLatest:false,reuseCompleted:true});
+ assert.equal(saved.error,undefined,saved.error?.message);
+ const before=worker.calls.compute,blocked=await worker.run(config);
+ assert.equal(blocked.error?.name,'DataCoverageError');assert.match(blocked.error.message,/1분봉 1구간/);
+ assert.equal(blocked.output,undefined);assert.equal(worker.calls.compute,before);
+ const behind=await worker.run({...config,endTime:end+60});
+ assert.equal(behind.error?.name,'DataCoverageError');assert.match(behind.error.message,/확정 시점까지/);
+ assert.equal(behind.output,undefined);assert.equal(worker.calls.compute,before);
+});
+
+test('a missing RSI preparation range is repaired without shortening the strategy period',async()=>{
+ const archive=S.memory(),end=start+day,from=start-6*3600;
+ const {records}=await seed(archive,m,start,end);
+ const io=source(candles(from,end),records),worker=realWorker(archive,R.memory(),io);
+ const out=await worker.run({...base,endTime:end,verifyLatest:true,researchOnly:false});
+ assert.equal(out.error,undefined,out.error?.message);
+ assert.equal(out.output.result.config.startTime,start);assert.equal(out.output.meta.coverage['3m'].warmup,80);
+ assert.deepEqual(io.calls.map(c=>[c.tf,c.edge]),[['1m',start*1000-1]]);
+});
+
+test('a confirmed change in settlement interval is not treated as an empty funding window',()=>{
+ const records=[{time:start-8*3600,intervalHours:4},{time:start-4*3600,intervalHours:4},{time:start,intervalHours:4},{time:start+8*3600,intervalHours:8},{time:start+16*3600,intervalHours:8}].map(r=>({...r,rate:-.6,intervalSource:'official-history'}));
+ const end=start+17*3600,data={endTime:end,coverage:{'3m':{first:start}},fundingRecords:records};
+ assert.deepEqual(H.verifySnapshot(data,{...base,endTime:end}),{candles:[],funding:[],errors:[]});
+ assert.deepEqual(H.verifySnapshot({...data,fundingRecords:records.filter(r=>r.time!==start+8*3600)},{...base,endTime:end}).funding,[[start+8*3600-60,start+16*3600]]);
+});
+
+test('a cold verified run distinguishes the earliest provided history from a missing start of a fixed period',async()=>{
+ const end=start+day,first=start+60,io=source(candles(first,end),funding(start-2*day,end));
+ const data=await D.create(io).loadBacktestDataset(m.symbol,{exchange:m.exchange,intervals:['1m'],packed:true,verifyLatest:true,startTime:start,endTime:end});
+ const settings={...base,timeframe:'1m',endTime:end};
+ assert.equal(data.oldestProvided['1m'],true);
+ assert.match(H.verifySnapshot(data,settings).errors.join(' '),/요청 시작 구간/);
+ assert.deepEqual(H.verifySnapshot(data,{...settings,allHistory:true}),{candles:[],funding:[],errors:[]});
+ assert.deepEqual(H.verifySnapshot(data,settings,{knownListing:first}),{candles:[],funding:[],errors:[]});
 });
 
 test('ordinary one-minute execution fills only the gaps in restored legacy candle and funding fragments',async()=>{
