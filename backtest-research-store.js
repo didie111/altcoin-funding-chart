@@ -50,7 +50,12 @@
   if(Number.isFinite(hours)&&hours>0&&hours<=24){row.intervalHours=hours;if(typeof r.intervalSource==='string'&&r.intervalSource.length<=40)row.intervalSource=r.intervalSource;}
   return row;
  }
- function rowAt(values,i,target={}){const p=i*6;for(let j=0;j<6;j++)target[columns[j]]=values[p+j];return target;}
+ function rowAt(values,i,target={}){
+  const p=i*6;
+  target.time=values[p];target.open=values[p+1];target.high=values[p+2];
+  target.low=values[p+3];target.close=values[p+4];target.volume=values[p+5];
+  return target;
+ }
  function normalizeRows(kind,rows){
   const map=new Map();
   for(const r of rows||[]){if(kind==='candles'&&!validCandle(r))throw Error('1분봉 원본의 가격·거래량·시간이 올바르지 않습니다.');map.set(r.time,kind==='candles'?r:fundingRow(r));}
