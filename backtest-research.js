@@ -1,6 +1,7 @@
 (function(root,factory){
  'use strict';
- const c=typeof module==='object'&&module.exports,api=factory(c?require('./backtest-research-store.js'):root.BacktestResearchStore,c?require('./timeframes.js'):root.TimeframeEngine,c?require('./backtest-bars.js'):root.BacktestBars,c?require('./funding.js'):root.FundingEngine);
+ // funding.js declares a classic-script binding, not a property on globalThis.
+ const c=typeof module==='object'&&module.exports,api=factory(c?require('./backtest-research-store.js'):root.BacktestResearchStore,c?require('./timeframes.js'):root.TimeframeEngine,c?require('./backtest-bars.js'):root.BacktestBars,c?require('./funding.js'):FundingEngine);
  if(c)module.exports=api;else root.BacktestResearch=api;
 })(globalThis,function(S,T,B,F){
  'use strict';

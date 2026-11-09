@@ -53,7 +53,7 @@
   async function execute(item,c,signal,onProgress,detail=false,strictSnapshot=false,purpose='backtest'){
    if(purpose==='backtest'&&c.timeframe!=='all'&&!c.researchOnly&&root.BacktestResults&&(strictSnapshot&&detail||c.reuseCompleted!==false)){signal.throwIfAborted();const store=await resultsPromise,heads=await store.find(item,c,{snapshot:!strictSnapshot}),output=(detail&&heads||root.BacktestResults.readyFor(heads,c,strictSnapshot))?await root.BacktestResults.fromHeads(store,heads,c,{detail}):null;signal.throwIfAborted();if(output){onProgress({phase:'reuse',text:'저장된 완료 결과 · 원본 재조회 0회 · 재계산 없음'});return output;}}
    return new Promise((resolve,reject)=>{
-    signal.throwIfAborted();clearTimeout(workerTimer);const id=++serial,task=worker??=new Worker('backtest-batch-worker.js?v=20261109-show-saved-strategy-1');let settled=false;
+    signal.throwIfAborted();clearTimeout(workerTimer);const id=++serial,task=worker??=new Worker('backtest-batch-worker.js?v=20261109-funding-backup-fix-1');let settled=false;
     const hosts={BINANCE:'fapi.binance.com',BYBIT:'api.bybit.com',BINGX:'open-api.bingx.com',BITGET:'api.bitget.com',MEXC:'api.mexc.com',OKX:'www.okx.com'},retry=event=>{if(event.detail.host===hosts[item.exchange])onProgress({phase:'wait',...event.detail});};
     const finish=(fn,value)=>{if(settled)return;settled=true;signal.removeEventListener('abort',abort);root.removeEventListener('market-api-wait',retry);task.onmessage=null;task.onerror=null;if(fn===resolve)workerTimer=setTimeout(stopWorker,25000);else stopWorker();fn(value);},abort=()=>finish(reject,signal.reason);signal.addEventListener('abort',abort,{once:true});root.addEventListener('market-api-wait',retry);
     task.onmessage=async event=>{

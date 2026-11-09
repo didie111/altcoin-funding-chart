@@ -5,7 +5,7 @@
 })(globalThis,function(root,S,A,Backup){
  'use strict';
  const enc=new TextEncoder(),dec=new TextDecoder('utf-8',{fatal:true}),magic=enc.encode('FUNDING-RESEARCH-1\n'),endMagic=enc.encode('FUNDING-RESEARCH-END\n'),metaLimit=16*1048576,legacyLimit=160*1048576,downloadLimit=128*1048576,descriptorLimit=4096;
- const u32=n=>{const a=new Uint8Array(4);new DataView(a.buffer).setUint32(0,n,true);return a;},equal=(a,b)=>a.length===b.length&&a.every((v,i)=>v===b[i]),json=value=>enc.encode(JSON.stringify(value));
+ const u32=n=>{const a=new Uint8Array(4);new DataView(a.buffer).setUint32(0,n,true);return a;},equal=(a,b)=>a.length===b.length&&a.every((v,i)=>v===b[i]),json=value=>enc.encode(JSON.stringify(value)),scriptURL=root.document?.currentScript?.src;
  const aborted=()=>new AbortController().signal;
  function join(a,b){const out=new Uint8Array(a.length+b.length);out.set(a);out.set(b,a.length);return out;}
  async function isResearch(file){return file.size>=magic.length&&equal(new Uint8Array(await file.slice(0,magic.length).arrayBuffer()),magic);}
@@ -20,7 +20,9 @@
    signal.throwIfAborted();const record=await store.readBlock(key);if(!record)throw Error('백업 도중 원본 블록을 읽을 수 없습니다.');
    const {head,bytes:body}=record,SHA=await A.sha256(join(json(head),body)),descriptor=json({head,SHA});
    if(descriptor.length>descriptorLimit)throw Error('원본 블록 설명이 너무 큽니다.');
-   await part(u32(descriptor.length));await part(descriptor);await part(body);
+   const block=new Uint8Array(4+descriptor.length+body.length);
+   block.set(u32(descriptor.length));block.set(descriptor,4);block.set(body,4+descriptor.length);
+   await part(block);
    blocks++;if(blocks===keys.length||blocks%16===0)onProgress({phase:'archive-export',blocks,total:keys.length,bytes});
   }
   await part(u32(blocks));await part(endMagic);return {blocks,markets:states.filter(s=>s.candles.count||s.funding.count).length,bytes};
@@ -57,9 +59,53 @@
   await store.importStates(states);return {legacy,blocks:info.blocks,markets:counts.size,bytes:file.size};
  }
  function filename(now=Date.now()){return Backup.filename(now).replace('funding-chart-backup-','funding-chart-research-');}
- function download(environment,doc,file,name,cleanup=()=>{}){
-  const url=environment.URL.createObjectURL(file),link=doc.createElement('a');link.href=url;link.download=name;doc.body.append(link);
-  try{link.click();}finally{link.remove();environment.setTimeout(()=>{environment.URL.revokeObjectURL(url);void cleanup();},600000);}
+ function download(environment,doc,file,name,cleanup){
+  const url=environment.URL.createObjectURL(file);let link;
+  try{link=doc.createElement('a');link.href=url;link.download=name;doc.body.append(link);link.click();}
+  catch(error){environment.URL.revokeObjectURL(url);throw error;}
+  finally{link?.remove();}
+  // The download may still be reading the disk-backed parts after link.click().
+  environment.setTimeout(()=>{environment.URL.revokeObjectURL(url);void cleanup?.();},cleanup?3600000:600000);
+ }
+ class OutputError extends Error{constructor(cause){super(cause.message,{cause});}}
+ async function output(action){try{return await action();}catch(error){throw new OutputError(error);}}
+ async function writeTo(open,produce,signal){
+  let sink;
+  try{
+   signal.throwIfAborted();sink=await output(open);
+   const raw=await produce({write:value=>output(()=>sink.write(value))});
+   signal.throwIfAborted();const file=await output(()=>sink.close());return {raw,file};
+  }catch(error){try{await sink?.abort?.();}catch{}signal.throwIfAborted();throw error;}
+ }
+ async function stagingSink(environment,doc,signal){
+  const name='tmp-research-export-v2-'+Date.now()+'-'+Math.random().toString(36).slice(2);
+  const worker=new environment.Worker(new URL('backtest-export-worker.js?v=20261109-funding-backup-fix-1',scriptURL||doc.baseURI).href);
+  let pending,id=0,stopped=false;
+  const cleanup=async()=>{try{const dir=await environment.navigator.storage.getDirectory();await dir.removeEntry(name,{recursive:true});}catch{}};
+  function stop(error){
+   if(stopped)return;stopped=true;worker.terminate();signal.removeEventListener('abort',cancel);
+   if(pending){const reply=pending;pending=null;reply.reject(error);}
+  }
+  function cancel(){stop(signal.reason);}
+  worker.onerror=event=>{event.preventDefault?.();stop(event.error||Error(event.message||'백업 임시 저장을 시작하지 못했습니다.'));};
+  worker.onmessageerror=()=>stop(Error('백업 임시 파일을 읽을 수 없습니다.'));
+  worker.onmessage=({data})=>{
+   if(pending?.id!==data.id)return;
+   const reply=pending;pending=null;
+   if(data.error)reply.reject(Object.assign(Error(data.error.message),{name:data.error.name}));else reply.resolve(data.output);
+  };
+  function send(op,params={}){
+   return new Promise((resolve,reject)=>{
+    signal.throwIfAborted();if(stopped)throw Error('백업 임시 저장이 중단되었습니다.');
+    pending={id:++id,resolve,reject};
+    try{worker.postMessage({id,op,...params});}catch(error){pending=null;throw error;}
+   });
+  }
+  signal.addEventListener('abort',cancel,{once:true});
+  async function abort(){stop();await cleanup();}
+  try{await send('open',{name});}
+  catch(error){await abort();throw error;}
+  return {write:value=>send('write',{value}),async close(){const {files}=await send('close');stop();return new Blob(files,{type:'application/octet-stream'});},abort,cleanup};
  }
  async function save(store,readLegacy,{environment=root,document=environment.document,onProgress=()=>{},signal=aborted(),optional=false,name=optional?Backup.filename():filename()}={}){
   let selection;
@@ -70,27 +116,40 @@
   const chosen=selection?await selection:null;if(chosen?.error?.name==='AbortError')throw chosen.error;
   signal.throwIfAborted();const source=await store,snapshot=await source?.snapshot(),includeRaw=Boolean(snapshot?.keys.length);
   if(!includeRaw&&!optional)throw Error('보관된 원본이 없습니다. 먼저 원본 수집·이어서를 실행하세요.');
-  const legacy=await readLegacy(includeRaw);let sink,dir,temp,handle=chosen?.handle,parts=null;
-  try{
-   if(!handle&&includeRaw&&environment.navigator?.storage?.getDirectory){
-    try{
-     dir=await environment.navigator.storage.getDirectory();
-     if(typeof dir.entries==='function')for await(const [key,entry] of dir.entries()){if(key.startsWith('tmp-research-export-')&&entry.kind==='file'){try{const old=await entry.getFile();if(Date.now()-old.lastModified>86400000)await dir.removeEntry(key);}catch{}}}
-     temp='tmp-research-export-'+Date.now()+'-'+Math.random().toString(36).slice(2)+'.dat';
-     const target=await dir.getFileHandle(temp,{create:true});if(typeof target.createWritable==='function')handle=target;
-    }catch(error){if(error.name==='QuotaExceededError')throw error;dir=null;temp=null;}
-   }
-   if(handle)sink=await handle.createWritable();
-   else{let size=0;parts=[];sink={write(p){size+=p.size??p.byteLength;if(size>(includeRaw?downloadLimit:legacyLimit))throw Error('이 브라우저는 큰 원본 파일을 바로 저장할 수 없습니다. Chrome·Edge 등 파일 저장 창을 지원하는 브라우저에서 원본 포함 백업을 실행하세요.');parts.push(p);},close(){},abort(){parts.length=0;}};}
-   let raw;
-   if(includeRaw)raw=await write(source,legacy,sink,{signal,onProgress,snapshot});
-   else{const file=await Backup.blob(legacy);await sink.write(file);raw={blocks:0,markets:0,bytes:file.size};}
-   await sink.close();
-   const result={...raw,includesRaw:includeRaw,favorites:legacy.favorites?.length||0,jobs:legacy.jobs.length,completedResults:legacy.completedResults?.entries?.length||0};
-   if(chosen?.handle)return {...result,method:'file'};
-   const file=parts?new Blob(parts,{type:'application/octet-stream'}):await handle.getFile(),cleanup=async()=>{if(dir&&temp)try{await dir.removeEntry(temp);}catch{}};
-   download(environment,document,file,name,cleanup);return {...result,method:'download'};
-  }catch(error){try{await sink?.abort?.();}catch{}if(dir&&temp)try{await dir.removeEntry(temp);}catch{}throw error;}
+  const legacy=await readLegacy(includeRaw);
+  const produce=async sink=>{
+   if(includeRaw)return write(source,legacy,sink,{signal,onProgress,snapshot});
+   signal.throwIfAborted();const file=await Backup.blob(legacy);await sink.write(file);return {blocks:0,markets:0,bytes:file.size};
+  };
+  const result=(raw,method)=>({...raw,includesRaw:includeRaw,favorites:legacy.favorites?.length||0,jobs:legacy.jobs.length,completedResults:legacy.completedResults?.entries?.length||0,method});
+  let storageError=chosen?.error;
+  const failed=error=>{signal.throwIfAborted();if(!(error instanceof OutputError))throw error;storageError=error.cause;};
+  if(chosen?.handle){
+   try{const {raw}=await writeTo(()=>chosen.handle.createWritable(),produce,signal);return result(raw,'file');}
+   catch(error){failed(error);}
+  }
+  if(includeRaw&&environment.Worker&&environment.navigator?.storage?.getDirectory&&document){
+   let stage;
+   try{
+    onProgress({phase:'archive-staging'});
+    const {raw,file}=await writeTo(async()=>stage=await stagingSink(environment,document,signal),produce,signal);
+    try{signal.throwIfAborted();await output(()=>download(environment,document,file,name,stage.cleanup));}
+    catch(error){await stage.cleanup();throw error;}
+    return result(raw,'download');
+   }catch(error){failed(error);}
+  }
+  if(!includeRaw||snapshot.states.reduce((n,s)=>n+s.bytes,0)<=downloadLimit){
+   const parts=[],limit=includeRaw?downloadLimit:legacyLimit;let size=0;
+   try{
+    const {raw,file}=await writeTo(()=>({
+     write(p){size+=p.size??p.byteLength;if(size>limit)throw Error('백업 파일이 브라우저의 직접 다운로드 한도를 넘었습니다.');parts.push(p);},
+     close:()=>new Blob(parts,{type:'application/octet-stream'}),abort:()=>{parts.length=0;}
+    }),produce,signal);
+    await output(()=>download(environment,document,file,name));return result(raw,'download');
+   }catch(error){failed(error);}
+  }
+  if(storageError?.name==='QuotaExceededError')throw Error('백업 파일을 만들 공간이 부족합니다. 디스크 여유 공간을 확보한 뒤 다시 저장하세요. 이미 보관한 원본은 유지됩니다.',{cause:storageError});
+  throw Error('백업 파일을 저장할 수 없습니다. 다운로드 폴더에 파일을 쓸 수 있는지와 디스크 여유 공간을 확인한 뒤 다시 시도하세요. 이미 보관한 원본은 유지됩니다.',{cause:storageError});
  }
  return {isResearch,write,restore,filename,save};
 });
