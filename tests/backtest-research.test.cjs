@@ -152,6 +152,57 @@ test('the same backup action falls back to a valid result file when no raw block
  const file=new Blob(written);assert.equal(result.includesRaw,false);assert.equal(await File.isResearch(file),false);assert.deepEqual(JSON.parse(await file.text()),legacy());
 });
 
+test('a refused native write switches to disk-backed worker parts and produces one restorable backup',async()=>{
+ const src=S.memory(),dst=S.memory();await seed(src,m,start,start+day);
+ const before=(await src.state(m)).signature,partSize=4096,parts=[],dirs=new Map(),removed=[],progress=[];
+ let saved,downloaded=0,aborts=0,directWrites=0,shortWrites=0,cleanup,terminations=0;
+ dirs.set('unrelated-origin-data',{kind:'directory'});
+ const stale='tmp-research-export-'+(Date.now()-2*day*1000)+'-test.dat';dirs.set(stale,{kind:'file'});
+ const dir={
+  async *entries(){yield* dirs;},
+  async getDirectoryHandle(name){
+   const handle={kind:'directory',async getFileHandle(){
+    let size=0;const body=new Uint8Array(partSize),entry={
+     async createSyncAccessHandle(){return {write(chunk,{at}){assert.equal(at,size);const count=Math.min(733,chunk.length);if(count<chunk.length)shortWrites++;body.set(chunk.subarray(0,count),at);size+=count;return count;},flush(){},close(){}};},
+     async getFile(){return new Blob([body.subarray(0,size)]);}
+    };parts.push(entry);return entry;
+   }};
+   dirs.set(name,handle);return handle;
+  },
+  async removeEntry(name){dirs.delete(name);removed.push(name);}
+ };
+ const navigator={storage:{getDirectory:async()=>dir}};
+ const environment={
+  navigator,showSaveFilePicker:async()=>({async createWritable(){return {
+   write(){if(++directWrites===8)throw new DOMException('Cannot modify the file','NoModificationAllowedError');},
+   close(){assert.fail('The rejected write must not commit');},abort(){aborts++;}
+  };}}),
+  document:{baseURI:'https://example.test/project/index.html',body:{append(){}},createElement(){return {click(){assert.match(this.download,/\.dat$/);downloaded++;},remove(){}};}},
+  URL:{createObjectURL(file){saved=file;return 'blob:fixture';},revokeObjectURL(){}},setTimeout(fn){cleanup=fn;},
+  Worker:class{
+   constructor(url){
+    assert.match(url,/\/project\/backtest-export-worker\.js\?/);
+    this.ctx=vm.createContext({navigator,Blob,Uint8Array,onmessage:null,postMessage:data=>this.onmessage({data})});
+    vm.runInContext(fs.readFileSync(require.resolve('../backtest-export-worker.js'),'utf8'),this.ctx);
+   }
+   postMessage(message){void this.ctx.onmessage({data:{...message,limit:partSize}});}
+   terminate(){terminations++;}
+  }
+ };
+ const savedInfo=await File.save(src,async()=>legacy(),{environment,onProgress:p=>progress.push(p.phase)});
+ assert.deepEqual({method:savedInfo.method,bytes:savedInfo.bytes,aborts,downloaded,terminations},{method:'download',bytes:saved.size,aborts:1,downloaded:1,terminations:1});
+ assert.ok(parts.length>1&&shortWrites>0);assert.ok(progress.includes('archive-staging'));assert.deepEqual(removed,[stale]);assert.ok(dirs.has('unrelated-origin-data'));
+ assert.equal((await File.restore(saved,dst)).markets,1);assert.equal((await dst.state(m)).signature,before);assert.equal((await src.state(m)).signature,before);
+ cleanup();await Promise.resolve();assert.equal(dirs.size,1);assert.ok(dirs.has('unrelated-origin-data'));
+});
+
+test('canceling the native file picker never starts another download',async()=>{
+ let opened=false;
+ const environment={showSaveFilePicker:async()=>{throw new DOMException('Canceled','AbortError');},Worker:class{constructor(){assert.fail('Canceled picker must not start a worker');}}};
+ await assert.rejects(File.save({snapshot(){opened=true;}},async()=>legacy(),{environment}),{name:'AbortError'});
+ assert.equal(opened,false);
+});
+
 test('a restored all-timeframe batch reuses all 143 recorded summaries with no worker, but a changed split never reuses 10-entry results',async()=>{
  const store=C.memory(),config={...base,timeframe:'all',startTime:H.earliest,cacheRangeEnd:'latest',splitCount:10,reuseCompleted:true},markets=Array.from({length:143},(_,i)=>({exchange:'BYBIT',symbol:'TEST'+i+'USDT'})),s={totalTrades:4,netPnl:2,totalReturnPct:1,timeframe:'3m'};
  // Older backup includes genuine comparisons but no complete detail cache.

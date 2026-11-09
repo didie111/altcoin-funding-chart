@@ -11,7 +11,7 @@
   }
   function status(text,error=false){$('btResearchStatus').textContent=text;$('btResearchStatus').classList.toggle('bt-error',error);batchStatus(text,error);}
   function progress(p){$('btResearchProgress').hidden=false;$('btResearchProgress').max=Math.max(1,p.total);$('btResearchProgress').value=p.count;}
-  function fileProgress(p){const verb=p.phase==='archive-import'?'복원':'저장';progress({count:p.blocks,total:p.total});status('원본 '+verb+' 중 · '+fmt(p.blocks,0)+' / '+fmt(p.total,0)+'묶음 · '+fmt(p.bytes/1048576,1)+'MiB');}
+  function fileProgress(p){if(p.phase==='archive-staging'){$('btResearchProgress').hidden=true;status('원본 백업 파일을 다운로드용으로 준비 중…');return;}const verb=p.phase==='archive-import'?'복원':'저장';progress({count:p.blocks,total:p.total});status('원본 '+verb+' 중 · '+fmt(p.blocks,0)+' / '+fmt(p.total,0)+'묶음 · '+fmt(p.bytes/1048576,1)+'MiB');}
   async function refresh(){
    const id=++refreshId;
    try{
