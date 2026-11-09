@@ -13,6 +13,28 @@ test('martingale uses 10, 10, 20, 40, 80 dollars and never allocates more than t
  assert.deepEqual(t.entries.map(e=>Math.round(e.cost)),[10,10,20,40,80]);assert.equal(t.totalCost,160);assert.equal(t.avgEntryPrice,100);
  assert.throws(()=>E.normalizeConfig({initialCapital:100,splitCount:5,dcaMethod:'martingale',positionSizing:'first_entry',firstEntryAmount:10}),/초과/);
 });
+test('10 cumulative entries respect the assigned budget, successive ratios and fees',()=>{
+ const dcaMultipliers=[2,4,4,2,1,1,1,1,1],s=scenario({initialCapital:10000,allocationPerTradePct:80,splitCount:10,dcaMethod:'cumulative',dcaMultipliers,feePct:.05});
+ for(let i=12;i<16;i++)s.bars.push({...s.bars.at(-1),time:base+i*60});
+ const t=first(s);assert.equal(t.dcaSteps,10);assert.equal(t.totalCost,8000);assert.ok(t.entryFees>0);
+ assert.ok(Math.abs(t.entries[0].cost-8000/427)<1e-10);
+ for(const [i,multiple] of dcaMultipliers.entries())assert.ok(Math.abs(t.entries[i+1].cost/t.entries[i].cost-multiple)<1e-10,'entry '+(i+2));
+ const extreme=first({...s,config:{...s.config,initialCapital:1,allocationPerTradePct:100,dcaMultipliers:Array(9).fill(10)}});
+ assert.equal(extreme.totalCost,1);assert.ok(extreme.entries.every(e=>e.cost>0));
+});
+test('a fixed first cumulative entry stays exact, and the plan identifies the first unaffordable round',()=>{
+ const s=scenario({initialCapital:10000,splitCount:3,dcaMethod:'cumulative',dcaMultipliers:[2,2],positionSizing:'first_entry',firstEntryAmount:1000});
+ const t=first(s);assert.deepEqual(t.entries.map(e=>e.cost),[1000,2000,4000]);assert.equal(t.totalCost,7000);
+ const single=first({...s,config:{...s.config,splitCount:0}});assert.deepEqual(single.entries.map(e=>e.cost),[1000]);
+ assert.throws(()=>E.normalizeConfig({...s.config,dcaMultipliers:[2,4]}),/3회차.*11,000 USDT/);
+ assert.throws(()=>E.normalizeConfig({...s.config,dcaMultipliers:[0,2]}),/2회차 배수/);
+ assert.throws(()=>E.normalizeConfig({...s.config,dcaMultipliers:[2,11]}),/3회차 배수/);
+});
+test('condition search compares other inputs without inventing rounds for a chosen multiplier plan',()=>{
+ const s=scenario({splitCount:3,dcaMethod:'cumulative',dcaMultipliers:[1,2]});
+ const out=E.optimizeStrategy(s.bars,s.funding,{baseConfig:s.config,splitCounts:[1,5,10],rsiOversolds:[20,30],takeProfitPcts:[0],stopLossPcts:[0],splitTriggers:['bar'],minTrades:1});
+ assert.equal(out.totalEvaluated,2);assert.equal(out.topRankings.length,2);assert.ok(out.topRankings.every(row=>row.params.splitCount===3));
+});
 test('stop monitoring starts on the first fill or only once all planned fills complete',()=>{
  const changes={4:{open:97,high:98,low:96,close:97},5:{open:94,high:95,low:93,close:94}},opts={splitCount:3,stopLossPct:1};
  const a=first(scenario({...opts,stopLossMode:'immediate'},changes)),b=first(scenario({...opts,stopLossMode:'after_all_dca'},changes));

@@ -10,15 +10,50 @@
   for(const [key,min,max,int]of [['rsiPeriod',2,200,true],['rsiOversold',1,99],['rsiExitLevel',1,99],['splitCount',0,10,true],['splitStepPct',.01,99],['takeProfitPct',0,10000],['stopLossPct',0,99.99],['feePct',0,10],['slippagePct',0,10],['initialCapital',1,1e12],['allocationPerTradePct',.01,100],['firstEntryAmount',.01,1e12],['maxHoldBars',0,1000000,true],['entryCooldownBars',0,1000000,true],['fundingIntervalHours',0,24],['fundingWindowSeconds',0,864000],['fundingTransitionLookbackSeconds',0,86400],['minFundingRate',-100,100]]){if(c[key]===null&&key==='stopLossPct')c[key]=0;number(key,min,max,int);}
   if(c.maxFundingRate!==null){number('maxFundingRate',-100,100);if(c.maxFundingRate>c.minFundingRate)throw Error('음펀비 범위의 순서를 확인하세요.');}
   if(!T.seconds[c.timeframe])throw Error('지원하지 않는 타임프레임입니다.');
-  for(const [key,choices]of Object.entries({fundingIntervalBasis:['known','chart'],entryTrigger:['rsi_cross_up','rsi_oversold'],splitTrigger:['rsi_cross_up','rsi_cross_up_1m','rsi_oversold','step_pct','bar'],dcaMethod:['equal','martingale'],stopLossMode:['immediate','after_all_dca'],exitType:['tp_sl','rsi_rebound','settle_exit','composite'],positionSizing:['budget','first_entry'],rsiSource:['close','open','high','low','hl2','hlc3','ohlc4','hlcc4']}))if(!choices.includes(c[key]))throw Error(key+' 옵션이 올바르지 않습니다.');
+  for(const [key,choices]of Object.entries({fundingIntervalBasis:['known','chart'],entryTrigger:['rsi_cross_up','rsi_oversold'],splitTrigger:['rsi_cross_up','rsi_cross_up_1m','rsi_oversold','step_pct','bar'],dcaMethod:['equal','martingale','cumulative'],stopLossMode:['immediate','after_all_dca'],exitType:['tp_sl','rsi_rebound','settle_exit','composite'],positionSizing:['budget','first_entry'],rsiSource:['close','open','high','low','hl2','hlc3','ohlc4','hlcc4']}))if(!choices.includes(c[key]))throw Error(key+' 옵션이 올바르지 않습니다.');
   c.includeFundingPayment=c.includeFundingPayment!==false;
   c.oneEntryPerFunding=c.oneEntryPerFunding===true;c.requireFreshFundingAfterCooldown=c.requireFreshFundingAfterCooldown===true;
   for(const key of ['startTime','endTime'])if(c[key]!==undefined&&!Number.isFinite(c[key]))throw Error('기간을 확인하세요.');
   if(c.startTime!==undefined&&c.endTime!==undefined&&c.startTime>=c.endTime)throw Error('테스트 기간을 확인하세요.');
-  if(c.positionSizing==='first_entry'&&getStepWeights(c.splitCount,c.dcaMethod).reduce((a,b)=>a+b,0)*c.firstEntryAmount>c.initialCapital+1e-8)throw Error('분할에 필요한 총금액이 초기 자본을 초과합니다.');
+  if(c.dcaMethod==='cumulative')c.dcaMultipliers=roundMultipliers(c.splitCount,c.dcaMultipliers);
+  else delete c.dcaMultipliers;
+  if(c.positionSizing==='first_entry'&&getStepWeights(c.splitCount,c.dcaMethod,c.dcaMultipliers).reduce((a,b)=>a+b,0)*c.firstEntryAmount>c.initialCapital+1e-8)throw Error(c.dcaMethod==='cumulative'?getAllocationPlan(c).message:'분할에 필요한 총금액이 초기 자본을 초과합니다.');
   return c;
  }
- function getStepWeights(count,method='equal'){count=Math.max(1,Math.min(10,Number(count)||1));return Array.from({length:count},(_,i)=>method==='martingale'?(i<2?1:2**(i-1)):1);}
+ function roundMultipliers(count,values=[]){
+  if(!Array.isArray(values)||values.length>9)throw Error('2~10회차 배수 목록을 확인하세요.');
+  return Array.from({length:Math.max(0,count-1)},(_,i)=>{
+   const value=values[i]===undefined?1:values[i];
+   if(!Number.isInteger(value)||value<1||value>10)throw Error((i+2)+'회차 배수는 1~10 사이 정수로 지정하세요.');
+   return value;
+  });
+ }
+ function getStepWeights(count,method='equal',multipliers){
+  count=Math.max(1,Math.min(10,Number(count)||1));
+  if(method==='cumulative'){let weight=1;return [1,...roundMultipliers(count,multipliers).map(value=>weight*=value)];}
+  return Array.from({length:count},(_,i)=>method==='martingale'?(i<2?1:2**(i-1)):1);
+ }
+ const positionBudget=(c,capital,sum)=>c.positionSizing==='first_entry'?c.firstEntryAmount*sum:capital*c.allocationPerTradePct/100;
+ function entryBudget(c,budget,weights,sum,index,used){
+  if(c.dcaMethod==='cumulative'){
+   if(c.positionSizing==='first_entry')return c.firstEntryAmount*weights[index];
+   if(index===weights.length-1)return budget-used;
+  }
+  return budget*weights[index]/sum;
+ }
+ function getAllocationPlan(c){
+  const weights=getStepWeights(c.splitCount,c.dcaMethod,c.dcaMultipliers),sum=weights.reduce((a,b)=>a+b,0),budget=positionBudget(c,c.initialCapital,sum);
+  let used=0,excessStep=0;
+  const exceeds=c.positionSizing==='first_entry'&&budget>c.initialCapital+1e-8;
+  const amounts=weights.map((_,i)=>{
+   const amount=entryBudget(c,budget,weights,sum,i,used);used+=amount;
+   if(exceeds&&!excessStep&&used>c.initialCapital+1e-8)excessStep=i+1;
+   return amount;
+  });
+  if(exceeds&&!excessStep)excessStep=amounts.length;
+  const format=value=>value.toLocaleString('en-US',{maximumFractionDigits:8});
+  return {amounts,budget,excessStep,message:excessStep?excessStep+'회차에서 초기 자본을 초과합니다. 총 '+format(budget)+' USDT 필요 · 초기 자본 '+format(c.initialCapital)+' USDT. 첫 진입금액이나 배수를 줄이세요.':''};
+ }
  function normalizeFunding(records){
   const unique=new Map();for(const row of records||[]){if(!Number.isFinite(row.time)||!Number.isFinite(row.rate))throw Error('펀딩비 기록 값이 올바르지 않습니다.');unique.set(row.time,{...row});}
   const sorted=[...unique.values()].sort((a,b)=>a.time-b.time);
@@ -105,7 +140,7 @@
  }
  function runBacktest(candles,fundingRecords,options={},context={}){
   const c=normalizeConfig(options),data=prepareExecution(candles,c,context),{bars,signalBars,rsi,minuteRsi,mtf,executionTimeframe}=data;
-  const records=normalizeFunding(fundingRecords),weights=getStepWeights(c.splitCount,c.dcaMethod),weightSum=weights.reduce((a,b)=>a+b,0),splitCount=weights.length;
+  const records=normalizeFunding(fundingRecords),weights=getStepWeights(c.splitCount,c.dcaMethod,c.dcaMultipliers),weightSum=weights.reduce((a,b)=>a+b,0),splitCount=weights.length;
   const trades=[],signals=[],equityCurve=[],warnings={ambiguousBars:0,fundingPriceEstimates:0,fundingTimingAmbiguities:0,dataGaps:0,skippedInsufficientCapital:0};
   const from=data.rangeStart,to=data.rangeEnd,fee=c.feePct/100,slip=c.slippagePct/100;
   const fundingSessions=identifyFundingSessions(records,c),rateSessions=c.fundingIntervalHours?identifyFundingSessions(records,{...c,fundingIntervalHours:0}):fundingSessions;
@@ -127,11 +162,11 @@
    }
   }
   function fill(bar,initial,fundingCondition,signalIndex){
-   if(initial){const budget=c.positionSizing==='first_entry'?c.firstEntryAmount*weightSum:capital*c.allocationPerTradePct/100;
+   if(initial){const budget=positionBudget(c,capital,weightSum);
     if(budget>capital+1e-7||budget<.01){warnings.skippedInsufficientCapital++;return;}
     pos={startTime:bar.time,totalBudget:budget,entries:[],totalQty:0,totalCost:0,purchaseCost:0,entryFees:0,avgPrice:0,fundingEarned:0,fundingEvents:[],holdBars:0,fundingCondition};
    }
-   if(!pos)return;const step=pos.entries.length+1,budget=pos.totalBudget*weights[step-1]/weightSum,price=bar.open*(1+slip),qty=budget/(price*(1+fee)),entryFee=budget-qty*price;
+   if(!pos)return;const step=pos.entries.length+1,budget=entryBudget(c,pos.totalBudget,weights,weightSum,step-1,pos.totalCost),price=bar.open*(1+slip),qty=budget/(price*(1+fee)),entryFee=budget-qty*price;
    pos.totalQty+=qty;pos.totalCost+=budget;pos.purchaseCost+=qty*price;pos.entryFees+=entryFee;pos.avgPrice=pos.purchaseCost/pos.totalQty;
    const tp=['tp_sl','composite'].includes(c.exitType)&&c.takeProfitPct>0?pos.avgPrice*(1+c.takeProfitPct/100):null,sl=c.stopLossPct>0&&(c.stopLossMode==='immediate'||step===splitCount)?pos.avgPrice*(1-c.stopLossPct/100):null;
    pos.entries.push({step,time:bar.time,price,qty,cost:budget,fee:entryFee,avgPrice:pos.avgPrice,takeProfit:tp,stopLoss:sl});
@@ -203,7 +238,7 @@
  }
  function runAllTimeframes(map,records,options={},controls={}){const results={},comparison=[],context={minuteCandles:map['1m'],prepared:new Map(),summaryOnly:controls.summaryOnly===true,equityMaxPoints:controls.equityMaxPoints,onProgress:controls.onProgress},frames=Object.keys(T.seconds).filter(tf=>map[tf]?.length);for(const [index,tf]of frames.entries()){controls.onProgress?.({phase:'compare',timeframe:tf,count:index+1,total:frames.length});const res=runBacktest(map[tf],records,{...options,timeframe:tf},context);results[tf]=res;comparison.push({timeframe:tf,...res.summary,trades:res.summary.totalTrades,fundingEarned:res.summary.totalFundingEarned});}const valid=comparison.filter(r=>r.totalTrades>0),best=key=>[...valid].sort((a,b)=>(b[key]??Infinity)-(a[key]??Infinity))[0]||null;return {results,comparison,bestByWinRate:best('winRatePct'),bestByProfitFactor:best('profitFactor'),bestByTotalReturn:best('totalReturnPct')};}
  function optimizeStrategy(candles,records,grid={}){
-  const combinations=[],context={minuteCandles:grid.minuteCandles,prepared:new Map(),summaryOnly:true},splits=grid.splitCounts||[0,3,5,10],oversolds=grid.rsiOversolds||[20,25,30],targets=grid.takeProfitPcts||[1,2,3],stops=grid.stopLossPcts||[2,3,5],triggers=grid.splitTriggers||(grid.minuteCandles?.length?['step_pct','rsi_cross_up','rsi_cross_up_1m']:['step_pct','rsi_cross_up']),total=splits.length*oversolds.length*targets.length*stops.length*triggers.length;let tested=0;
+  const combinations=[],context={minuteCandles:grid.minuteCandles,prepared:new Map(),summaryOnly:true},splits=grid.baseConfig?.dcaMethod==='cumulative'?[grid.baseConfig.splitCount??defaultStrategyConfig.splitCount]:grid.splitCounts||[0,3,5,10],oversolds=grid.rsiOversolds||[20,25,30],targets=grid.takeProfitPcts||[1,2,3],stops=grid.stopLossPcts||[2,3,5],triggers=grid.splitTriggers||(grid.minuteCandles?.length?['step_pct','rsi_cross_up','rsi_cross_up_1m']:['step_pct','rsi_cross_up']),total=splits.length*oversolds.length*targets.length*stops.length*triggers.length;let tested=0;
   for(const splitCount of splits)for(const rsiOversold of oversolds)for(const takeProfitPct of targets)for(const stopLossPct of stops)for(const splitTrigger of triggers){
    const params={splitCount,rsiOversold,takeProfitPct,stopLossPct,splitTrigger};tested++;if(tested>1000)throw Error('최적화 조합은 1,000개까지 지원합니다.');
    grid.onProgress?.({phase:'optimize',timeframe:grid.baseConfig?.timeframe,count:tested,total});
@@ -214,5 +249,5 @@
   return {totalEvaluated:tested,eligibleEvaluated:combinations.length,bestWinRate:best('winRatePct'),bestProfitFactor:best('profitFactor'),bestTotalReturn:best('totalReturnPct'),bestBalanced:[...combinations].sort((a,b)=>b.score-a.score)[0]||null,topRankings:combinations.sort((a,b)=>b.score-a.score).slice(0,20)};
  }
  function signalLabel(signal){if(signal.type==='BUY_INITIAL')return 'BUY 1';if(signal.type==='DCA_BUY')return 'DCA '+signal.step;return reasons[signal.reason]||'청산';}
- return {defaultStrategyConfig,normalizeConfig,getStepWeights,normalizeFunding,identifyFundingSessions,fundingSessionAt,computeRSI,runBacktest,runAllTimeframes,optimizeStrategy,signalLabel,reasons};
+ return {defaultStrategyConfig,normalizeConfig,getStepWeights,getAllocationPlan,normalizeFunding,identifyFundingSessions,fundingSessionAt,computeRSI,runBacktest,runAllTimeframes,optimizeStrategy,signalLabel,reasons};
 });

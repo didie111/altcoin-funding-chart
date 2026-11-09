@@ -26,6 +26,16 @@
 .bt-settings-dialog .bt-check{display:flex;align-items:center;gap:8px;line-height:1.6}.bt-settings-dialog .bt-check input{width:14px!important;height:14px;padding:0;accent-color:#6b9ce3;flex:0 0 auto}
 .bt-funding-reentry{display:grid;gap:7px;padding:11px 12px;border:1px solid #3a5e87;border-radius:6px;background:#172c45}.bt-settings-dialog .bt-funding-reentry .bt-check{color:#d9eaff;font-size:12px;font-weight:600;cursor:pointer}.bt-settings-dialog .bt-funding-reentry small{color:#a8bfdc;font-size:11px;line-height:1.7}
 .bt-allocation-preview{font-size:11px;line-height:1.8;color:#aacefc;background:#1e314d;padding:9px 10px;border:1px solid #355373;border-radius:5px;margin:0;overflow-wrap:anywhere}
+.bt-dca-plan{display:grid;gap:8px;padding:10px;border:1px solid #3b5c84;border-radius:6px;background:#182b43;min-width:0}
+.bt-dca-plan[hidden],.bt-dca-round[hidden]{display:none}
+.bt-dca-plan>strong{font-size:12px;color:#d6e7ff}
+.bt-dca-rounds{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,98px),1fr));gap:6px}
+.bt-dca-round{min-width:0;display:grid;align-content:space-between;gap:5px;padding:7px;border-radius:5px;border:1px solid #365575;background:#152237;color:#bdcfe7;font-size:11px}
+.bt-settings-dialog .bt-dca-round label{gap:4px}
+.bt-settings-dialog .bt-dca-round select{padding:5px 6px}
+.bt-dca-amount{font-size:11px;font-variant-numeric:tabular-nums;font-weight:650;line-height:1.4;color:#d4eaff;overflow-wrap:anywhere}
+.bt-dca-round.bt-dca-excess,.bt-allocation-preview.bt-allocation-error{border-color:#985664;background:#32232f;color:#ffc3ca}
+.bt-dca-excess .bt-dca-amount{color:#ffc3ca}
 .bt-quick-coins{display:flex;align-items:center;gap:6px;font-size:10px;color:#8fa6c6}.bt-quick-coins button{background:#263f62;color:#b6d6ff;border:1px solid #45658f;border-radius:4px;font-size:10px;padding:4px 7px}
 #backtestDock[data-running=true] #backtestToggle:after{content:'진행 중';font-size:9px;font-weight:400;color:#a6c9ff;padding:2px 5px;border:1px solid #436089;border-radius:3px;margin-left:4px}
 @media(max-width:1000px){.bt-summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.bt-summary-card strong{font-size:14px}#btRunTarget{flex-basis:100%}}

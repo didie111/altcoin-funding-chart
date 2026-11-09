@@ -1,9 +1,14 @@
 (function(root,factory){'use strict';const api=factory(root,typeof module==='object'&&module.exports?require('./timeframes.js'):root.TimeframeEngine,typeof module==='object'&&module.exports?require('./backtest-engine.js'):root.BacktestEngine);if(typeof module==='object'&&module.exports)module.exports=api;else root.BacktestResults=api;})(globalThis,function(root,T,E){
  'use strict';
- // Bump this whenever data interpretation or the trading engine changes.
+ // Bump when an existing strategy's results would change.
  const equityPoints=512,version=1,maxBytes=64*1048576,maxRawBytes=64*1048576,frames=Object.keys(T.seconds),decoder=new TextDecoder(),encoder=new TextEncoder();
  const strategyFields=Object.keys(E.defaultStrategyConfig).sort();
- function strategyValues(c,tf,effective=false){const normalized=E.normalizeConfig({...c,timeframe:tf});return strategyFields.map(k=>[k,effective&&k==='splitCount'?Math.max(1,normalized[k]):normalized[k]]);}
+ function strategyValues(c,tf,effective=false){
+  const normalized=E.normalizeConfig({...c,timeframe:tf}),values=strategyFields.map(k=>[k,effective&&k==='splitCount'?Math.max(1,normalized[k]):normalized[k]]);
+  // Only the new mode adds a field. Keep the exact keys of older results and backups.
+  if(normalized.dcaMethod==='cumulative')values.push(['dcaMultipliers',normalized.dcaMultipliers.join(',')]);
+  return values;
+ }
  // The engine gives 0 and 1 the same single entry. Preserve both legacy file keys.
  const strategySignature=(c,tf)=>JSON.stringify(strategyValues(c,tf,true));
  function sameStrategy(a,b,tf=a?.timeframe){if(!a||!b)return false;const frame=tf==='all'?'1m':tf;try{return strategySignature(a,frame)===strategySignature(b,frame);}catch{return false;}}

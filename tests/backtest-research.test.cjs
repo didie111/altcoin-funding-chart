@@ -94,6 +94,17 @@ test('actual worker changes RSI and split values on archived candles, reuses the
  const other=await worker.run({...config,timeframe:'1h',splitCount:1,rsiOversold:25});assert.equal(other.output.result.config.timeframe,'1h');assert.deepEqual(worker.calls,{network:0,datasets:2,compute:3});
 });
 
+test('the batch worker changes entry multipliers from archived inputs without fetching or preparing the candles twice',async()=>{
+ const archive=S.memory(),results=R.memory(),end=start+day;await seed(archive,m,start,end);
+ const worker=realWorker(archive,results),settings={...base,endTime:end,rsiOversold:50,splitCount:3,splitTrigger:'bar',dcaMethod:'cumulative',takeProfitPct:0,stopLossPct:0,maxHoldBars:12,positionSizing:'first_entry',firstEntryAmount:1000};
+ const first=await worker.run({...settings,dcaMultipliers:[2,2]}),changed=await worker.run({...settings,dcaMultipliers:[1,2]});
+ assert.equal(first.error,undefined,first.error?.message);assert.equal(changed.error,undefined,changed.error?.message);
+ assert.deepEqual(first.output.result.trades.find(t=>t.entries.length===3).entries.map(e=>e.cost),[1000,2000,4000]);
+ assert.deepEqual(changed.output.result.trades.find(t=>t.entries.length===3).entries.map(e=>e.cost),[1000,1000,2000]);
+ assert.deepEqual(worker.calls,{network:0,datasets:1,compute:2});
+ const repeated=await worker.run({...settings,dcaMultipliers:[1,2]});assert.equal(repeated.output.meta.reuse.networkRequests,0);assert.deepEqual(worker.calls,{network:0,datasets:1,compute:2});
+});
+
 test('ordinary execution after restoring raw inputs calculates current settings through the saved cutoff, then reuses the new result',async()=>{
  const original=S.memory(),archive=S.memory(),results=R.memory(),end=start+3*day;
  await seed(original,m,start,end);const parts=[];await File.write(original,legacy(),{write:p=>parts.push(p)});await File.restore(new Blob(parts),archive);
