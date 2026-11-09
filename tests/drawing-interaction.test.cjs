@@ -13,6 +13,12 @@ test('two clicks create one trend with one undo entry and return to the normal c
 test('drag creation produces a single completed shape and never leaves chart input captured',()=>{
  const {m,event,captures}=harness('rectangle');m.onDown(event(80,40));m.onMove(event(240,130));m.onUp(event(240,130));assert.equal(m.store.state.items[0].tool,'rectangle');assert.equal(m.store.state.items[0].points[1].time,240);assert.equal(m.store.past.length,1);assert.equal(captures.size,0);
 });
+test('an active ruler captures on the native chart element and releases it when finished',()=>{
+ const {m,event,captures}=harness('ruler'),chartPointers=new Set(),el={setPointerCapture:p=>chartPointers.add(p),hasPointerCapture:p=>chartPointers.has(p),releasePointerCapture:p=>chartPointers.delete(p)};
+ m.api.chart.chartElement=()=>el;
+ m.onDown(event(100,80));assert.ok(m.usesRuler());assert.equal(captures.size,0);assert.ok(chartPointers.has(1));
+ m.onMove(event(220,50));m.onUp(event(220,50));assert.equal(chartPointers.size,0);assert.ok(m.measurement);assert.equal(m.usesRuler(),false);
+});
 test('a three-point channel waits for its offset and continuous drawing keeps its tool',()=>{
  const {m,event}=harness('parallel');m.preferences.stay=true;m.onDown(event(60,100));m.onUp(event(60,100));m.onDown(event(250,70));m.onUp(event(250,70));assert.equal(m.store.state.items.length,0);m.onDown(event(100,180));m.onUp(event(100,180));assert.equal(m.store.state.items[0].points.length,3);assert.equal(m.tool,'parallel');assert.equal(m.draft,null);
 });
