@@ -27,7 +27,9 @@
   const frameLabel=tf=>tf==='all'?'전체 주기':M.labels[tf]||tf;
   const hasResults=row=>Boolean(row?.items.some(i=>i.status==='done'));
   const storedStates=async()=>root.BacktestResearchStore?await root.BacktestResearchStore.getDefault().then(s=>s.states()).catch(()=>[]):[];
-  const splitLabel=c=>Math.max(1,c.splitCount)===1?'진입 1회':c.splitCount+'분할 · 최대 '+c.splitCount+'회 진입';
+  const splitLabel=c=>(Math.max(1,c.splitCount)===1?'진입 1회':c.splitCount+'분할 · 최대 '+c.splitCount+'회 진입')+(c.dcaMethod==='cumulative'?' · 회차별 배수':'');
+  const sizingText=c=>c.positionSizing==='first_entry'?'첫 진입 '+fmt(c.firstEntryAmount,2)+' USDT 고정':'주문 '+fmt(c.allocationPerTradePct)+'%';
+  const multiplierText=c=>c.dcaMethod==='cumulative'&&c.dcaMultipliers?.length?' · 2회차부터 '+c.dcaMultipliers.map(v=>v+'배').join(' → '):'';
   function config(useSaved=false){const c=useSaved?job.config:getConfig(),tf=$('btBatchFrame').value||c.timeframe;return {...root.BacktestEngine.normalizeConfig({...c,timeframe:tf==='all'?'1m':tf}),timeframe:tf,useBinanceArchive:$('btBatchArchive').checked,reuseCompleted:true,precomputeTimeframes:$('btBatchPrepare').checked,researchOnly:$('btBatchResearchOnly').checked};}
   function controls(updatePlan=true){const size=F.store.snapshot().size,useSaved=$('btBatchUseSaved');useSaved.hidden=!hasResults(job);useSaved.disabled=working()||!size;$('btBatchStart').disabled=!ready||locked||ioBusy||planning||isBusy()||!size;$('btBatchResume').disabled=!ready||locked||ioBusy||planning||isBusy();$('btBatchResume').textContent='이전 설정으로 이어서';$('btBatchResume').hidden=!job||!job.items.some(i=>['pending','error','deferred'].includes(i.status));$('btBatchPause').hidden=!locked;for(const b of panel.querySelectorAll('[data-batch-detail]'))b.disabled=working();for(const id of ['btBatchFrame','btBatchPeriod','btBatchSavedJob','btBatchCacheClear','btBatchSettings','btBatchArchive','btBatchPrepare','btBatchResearchOnly','btBatchExport','btBatchImport'])$(id).disabled=!ready||locked||ioBusy||planning;researchUI?.controls();if(!updatePlan)return;let c;try{c=config();}catch{return;}$('btBatchPlan').textContent='현재 설정 · '+size+'개 거래소·코인 · '+frameLabel(c.timeframe)+' · 각 초기 자본 '+fmt(c.initialCapital)+' USDT · '+splitLabel(c)+' · RSI '+c.rsiOversold+' · TP '+fmt(c.takeProfitPct)+'% / SL '+fmt(c.stopLossPct)+'% · 펀딩 '+(c.fundingIntervalHours?c.fundingIntervalHours+'시간':'전체 주기')+' / '+c.minFundingRate+'% 이하 · 수수료 '+c.feePct+'% / 슬리피지 '+c.slippagePct+'% (각 체결)';renderPlan(c);}
   function plan(c,mode=$('btBatchPeriod').value,markets=F.store.snapshot().markets,source=null){
@@ -53,7 +55,7 @@
   async function execute(item,c,signal,onProgress,detail=false,strictSnapshot=false,purpose='backtest'){
    if(purpose==='backtest'&&c.timeframe!=='all'&&!c.researchOnly&&root.BacktestResults&&(strictSnapshot&&detail||c.reuseCompleted!==false)){signal.throwIfAborted();const store=await resultsPromise,heads=await store.find(item,c,{snapshot:!strictSnapshot}),output=(detail&&heads||root.BacktestResults.readyFor(heads,c,strictSnapshot))?await root.BacktestResults.fromHeads(store,heads,c,{detail}):null;signal.throwIfAborted();if(output){onProgress({phase:'reuse',text:'저장된 완료 결과 · 원본 재조회 0회 · 재계산 없음'});return output;}}
    return new Promise((resolve,reject)=>{
-    signal.throwIfAborted();clearTimeout(workerTimer);const id=++serial,task=worker??=new Worker('backtest-batch-worker.js?v=20261109-funding-backup-fix-1');let settled=false;
+    signal.throwIfAborted();clearTimeout(workerTimer);const id=++serial,task=worker??=new Worker('backtest-batch-worker.js?v=20261109-entry-multipliers-1');let settled=false;
     const hosts={BINANCE:'fapi.binance.com',BYBIT:'api.bybit.com',BINGX:'open-api.bingx.com',BITGET:'api.bitget.com',MEXC:'api.mexc.com',OKX:'www.okx.com'},retry=event=>{if(event.detail.host===hosts[item.exchange])onProgress({phase:'wait',...event.detail});};
     const finish=(fn,value)=>{if(settled)return;settled=true;signal.removeEventListener('abort',abort);root.removeEventListener('market-api-wait',retry);task.onmessage=null;task.onerror=null;if(fn===resolve)workerTimer=setTimeout(stopWorker,25000);else stopWorker();fn(value);},abort=()=>finish(reject,signal.reason);signal.addEventListener('abort',abort,{once:true});root.addEventListener('market-api-wait',retry);
     task.onmessage=async event=>{
@@ -110,13 +112,13 @@
   function showSourceNotice(check,resume=false,reused=0){
    const message=sourceNotice(check,resume,reused);if(researchUI)researchUI.reveal(message);else status(message);
   }
-  const strategyText=c=>splitLabel(c)+' · RSI '+c.rsiOversold;
+  const strategyText=c=>splitLabel(c)+' · RSI '+c.rsiOversold+(c.dcaMethod==='cumulative'?multiplierText(c)+' · '+sizingText(c):'');
   const entryText=c=>Math.max(1,c.splitCount)===1?'1회 진입':c.splitCount+'분할';
   const conditionGroups=[
    ['진입 횟수',['splitCount']],['RSI',['rsiOversold','rsiPeriod','rsiSource','rsiExitLevel']],
    ['펀딩 조건',['fundingIntervalHours','fundingIntervalBasis','minFundingRate','maxFundingRate','fundingWindowSeconds','fundingTransitionLookbackSeconds']],
    ['재진입·대기',['oneEntryPerFunding','entryCooldownBars','requireFreshFundingAfterCooldown']],
-   ['진입·분할 방식',['entryTrigger','splitTrigger','splitStepPct','dcaMethod']],
+   ['진입·분할 방식',['entryTrigger','splitTrigger','splitStepPct','dcaMethod','dcaMultipliers']],
    ['청산·익절·손절',['stopLossMode','exitType','takeProfitPct','stopLossPct','maxHoldBars']],
    ['자본·주문 크기',['initialCapital','allocationPerTradePct','positionSizing','firstEntryAmount']],['거래 비용',['feePct','slippagePct','includeFundingPayment']]
   ];
@@ -170,7 +172,7 @@
       const readyItems=new Set(check.ready);next.items=next.items.filter(i=>i.status==='done'||readyItems.has(i));
      }
      const period=source?'저장한 기간·전략':'이 브라우저의 현재 설정',fresh=next.items.length-reused;
-     const rawText=local?' 보관 원본 '+local+'개는 저장한 범위에서 계산합니다.':(fresh?' 새 계산에 필요한 전체 원본이 준비되지 않았습니다. 보관된 자료는 재사용하고 빠진 구간을 조회합니다.':'');
+     const rawText=local?' 보관 원본 '+local+'개는 거래소 재조회 없이 저장한 범위에서 계산합니다.':(fresh?' 새 계산에 필요한 전체 원본이 준비되지 않았습니다. 보관된 자료는 재사용하고 빠진 구간을 조회합니다.':'');
      const rangeText=c.researchOnly||local===fresh?'':(p.allHistory?' 추가 자료가 필요한 코인의 요청 기간 · 거래소 제공 과거 ~ ':' 추가 자료가 필요한 코인의 요청 기간 · '+stamp(next.config.startTime)+' ~ ')+stamp(next.config.endTime)+' KST.';
      const reuseText=reused?'저장 결과 '+reused+'개 재사용 · 새 계산 '+fresh+'개. 저장 결과는 원래 자료 시점을 유지합니다.':'현재 선택한 기간·주기·전략과 일치하는 저장 결과 0개 · 새 계산 '+fresh+'개.';
      let accepted;
@@ -185,7 +187,7 @@
      }else accepted=!useSaved&&!partial&&reused>0||await root.CoinFavoritesUI.confirm({
       host,title:partial?'일부 코인의 원본만 준비됨':source?'저장 설정으로 일괄 실행':'현재 설정으로 일괄 실행',
       message:partial?markets.length+'개 중 '+next.items.length+'개만 '+frameLabel(c.timeframe)+' 결과에 포함할까요?':markets.length+'개 거래소·코인을 '+frameLabel(c.timeframe)+' 설정으로 테스트하시겠습니까?',
-      details:reuseText+rawText+(partial?' 원본이 부족한 '+check.missing.length+'개는 제외합니다. 그 코인도 계산하려면 원본을 수집하거나 보관 원본만 사용을 끄세요.':'')+rangeText+' '+period+' · '+splitLabel(c)+' / RSI '+c.rsiOversold+' · 각 자본 '+fmt(c.initialCapital)+' USDT · 주문 '+fmt(c.allocationPerTradePct)+'% · 수수료 '+fmt(c.feePct,4)+'% · 슬리피지 '+fmt(c.slippagePct,4)+'%.',
+      details:reuseText+rawText+(partial?' 원본이 부족한 '+check.missing.length+'개는 제외합니다. 그 코인도 계산하려면 원본을 수집하거나 보관 원본만 사용을 끄세요.':'')+rangeText+' '+period+' · '+splitLabel(c)+multiplierText(c)+' / RSI '+c.rsiOversold+' · 각 자본 '+fmt(c.initialCapital)+' USDT · '+sizingText(c)+' · 수수료 '+fmt(c.feePct,4)+'% · 슬리피지 '+fmt(c.slippagePct,4)+'%.',
       action:partial?'준비된 '+next.items.length+'개 실행':'테스트 시작'
      });
      if(!accepted||working())return;
