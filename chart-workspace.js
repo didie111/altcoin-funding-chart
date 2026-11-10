@@ -9,25 +9,30 @@
  function assetRevision(sources){let hash=2166136261;for(const char of sources.join('|')){hash^=char.charCodeAt(0);hash=Math.imul(hash,16777619);}return (hash>>>0).toString(36);}
  function embedUrl(href,value,index,revision){const url=new URL(href);url.hash='';url.search='';url.searchParams.set('chart-embed','1');url.searchParams.set('cell',String(index));if(revision)url.searchParams.set('build',revision);const m=market(value);for(const [key,v]of Object.entries(m))url.searchParams.set(key,v);return url.href;}
  function forwardPageSwipes(surface,enabled,scroll){
-  // Split charts are separate documents with no scroll range of their own.
-  // Send only vertical, single-finger gestures to the outer page.
+  // All chart surfaces reserve native gestures. Only a one-finger vertical
+  // swipe on the plot is routed to the page when it is outside fullscreen.
+  // Screen coordinates stay put even as scrolling moves the iframe itself.
+  const point=t=>({x:Number.isFinite(t.screenX)?t.screenX:t.clientX,y:Number.isFinite(t.screenY)?t.screenY:t.clientY});
   let drag=null;
   surface.addEventListener('touchstart',event=>{
    const t=event.touches[0];
-   drag=enabled()&&event.touches.length===1&&!event.target.closest?.('[data-panel-ui],[data-chart-nav],[data-chart-fullscreen],[data-pane-scale],[data-drawing-ui]')?{id:t.identifier,x:t.clientX,y:t.clientY,last:t.clientY,axis:null}:null;
+   if(event.touches.length!==1||!enabled(t)||event.target.closest?.('[data-panel-ui],[data-chart-nav],[data-chart-fullscreen],[data-pane-scale],[data-drawing-ui]')){drag=null;return;}
+   const {x,y}=point(t);drag={id:t.identifier,x,y,last:y,axis:null};
   },{capture:true,passive:true});
   surface.addEventListener('touchmove',event=>{
    if(!drag)return;
    const t=event.touches[0];
-   if(!enabled()||event.touches.length!==1||t.identifier!==drag.id){drag=null;return;}
+   if(event.touches.length!==1||t.identifier!==drag.id||!enabled()){drag=null;return;}
+   const {x,y}=point(t);
    if(!drag.axis){
-    const x=Math.abs(t.clientX-drag.x),y=Math.abs(t.clientY-drag.y);
-    if(Math.max(x,y)<7)return;
-    drag.axis=y>x?'y':'x';
+    const dx=Math.abs(x-drag.x),dy=Math.abs(y-drag.y);
+    if(dx+dy<5)return;
+    // Match the chart library's drag direction threshold.
+    drag.axis=dy>=dx*.5?'y':'x';
    }
    if(drag.axis!=='y'||!event.cancelable)return;
    event.preventDefault();event.stopPropagation();
-   const delta=drag.last-t.clientY;drag.last=t.clientY;if(delta)scroll(delta);
+   const delta=drag.last-y;drag.last=y;if(delta)scroll(delta);
   },{capture:true,passive:false});
   for(const type of ['touchend','touchcancel'])surface.addEventListener(type,()=>{drag=null;},{capture:true,passive:true});
  }
@@ -86,12 +91,12 @@
    const frame=frames.find(f=>Number(f.dataset.chartCell)===active);if(!frame)return false;
    deliver(frame,{type:'drawing-tool-select',tool});return true;
   }
-  function scrollFromFrame(delta){
+  function scrollPage(delta){
    if(!isTouch()||workspaceFullscreen||!Number.isFinite(delta)||Math.abs(delta)>win.innerHeight)return;
    pageDelta+=delta;if(pageScrollFrame!==null)return;
    pageScrollFrame=win.requestAnimationFrame(()=>{
     pageScrollFrame=null;const delta=pageDelta;pageDelta=0;
-    if(mode===4&&isTouch()&&!workspaceFullscreen&&delta)win.scrollBy(0,delta);
+    if(isTouch()&&!workspaceFullscreen&&delta)win.scrollBy(0,delta);
    });
   }
   function expandControl(button,pressed,label,kind='chart'){
@@ -154,9 +159,10 @@
    maximizeButton=doc.createElement('button');maximizeButton.id='chartCellMaximize';maximizeButton.type='button';maximizeButton.className='chart-workspace-control';maximizeButton.onclick=()=>{if(embedded)send({type:'maximize'});else toggleMaximized(0);};
    workspaceButton=doc.createElement('button');workspaceButton.id='chartWorkspaceFullscreen';workspaceButton.type='button';workspaceButton.className='chart-workspace-control';workspaceButton.onclick=requestWorkspaceFullscreen;$('drawingHistoryControls').append(maximizeButton,workspaceButton);
    doc.addEventListener('keydown',event=>{if(event.defaultPrevented||!event.altKey||event.ctrlKey||event.metaKey||event.shiftKey||event.key!=='Enter'||event.target?.closest?.('input,textarea,select,[contenteditable="true"]')||doc.querySelector('dialog[open]'))return;event.preventDefault();if(embedded)send({type:'maximize'});else if(mode===4)toggleMaximized(maximized>=0?maximized:active);else void api.fullscreen({workspace:true});});
+   forwardPageSwipes(api.host,touch=>!disposed&&isTouch()&&!workspaceFullscreen&&api.canPageSwipe?.(touch)===true,
+    embedded?delta=>send({type:'page-scroll',delta}):delta=>{if(maximized<=0)scrollPage(delta);});
    if(embedded){
     doc.addEventListener('pointerdown',()=>send({type:'active'}),{capture:true,passive:true});doc.addEventListener('focusin',()=>send({type:'active'}));
-    forwardPageSwipes(api.host,()=>!disposed&&isTouch()&&!workspaceFullscreen&&api.canPageSwipe?.()===true,delta=>send({type:'page-scroll',delta}));
     win.addEventListener('message',event=>{if(event.origin!==win.location.origin||event.source!==win.parent||event.data?.channel!==channel)return;
      if(event.data.type==='backtest-result')api.backtest?.(event.data.value);
      else if(event.data.type==='signals-watch'){signalsWatched=event.data.enabled===true;signalsChanged();}
@@ -196,7 +202,7 @@
      else if(data.type==='exit-workspace-fullscreen'&&workspaceFullscreen)void api.fullscreen({workspace:true});
      else if(data.type==='drawing-tool-state'&&knownTool(data.tool)){drawingTools[index]=data.tool;if(active===index)syncFavoritesTarget();}
      else if(data.type==='drawing-favorite-edit')api.applyFavoriteEdit?.(data.command);
-     else if(data.type==='page-scroll'&&(maximized<0||maximized===index))scrollFromFrame(data.delta);
+     else if(data.type==='page-scroll'&&(maximized<0||maximized===index))scrollPage(data.delta);
      else if(data.type==='ready'){frame.chartReady=true;for(const message of frame.chartQueue||[])deliver(frame,message);frame.chartQueue=[];broadcastLayout();sendFavorites(frame);watchSignals();}
     });
     if(saved.layout===4)setLayout(4);

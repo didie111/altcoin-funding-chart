@@ -49,6 +49,16 @@ test('DCA reweights by quantity and never uses a pre-entry high to invent a same
  const t=first(scenario({splitCount:2,splitTrigger:'step_pct',splitStepPct:5,takeProfitPct:5,stopLossMode:'after_all_dca'},{4:{open:100,high:103,low:90,close:90},5:{open:90,high:90,low:90,close:90},6:{open:90,high:90,low:90,close:90},7:{open:90,high:90,low:90,close:90},8:{open:90,high:90,low:90,close:90},9:{open:90,high:90,low:90,close:90},10:{open:90,high:90,low:90,close:90},11:{open:90,high:90,low:90,close:90}}));
  assert.equal(t.entries[1].time,base+5*60);assert.ok(Math.abs(t.avgEntryPrice-1000/(500/100+500/90))<1e-9);assert.equal(t.exitReason,'END_OF_TEST');
 });
+test('a drop is recorded on the qualifying low and fills at the next open even after a rebound',()=>{
+ const t=first(scenario({splitCount:2,splitTrigger:'step_pct',splitStepPct:9,slippagePct:.03},{
+  4:{open:100,high:100,low:90,close:96},5:{open:96,high:96,low:96,close:96}
+ }));
+ const [firstBuy,dca]=t.entries,signal=dca.signal;
+ assert.equal(signal.kind,'step_pct');assert.equal(signal.barTime,base+4*60);
+ assert.equal(signal.low,90);assert.ok(Math.abs(signal.referencePrice-firstBuy.price*.91)<1e-9);
+ assert.equal(dca.time,base+5*60);assert.equal(dca.time,signal.time);
+ assert.ok(dca.price>signal.referencePrice);assert.ok(Math.abs(dca.price-96*1.0003)<1e-9);
+});
 test('a bar touching both TP and SL uses SL; a known opening gap above TP exits at the open first',()=>{
  const a=first(scenario({takeProfitPct:2,stopLossPct:3},{4:{open:100,high:105,low:95,close:100}}));assert.equal(a.exitReason,'STOP_LOSS');assert.equal(a.exitPrice,97);assert.equal(a.ambiguousBar,true);
  const b=first(scenario({takeProfitPct:2,stopLossPct:3},{4:{open:105,high:106,low:90,close:100}}));assert.equal(b.exitReason,'TAKE_PROFIT');assert.equal(b.exitPrice,105);

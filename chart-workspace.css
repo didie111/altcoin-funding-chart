@@ -28,13 +28,14 @@ body.chart-layout-four #chart-container>:not(#chartWorkspace){display:none!impor
 .chart-quad #chartSymbolLabel{min-width:80px;flex-shrink:0}
 .chart-quad #cycle-badge,.chart-embedded #cycle-badge{font-size:9px;max-width:45%;padding:2px 4px}
 #drawingHistoryControls{flex-shrink:0}
-.chart-embedded body{height:100dvh;overflow:hidden}
+.chart-embedded{height:100%;overflow:hidden}
+.chart-embedded body{height:100%;overflow:hidden}
 .chart-embedded body>header,.chart-embedded #signal-sidebar,.chart-embedded #chart-container>:not(#chartWorkspace){display:none!important}
 .chart-embedded #main-wrapper,.chart-embedded #chart-container,.chart-embedded #chartWorkspace{width:100%;height:100%;min-width:0;min-height:0;flex:1 1 0}
 
 /* The phone's normal page scrolls; only the workspace fullscreen stays pinned. */
-.chart-mobile-page{overflow-x:clip;overflow-y:auto}
-.chart-mobile-page body{height:auto;min-height:100vh;min-height:100dvh;overflow:visible}
+.chart-mobile-page{overflow-x:clip;overflow-y:auto;overscroll-behavior-y:none;overflow-anchor:none;scroll-behavior:auto}
+.chart-mobile-page body{height:auto;min-height:100vh;min-height:100svh;overflow:visible}
 .chart-mobile-page #main-wrapper{flex:1 0 auto;height:auto;overflow:visible}
 .chart-mobile-page #chart-container{height:auto}
 .chart-mobile-page #chartWorkspace{flex:1 0 auto}
@@ -43,8 +44,10 @@ body.chart-layout-four #chart-container>:not(#chartWorkspace){display:none!impor
 .chart-mobile-page #chartWorkspace #backtestDock[data-open=true]{flex:0 0 clamp(320px,max(var(--backtest-height,280px),58svh),640px)}
 .chart-mobile-page #chartWorkspace.backtest-maximized #backtestDock{flex-basis:clamp(480px,85svh,940px)}
 
-.chart-touch-device #unified-chart{touch-action:none}
-.chart-touch-device:not(.chart-embedded) #unified-chart.chart-page-pan{touch-action:pan-y}
+.chart-touch-device{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+.chart-touch-device #unified-chart .tv-lightweight-charts{touch-action:none}
+.chart-touch-device #chartWorkspace button,.chart-touch-device body>header button{touch-action:manipulation}
+.chart-touch-device body>header input,.chart-touch-device body>header select{font-size:16px}
 .chart-touch-device .pane-scale-controls{opacity:1;pointer-events:auto}
 .chart-touch-overview .pane-scale-controls,.chart-touch-overview .pane-header,.chart-touch-overview #chartLegendToggle{display:none!important}
 .chart-touch-overview #chartTopbar{gap:3px;padding-inline:4px}

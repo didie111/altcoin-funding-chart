@@ -161,7 +161,13 @@
     const income=-pos.totalQty*price*f.rate/100;pos.fundingEarned+=income;pos.fundingEvents.push({time:f.time,rate:f.rate,income,price,estimated:!(supplied>0)});
    }
   }
-  function fill(bar,initial,fundingCondition,signalIndex){
+  function entrySignal(kind,bar,time,timeframe,details){
+   if(context.summaryOnly)return;
+   const signal={kind,barTime:bar.time,time,timeframe,close:bar.close,...details};
+   if(details&&'previousRsi' in details&&!Number.isFinite(details.previousRsi))signal.previousRsi=null;
+   return signal;
+  }
+  function fill(bar,initial,fundingCondition,signalIndex,signal){
    if(initial){const budget=positionBudget(c,capital,weightSum);
     if(budget>capital+1e-7||budget<.01){warnings.skippedInsufficientCapital++;return;}
     pos={startTime:bar.time,totalBudget:budget,entries:[],totalQty:0,totalCost:0,purchaseCost:0,entryFees:0,avgPrice:0,fundingEarned:0,fundingEvents:[],holdBars:0,fundingCondition};
@@ -169,7 +175,7 @@
    if(!pos)return;const step=pos.entries.length+1,budget=entryBudget(c,pos.totalBudget,weights,weightSum,step-1,pos.totalCost),price=bar.open*(1+slip),qty=budget/(price*(1+fee)),entryFee=budget-qty*price;
    pos.totalQty+=qty;pos.totalCost+=budget;pos.purchaseCost+=qty*price;pos.entryFees+=entryFee;pos.avgPrice=pos.purchaseCost/pos.totalQty;
    const tp=['tp_sl','composite'].includes(c.exitType)&&c.takeProfitPct>0?pos.avgPrice*(1+c.takeProfitPct/100):null,sl=c.stopLossPct>0&&(c.stopLossMode==='immediate'||step===splitCount)?pos.avgPrice*(1-c.stopLossPct/100):null;
-   pos.entries.push({step,time:bar.time,price,qty,cost:budget,fee:entryFee,avgPrice:pos.avgPrice,takeProfit:tp,stopLoss:sl});
+   pos.entries.push({step,time:bar.time,price,qty,cost:budget,fee:entryFee,avgPrice:pos.avgPrice,takeProfit:tp,stopLoss:sl,...(signal?{signal}:{})});
    if(initial){if(c.oneEntryPerFunding)lastUsedFundingTime=fundingCondition.settleTime;lastEntrySignalIndex=signalIndex;lastCooldownClose=fundingCondition.signalTime;}
    if(!context.summaryOnly)signals.push({time:bar.time,type:initial?'BUY_INITIAL':'DCA_BUY',step,price,avgPrice:pos.avgPrice,takeProfit:tp,stopLoss:sl,...(initial?{fundingCondition}: {})});
   }
@@ -189,8 +195,8 @@
    settle(bar.time,bar); // Settlement at the opening instant precedes new entries.
    if(pos){const tp=['tp_sl','composite'].includes(c.exitType)&&c.takeProfitPct>0?pos.avgPrice*(1+c.takeProfitPct/100):null,sl=c.stopLossPct>0&&(c.stopLossMode==='immediate'||pos.entries.length===splitCount)?pos.avgPrice*(1-c.stopLossPct/100):null;if(sl!==null&&bar.open<=sl)close(bar,bar.open,'STOP_LOSS');else if(tp!==null&&bar.open>=tp)close(bar,bar.open,'TAKE_PROFIT');}
    if(pending?.kind==='exit'&&pos)close(bar,bar.open,pending.reason);
-   else if(pending?.kind==='entry'&&!pos)fill(bar,true,pending.fundingCondition,pending.signalIndex);
-   else if(pending?.kind==='dca'&&pos&&pos.entries.length<splitCount)fill(bar,false);
+   else if(pending?.kind==='entry'&&!pos)fill(bar,true,pending.fundingCondition,pending.signalIndex,pending.signal);
+   else if(pending?.kind==='dca'&&pos&&pos.entries.length<splitCount)fill(bar,false,null,null,pending.signal);
    pending=null;
    if(pos){
     const bucket=T.start(bar.time,c.timeframe);if(!mtf||pos.holdBucket!==bucket){pos.holdBars++;pos.holdBucket=bucket;}
@@ -217,14 +223,22 @@
     if(!context.summaryOnly){diagnostics.samples.push({time:end,rsi:entryRsi,previousRsi:Number.isFinite(entryPrev)?entryPrev:null,reason,intervalHours:interval?.hours??null,intervalSource:interval?.source??'unknown',fundingTime:negative?.time??null,fundingRate:negative?.rate??null,validUntil:matched?.transitionTime?matched.validUntil:negative?negative.time+(c.fundingWindowSeconds||negative.intervalHours*3600||0):null,...(matched?.transitionTime?{transitionTime:matched.transitionTime}:{})});if(diagnostics.samples.length>30)diagnostics.samples.shift();}
    }
    if(pos){
-    const r=rsi[checkpoint],prev=rsi[checkpoint-1],cross=Number.isFinite(prev)&&prev<=c.rsiOversold&&r>c.rsiOversold,minuteCross=Number.isFinite(minuteRsi[i-1])&&minuteRsi[i-1]<=c.rsiOversold&&minuteRsi[i]>c.rsiOversold;
+    const r=rsi[checkpoint],prev=rsi[checkpoint-1],cross=Number.isFinite(prev)&&prev<=c.rsiOversold&&r>c.rsiOversold,minuteCross=Number.isFinite(minuteRsi[i-1])&&minuteRsi[i-1]<=c.rsiOversold&&minuteRsi[i]>c.rsiOversold,kind=c.splitTrigger;
     if(signalBar&&['rsi_rebound','composite'].includes(c.exitType)&&Number.isFinite(r)&&r>=c.rsiExitLevel)pending={kind:'exit',reason:'RSI_REBOUND'};
     else if(signalBar&&c.exitType==='settle_exit'&&pos.fundingEvents.length&&signalBar.close>signalBar.open)pending={kind:'exit',reason:'SETTLE_EXIT'};
     else if(signalBar&&c.maxHoldBars>0&&pos.holdBars>=c.maxHoldBars)pending={kind:'exit',reason:'TIMEOUT'};
-    else if(pos.entries.length<splitCount&&((c.splitTrigger==='rsi_cross_up_1m'&&minuteCross)||(c.splitTrigger==='rsi_cross_up'&&cross)||(c.splitTrigger==='rsi_oversold'&&r<=c.rsiOversold)||(c.splitTrigger==='step_pct'&&bar.low<=pos.entries.at(-1).price*(1-c.splitStepPct/100))||c.splitTrigger==='bar'))pending={kind:'dca'};
+    else if(pos.entries.length<splitCount){
+     const level=kind==='step_pct'?pos.entries.at(-1).price*(1-c.splitStepPct/100):null;
+     if(kind==='step_pct'&&bar.low<=level)pending={kind:'dca',signal:entrySignal(kind,bar,end,executionTimeframe,{referencePrice:level,low:bar.low})};
+     else if(kind==='bar')pending={kind:'dca',signal:entrySignal(kind,bar,end,executionTimeframe)};
+     else if((kind==='rsi_cross_up_1m'&&minuteCross)||(kind==='rsi_cross_up'&&cross)||(kind==='rsi_oversold'&&r<=c.rsiOversold)){
+      const minute=kind==='rsi_cross_up_1m';
+      pending={kind:'dca',signal:entrySignal(kind,minute?bar:signalBar,end,minute?'1m':c.timeframe,{threshold:c.rsiOversold,rsi:minute?minuteRsi[i]:r,previousRsi:(minute?minuteRsi[i-1]:prev)??null})};
+     }
+    }
     equity(capital-pos.totalCost+pos.totalQty*bar.close*(1-slip)*(1-fee)+pos.fundingEarned,bar.time);
    }else{
-    if(entrySession)pending={kind:'entry',signalIndex:checkpoint,fundingCondition:{signalTime:end,settleTime:entrySession.settleTime,rate:entrySession.rate,intervalHours:entrySession.intervalHours,intervalSource:entrySession.intervalSource,validUntil:entrySession.validUntil,...(entrySession.transitionTime?{transitionTime:entrySession.transitionTime}:{})}};
+    if(entrySession)pending={kind:'entry',signalIndex:checkpoint,signal:entrySignal(c.entryTrigger,signalBar,end,c.timeframe,{threshold:c.rsiOversold,rsi:entryRsi,previousRsi:entryPrev??null}),fundingCondition:{signalTime:end,settleTime:entrySession.settleTime,rate:entrySession.rate,intervalHours:entrySession.intervalHours,intervalSource:entrySession.intervalSource,validUntil:entrySession.validUntil,...(entrySession.transitionTime?{transitionTime:entrySession.transitionTime}:{})}};
    }
   }
   if(pos&&lastIndex>=0){const last=B.get(bars,lastIndex,previousBar);close(last,last.close,'END_OF_TEST');}
