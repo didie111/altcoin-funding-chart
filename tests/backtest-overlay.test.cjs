@@ -42,11 +42,14 @@ test('a real fill inside the final displayed candle is visible, including fixed-
  assert.equal(s.segments.length,6);assert.equal(s.groups[0].step,2);assert.equal(s.exits.length,1);
  assert.equal(s.segments[3].x1,182);assert.equal(s.exits[0].x,184);
 });
-test('DCA phase lines use each filled weighted average and only the last visible phase gets price explanations',()=>{
+test('visible DCA phases identify their own average, with TP/SL labels on the latest visible phase',()=>{
  const h=harness({trade:{exitTime:base+18*60,entries:[entry(0,.1,1),entry(6,.09,2),entry(12,.08,3)]}}),s=h.scene();
- assert.equal(s.segments.length,9);assert.equal(s.groups.length,1);assert.equal(s.groups[0].step,3);
- assert.deepEqual(s.segments.filter(x=>x.key==='avgPrice').map(x=>x.value),[.1,.09,.08]);assert.ok(s.groups[0].lines.every(x=>x.value<.09));
- h.state.to=base+8*60;const earlier=h.scene();assert.equal(earlier.groups[0].step,2);assert.equal(earlier.segments.length,6);
+ assert.equal(s.segments.length,9);assert.deepEqual(s.groups.map(g=>g.step),[1,2,3]);
+ assert.deepEqual(s.segments.filter(x=>x.key==='avgPrice').map(x=>x.value),[.1,.09,.08]);assert.ok(s.groups.at(-1).lines.every(x=>x.value<.09));
+ assert.ok(s.groups.slice(0,-1).every(g=>g.lines.length===1&&g.lines[0].label===g.step+'차 평단'));
+ const labels=O.labelLayout(s.groups,{width:500,height:200,measure:t=>t.length*5,format:v=>v.toFixed(4)});
+ assert.ok(labels.some(l=>l.text.includes('2차 평단 0.0900')&&l.anchorX===210));
+ h.state.to=base+8*60;const earlier=h.scene();assert.equal(earlier.groups.at(-1).step,2);assert.equal(earlier.segments.length,6);
 });
 test('stop loss after all splits stays absent until the engine has actually activated it',()=>{
  const first={...entry(0),stopLoss:null},last=entry(6,.09,2),h=harness({trade:{exitTime:base+12*60,entries:[first,last]}}),s=h.scene();

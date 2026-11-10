@@ -8,6 +8,14 @@
  function preferences(value){return {layout:value?.layout===4?4:1,markets:Array.isArray(value?.markets)?value.markets.slice(0,4).map(m=>m?market(m):null):[]};}
  function assetRevision(sources){let hash=2166136261;for(const char of sources.join('|')){hash^=char.charCodeAt(0);hash=Math.imul(hash,16777619);}return (hash>>>0).toString(36);}
  function embedUrl(href,value,index,revision){const url=new URL(href);url.hash='';url.search='';url.searchParams.set('chart-embed','1');url.searchParams.set('cell',String(index));if(revision)url.searchParams.set('build',revision);const m=market(value);for(const [key,v]of Object.entries(m))url.searchParams.set(key,v);return url.href;}
+ function normalMobileViewport(previous,width,height,angle){
+  if(!(Number.isFinite(width)&&width>0&&Number.isFinite(height)&&height>0))return previous;
+  const rotated=Number.isFinite(angle)&&Number.isFinite(previous?.angle)&&angle!==previous.angle;
+  // Some in-app browsers resize the WebView itself while hiding their bars,
+  // which also changes svh. Only a new screen width or a rotation resets it.
+  if(previous&&!rotated&&Math.abs(previous.width-width)<8)return previous;
+  return {width,height:Math.round(height),angle};
+ }
  function forwardPageSwipes(surface,enabled,scroll){
   // All chart surfaces reserve native gestures. Only a one-finger vertical
   // swipe on the plot is routed to the page when it is outside fullscreen.
@@ -45,7 +53,7 @@
   const markets=saved.markets;
   const controls=[],drawingTools=[],listeners=new Set(),actions=new Set(['ruler','ruler-settings','lines','indicators']);
   const knownTool=id=>typeof id==='string'&&Object.hasOwn(win.DrawingEngine?.catalog||{},id);
-  let pageDelta=0,pageScrollFrame=null;
+  let pageDelta=0,pageScrollFrame=null,mobileViewport=null;
   const signalViews=[],signalRevisions=[],signalListeners=new Set();let signalsWatched=false;
   const sameMarket=(a,b)=>a&&b&&a.ex===b.ex&&a.symbol===b.symbol&&a.int===b.int;
   function notifySignals(){for(const listener of signalListeners)listener();}
@@ -62,11 +70,19 @@
   function notify(){for(const listener of listeners)listener();}
   let lastControls='';
   if(embedded)doc.documentElement.classList.add('chart-embedded');
+  function syncMobileViewport(){
+   if(embedded||disposed||!isTouch()||workspaceFullscreen)return;
+   const next=normalMobileViewport(mobileViewport,doc.documentElement.clientWidth||win.innerWidth,win.innerHeight,win.screen?.orientation?.angle??win.orientation);
+   if(next===mobileViewport)return;
+   mobileViewport=next;
+   doc.documentElement.style.setProperty('--chart-mobile-viewport-height',next.height+'px');
+  }
   function refreshPresentation(){
    const touch=isTouch(),overview=touch&&(embedded||mode===4)&&maximized<0,pageScroll=touch&&!workspaceFullscreen;
    doc.documentElement.classList.toggle('chart-touch-device',touch);
    doc.documentElement.classList.toggle('chart-touch-overview',overview);
    doc.documentElement.classList.toggle('chart-mobile-page',pageScroll&&!embedded);
+   syncMobileViewport();
    api?.touchLayout?.({pageScroll,overview});
   }
   refreshPresentation();
@@ -208,10 +224,11 @@
     if(saved.layout===4)setLayout(4);
    }
    refreshPresentation();touchQuery?.addEventListener?.('change',refreshPresentation);
+   if(!embedded)win.addEventListener('resize',syncMobileViewport,{passive:true});
    updateControls();marketChanged(current());if(embedded)send({type:'ready'});api.syncFullscreen?.();
    win.addEventListener('pagehide',()=>{disposed=true;api.dispose();},{once:true});
   }
   return {openPicker,embedded,bind,marketChanged,reportStatus,selectActive,runOnActive,controlsChanged,drawOnActive,drawingToolChanged,editFavorite,favoritesChanged,setBacktest,signalsChanged,activeSignals,signalCommand,subscribeSignals:listener=>{signalListeners.add(listener);return ()=>signalListeners.delete(listener);},activeCell:()=>active,subscribe:listener=>{listeners.add(listener);return ()=>listeners.delete(listener);},activeMarket:()=>hasRemoteTarget()?market(markets[active],current()):current(),isMulti:()=>embedded||mode===4,visible:()=>!disposed&&!doc.hidden,requestFullscreen,requestWorkspaceFullscreen,exitWorkspaceFullscreen,restoreMaximized,fullscreenState,syncWorkspaceFullscreen,setLayout};
  }
- return {create,market,preferences,embedUrl,assetRevision,forwardPageSwipes};
+ return {create,market,preferences,embedUrl,assetRevision,forwardPageSwipes,normalMobileViewport};
 });

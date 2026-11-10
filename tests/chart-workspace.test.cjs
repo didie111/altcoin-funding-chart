@@ -69,13 +69,14 @@ function workspaceHarness({embedded=false,saved={},signalSnapshot=null,touch=fal
   setAttribute(name,value){this.attrs[name]=String(value);}addEventListener(name,fn){this.events??={};this.events[name]=fn;}
  }
  const doc={body:new Element('body'),documentElement:new Element('html'),createElement:tag=>new Element(tag),getElementById:id=>ids.get(id),addEventListener:(name,fn)=>docEvents[name]=fn,querySelector:()=>null};
+ const css=new Map();doc.documentElement.style={setProperty:(key,value)=>css.set(key,value)};
  for(const id of ['exchangeSelect','symbolInput','intervalSelect','chartWorkspace','chartTopbar','chartBody','drawingHistoryControls','chartSymbolLabel','host']){const element=new Element('div');element.id=id;doc.body.append(element);}
  ids.get('exchangeSelect').value='BITGET';ids.get('symbolInput').value='SAHARAUSDT';ids.get('intervalSelect').value='1h';
- const animation=[],parent={postMessage:data=>messages.push({data})},win={document:doc,innerHeight:800,scrollBy:(x,y)=>calls.scroll.push(y),requestAnimationFrame:fn=>animation.push(fn),matchMedia:()=>({matches:touch}),DrawingEngine:require('../drawing-engine.js'),location:new URL('https://example.test/'+(embedded?'?chart-embed=1&cell=2':'')),parent:embedded?parent:null,localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},addEventListener:(name,fn)=>events[name]=fn,CoinFavorites:Favorites,SymbolPicker:{bind:()=>({open(...args){calls.picker.push(args);}})},MarketCatalog:{create:()=>({})}};
+ const animation=[],parent={postMessage:data=>messages.push({data})},win={document:doc,innerWidth:390,innerHeight:800,scrollBy:(x,y)=>calls.scroll.push(y),requestAnimationFrame:fn=>animation.push(fn),matchMedia:()=>({matches:touch}),DrawingEngine:require('../drawing-engine.js'),location:new URL('https://example.test/'+(embedded?'?chart-embed=1&cell=2':'')),parent:embedded?parent:null,localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},addEventListener:(name,fn)=>events[name]=fn,CoinFavorites:Favorites,SymbolPicker:{bind:()=>({open(...args){calls.picker.push(args);}})},MarketCatalog:{create:()=>({})}};
  if(!embedded)win.parent=win;
  const calls={picker:[],schedule:0,dispose:0,split:0,fullscreen:[],market:[],navigation:[],action:[],backtest:[],signalCommands:[],scroll:[],touch:[],host:[],target:[],edit:[],state:[],tool:[]},controller=Workspace.create(win);
  controller.bind({touchLayout:value=>calls.touch.push(value),canPageSwipe:()=>true,favoritesHost:host=>calls.host.push(host),favoritesTarget:(...value)=>calls.target.push(value),favoritesSnapshot:()=>({tools:['hline'],visible:true}),applyFavoriteEdit:command=>calls.edit.push(command),favoritesState:state=>calls.state.push(state),drawingTool:tool=>calls.tool.push(tool),signalSnapshot:()=>signalSnapshot,signalCommand:value=>calls.signalCommands.push(value),workspace:ids.get('chartWorkspace'),host:ids.get('host'),symbolButton:ids.get('chartSymbolLabel'),getMarket:()=>({ex:'BITGET',symbol:'SAHARAUSDT',int:'1h'}),selectMarket:(m,n)=>{calls.market.push(m);calls.navigation.push(n);},action:a=>calls.action.push(a),backtest:value=>calls.backtest.push(value),onSplit:()=>calls.split++,dispose:()=>calls.dispose++,schedule:()=>calls.schedule++,fullscreen:options=>calls.fullscreen.push(options),syncFullscreen(){},jumpDate(){}});
- return {ids,doc,messages,calls,controller,parent,win,storage,flush:()=>animation.splice(0).forEach(fn=>fn()),frames:()=>ids.get('chartGrid')?.children.filter(x=>x.tagName==='iframe')||[],message:(source,data,origin=win.location.origin)=>events.message({source,origin,data:{channel:'funding-chart-workspace-v1',...data}}),key:event=>docEvents.keydown({target:{closest:()=>null},preventDefault(){this.defaultPrevented=true;},...event})};
+ return {ids,doc,messages,calls,controller,parent,win,storage,css,resize:(width,height)=>{win.innerWidth=width;win.innerHeight=height;events.resize?.();},flush:()=>animation.splice(0).forEach(fn=>fn()),frames:()=>ids.get('chartGrid')?.children.filter(x=>x.tagName==='iframe')||[],message:(source,data,origin=win.location.origin)=>events.message({source,origin,data:{channel:'funding-chart-workspace-v1',...data}}),key:event=>docEvents.keydown({target:{closest:()=>null},preventDefault(){this.defaultPrevented=true;},...event})};
 }
 test('loading a panel coin into a selected remote cell immediately updates backtest subscribers',t=>{
  const h=workspaceHarness();t.after(()=>h.controller.setLayout(1));h.controller.setLayout(4);const frame=h.frames()[1];h.message(frame.contentWindow,{type:'ready'});h.message(frame.contentWindow,{type:'active'});
@@ -295,4 +296,16 @@ test('vertical gestures use the finger position on screen even as the chart move
  assert.deepEqual(h.calls.scroll,[30,25,-17]);
  h.controller.syncWorkspaceFullscreen(true);events.touchmove(event(touch(150,400)));h.flush();
  assert.deepEqual(h.calls.scroll,[30,25,-17]);
+});
+test('normal mobile chart height survives browser chrome and fullscreen changes, then fits a rotated screen',t=>{
+ const h=workspaceHarness({touch:true}),key='--chart-mobile-viewport-height';t.after(()=>h.controller.setLayout(1));
+ assert.equal(h.css.get(key),'800px');
+ for(const height of [720,840,740,800]){h.resize(390,height);assert.equal(h.css.get(key),'800px');}
+ h.controller.setLayout(4);assert.equal(h.css.get(key),'800px');
+ h.controller.syncWorkspaceFullscreen(true);h.resize(390,844);assert.equal(h.css.get(key),'800px');
+ h.controller.syncWorkspaceFullscreen(false);assert.equal(h.css.get(key),'800px');
+ h.resize(844,390);assert.equal(h.css.get(key),'390px');
+ h.resize(844,335);assert.equal(h.css.get(key),'390px');
+ assert.equal(workspaceHarness().css.has(key),false);
+ assert.equal(workspaceHarness({embedded:true,touch:true}).css.has(key),false);
 });

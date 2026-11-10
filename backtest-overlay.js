@@ -60,7 +60,7 @@
   };
   const trades=result.trades,last=lower(trades,to,'entryTime');let index=Math.max(lower(trades,from,'exitTime'),last-80);
   for(;index<last;index++){
-   const trade=trades[index],tradeId=trade.id??index+1;let group=null;
+   const trade=trades[index],tradeId=trade.id??index+1,phases=[];
    for(let j=0;j<trade.entries.length;j++){
     const entry=trade.entries[j],next=trade.entries[j+1],until=next?.time??trade.exitTime;
     if(entry.time>=from&&Number.isFinite(entry.price)&&entry.price>0){
@@ -87,15 +87,20 @@
     // previous average or TP/SL into the next DCA phase or the next trade.
     const following=trades[index+1]?.entryTime,followingX=Number.isFinite(following)&&following<to?x(following):null;
     const tailEnd=display?.tails!==false&&!next&&until<to&&x2-x1<42?Math.max(x2,Math.min(width,x1+42,Number.isFinite(followingX)?followingX-3:width)):x2;
-    group={tradeId,step:entry.step??j+1,lines:[]};
+    const group={tradeId,step:entry.step??j+1,lines:[]};
     for(const [key,label,color]of levels){
      const value=entry[key];if(display?.[key]===false||!Number.isFinite(value)||value<=0)continue;const y=series.priceToCoordinate(value);if(!Number.isFinite(y)||y<0||y>height)continue;
-     const line={x1,x2,tailEnd,y,value,label,color,tradeId,step:group.step,key};scene.segments.push(line);group.lines.push(line);
+     const line={x1,x2,tailEnd,y,value,label:key==='avgPrice'?group.step+'차 '+label:label,color,tradeId,step:group.step,key};scene.segments.push(line);group.lines.push(line);
     }
+    if(group.lines.length)phases.push(group);
    }
-   // All DCA phases retain their true lines. Only the last visible phase of a
-   // trade needs value labels, instead of three overlapping labels at every fill.
-   if(group?.lines.length)scene.groups.push(group);
+   // Identify the average that was in force before each later fill. Keep TP
+   // and SL labels on the latest visible phase to avoid covering the candles.
+   for(let j=0;j<phases.length-1;j++){
+    const phase=phases[j],average=phase.lines.find(line=>line.key==='avgPrice');
+    if(average&&average.x2-average.x1>=20)scene.groups.push({...phase,prior:true,lines:[average]});
+   }
+   if(phases.length)scene.groups.push(phases.at(-1));
    if(display?.exit!==false&&trade.exitTime>=from&&trade.exitTime<to){const px=x(trade.exitTime),py=series.priceToCoordinate(trade.exitPrice);
     if(Number.isFinite(px)&&Number.isFinite(py)&&px>=0&&px<=width&&py>=0&&py<=height)scene.exits.push({x:px,y:py,color:trade.exitReason==='STOP_LOSS'?'#fb7185':trade.exitReason==='TAKE_PROFIT'?'#34d399':'#c4b5fd'});
    }
@@ -108,9 +113,10 @@
   // and text measurement come from this pane, so split/fullscreen sizes agree.
   for(const group of [...groups].reverse())for(const line of [...group.lines].sort((a,b)=>a.y-b.y)){
    if(labels.length>=48)return labels;let text='#'+group.tradeId+' · '+line.label+' '+format(line.value),w=Math.ceil(measure(text))+10;
-   if(w>width-2*padding&&line.compact){text=line.compact;w=Math.ceil(measure(text))+10;}
-   if(w>width-2*padding)continue;const labelEnd=line.tailEnd??line.x2,anchorX=clamp(line.x2,padding,width-padding),anchorY=line.y;
-   const positions=[labelEnd+6,line.x2-w-4,line.x1-w-8,clamp(anchorX-w/2,padding,width-padding-w)];let placed=null;
+   const compact=line.compact||(line.key==='avgPrice'?line.label+' '+format(line.value):'');
+   if(w>width-2*padding&&compact){text=compact;w=Math.ceil(measure(text))+10;}
+   if(w>width-2*padding)continue;const labelEnd=line.tailEnd??line.x2,anchorX=clamp(group.prior?(line.x1+line.x2)/2:line.x2,padding,width-padding),anchorY=line.y;
+   const positions=group.prior?[clamp(anchorX-w/2,padding,width-padding-w),line.x1+3,line.x2-w-3]:[labelEnd+6,line.x2-w-4,line.x1-w-8,clamp(anchorX-w/2,padding,width-padding-w)];let placed=null;
    for(const left of positions){if(left<padding||left+w>width-padding)continue;
     for(const offset of [0,-21,21,-42,42,-63,63]){const box={x:left,y:clamp(anchorY-lineHeight/2+offset,top,height-padding-lineHeight),width:w,height:lineHeight};
      if(!labels.some(other=>overlaps(box,other))){placed={...box,text,color:line.color,anchorX,anchorY,tradeId:group.tradeId,key:line.key};break;}
