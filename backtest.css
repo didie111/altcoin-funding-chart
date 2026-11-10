@@ -94,7 +94,20 @@
 .backtest-bar #btStrategySettings{flex:none;margin-left:8px;padding:5px 8px;gap:5px;border:1px solid #405675;border-radius:5px;background:#23334c;font-size:11px;white-space:nowrap;cursor:pointer}
 .backtest-bar #btStrategySettings:hover{background:#2f4669;color:#fff}.backtest-bar #btStrategySettings:focus-visible{outline:2px solid #79aefe;outline-offset:1px}
 #backtestDock[data-open=false] .backtest-bar #btStrategySettings,#backtestDock[data-view=batch] .bt-runbar,#backtestDock[data-view=batch] .bt-progress-row{display:none}
-@media(max-width:420px){#backtestDock[data-view=batch] .backtest-bar{gap:4px;padding-inline:6px}.backtest-bar #btStrategySettings{margin-left:0;padding-inline:5px;gap:4px}}
+@media(max-width:650px){
+ #backtestDock[data-open=true][data-view=batch] .backtest-bar{flex-wrap:wrap;gap:3px 6px;padding:3px 8px 6px}
+ .backtest-bar #btStrategySettings{order:1;flex:1 0 100%;justify-content:space-between;margin:0;min-height:44px;padding:6px 10px;font-size:12px}
+ .backtest-bar #btStrategySettings:focus-visible{outline-offset:-2px}
+ .research-dialog.bt-settings-dialog{width:calc(100% - 20px);max-height:calc(100dvh - 20px)}
+ .bt-settings-dialog form{display:flex;flex-direction:column;max-height:calc(100dvh - 22px)}
+ .bt-settings-dialog .research-dialog-body{grid-template-columns:minmax(0,1fr);flex:1 1 auto;min-height:0;max-height:none;padding:12px;gap:12px;overscroll-behavior:contain}
+ .bt-settings-dialog .research-dialog-header,.bt-settings-dialog footer{flex:none;padding:8px 12px}
+ .bt-settings-dialog .research-dialog-header button{min-width:44px;min-height:44px}
+ .bt-settings-dialog footer{flex-wrap:wrap}.bt-settings-dialog footer button{min-height:44px}
+ .bt-settings-dialog .research-error:not(:empty){flex-basis:100%}
+ .bt-settings-dialog input:not([type=checkbox]),.bt-settings-dialog select,.bt-settings-dialog textarea{font-size:16px}
+}
+@media(max-width:360px){.bt-settings-dialog .research-field-row{grid-template-columns:minmax(0,1fr)}}
 #backtestDock[data-open=true][data-view=batch]:not([data-user-sized=true]){flex-basis:clamp(0px,max(var(--backtest-height,280px),55%),72%)}
 @container batch (max-width:800px){.bt-batch-monitor{gap:8px 12px;padding:10px 12px 0;grid-template-columns:auto minmax(0,1fr)}.bt-batch-monitor-actions{grid-column:1/-1;justify-content:flex-start}.bt-batch-counter strong{font-size:20px}.bt-batch-activity{font-size:11px}.bt-batch-content{padding:0 10px 10px}}
 @container batch (max-width:620px){
