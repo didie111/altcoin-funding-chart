@@ -34,15 +34,16 @@ body.chart-layout-four #chart-container>:not(#chartWorkspace){display:none!impor
 .chart-embedded #main-wrapper,.chart-embedded #chart-container,.chart-embedded #chartWorkspace{width:100%;height:100%;min-width:0;min-height:0;flex:1 1 0}
 
 /* The phone's normal page scrolls; only the workspace fullscreen stays pinned. */
-.chart-mobile-page{overflow-x:clip;overflow-y:auto;overscroll-behavior-y:none;overflow-anchor:none;scroll-behavior:auto}
-.chart-mobile-page body{height:auto;min-height:100vh;min-height:100svh;overflow:visible}
+.chart-mobile-page{--chart-mobile-layout-height:var(--chart-mobile-viewport-height,100svh);overflow-x:clip;overflow-y:auto;overscroll-behavior-y:none;overflow-anchor:none;scroll-behavior:auto}
+.chart-mobile-page body{height:auto;min-height:100vh;min-height:var(--chart-mobile-layout-height);overflow:visible}
 .chart-mobile-page #main-wrapper{flex:1 0 auto;height:auto;overflow:visible}
 .chart-mobile-page #chart-container{height:auto}
 .chart-mobile-page #chartWorkspace{flex:1 0 auto}
-.chart-mobile-page #chartGrid{flex:0 0 clamp(440px,78svh,800px)}
-.chart-mobile-page #chartGrid.four:not(.cell-maximized){flex-basis:clamp(580px,92svh,940px)}
-.chart-mobile-page #chartWorkspace #backtestDock[data-open=true]{flex:0 0 clamp(320px,max(var(--backtest-height,280px),58svh),640px)}
-.chart-mobile-page #chartWorkspace.backtest-maximized #backtestDock{flex-basis:clamp(480px,85svh,940px)}
+.chart-mobile-page #chartGrid{flex:0 0 clamp(440px,calc(var(--chart-mobile-layout-height) * .78),800px)}
+.chart-mobile-page #chartGrid.four:not(.cell-maximized){flex-basis:clamp(580px,calc(var(--chart-mobile-layout-height) * .92),940px)}
+.chart-mobile-page #chartWorkspace #backtestDock[data-open=true]{flex:0 0 clamp(320px,max(var(--backtest-height,280px),calc(var(--chart-mobile-layout-height) * .58)),640px)}
+.chart-mobile-page #chartWorkspace.backtest-maximized #backtestDock{flex-basis:clamp(480px,calc(var(--chart-mobile-layout-height) * .85),940px)}
+.chart-mobile-page #backtestResize{display:none}
 
 .chart-touch-device{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 .chart-touch-device #unified-chart .tv-lightweight-charts{touch-action:none}

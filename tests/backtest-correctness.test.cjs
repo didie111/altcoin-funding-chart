@@ -30,6 +30,18 @@ test('a fixed first cumulative entry stays exact, and the plan identifies the fi
  assert.throws(()=>E.normalizeConfig({...s.config,dcaMultipliers:[0,2]}),/2회차 배수/);
  assert.throws(()=>E.normalizeConfig({...s.config,dcaMultipliers:[2,11]}),/3회차 배수/);
 });
+test('1x after 2x repeats the preceding budget and weights the average by actual bought quantity',()=>{
+ const config={initialCapital:10000,splitCount:3,dcaMethod:'cumulative',dcaMultipliers:[2,1],feePct:.05,slippagePct:.03};
+ const s=scenario(config,{4:{open:80,high:80,low:80,close:80},5:{open:50,high:50,low:50,close:50}});
+ const [a,b,c]=first(s).entries;
+ assert.deepEqual([a.cost,b.cost,c.cost],[2000,4000,4000]);
+ const raw=[100,80,50],spend=[2000,4000,4000];
+ const actualQty=raw.map((open,i)=>spend[i]/(open*1.0003*1.0005));
+ assert.ok(Math.abs(c.qty-actualQty[2])<1e-10);
+ const expected=[a.price,6000/(2000/100+4000/80)*1.0003,10000/(2000/100+4000/80+4000/50)*1.0003];
+ for(const [i,e]of [a,b,c].entries())assert.ok(Math.abs(e.avgPrice-expected[i])<1e-10);
+ assert.ok(c.qty>b.qty&&c.avgPrice<b.avgPrice);
+});
 test('condition search compares other inputs without inventing rounds for a chosen multiplier plan',()=>{
  const s=scenario({splitCount:3,dcaMethod:'cumulative',dcaMultipliers:[1,2]});
  const out=E.optimizeStrategy(s.bars,s.funding,{baseConfig:s.config,splitCounts:[1,5,10],rsiOversolds:[20,30],takeProfitPcts:[0],stopLossPcts:[0],splitTriggers:['bar'],minTrades:1});

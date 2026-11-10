@@ -47,6 +47,17 @@ test('expanded entry records can jump to the signal bar or its actual fill with 
  assert.deepEqual(h.jumps.map(({market,time})=>[market.int,time]),[['1h',fill-60],['1h',fill]]);
  assert.equal(result.config.timeframe,'3m');
 });
+test('trade details show the recorded 1x round amount, acquired quantity and phase average together',()=>{
+ const h=tradeUI(),r=h.ctx.single.result,trade=r.trades[0];
+ r.config={timeframe:'3m',dcaMethod:'cumulative',splitCount:3,dcaMultipliers:[2,1],splitTrigger:'bar'};
+ trade.entries=[
+  {step:1,time:trade.entryTime,price:100,cost:2000,qty:20,avgPrice:100},
+  {step:2,time:trade.entryTime+180,price:80,cost:4000,qty:50,avgPrice:85.71428571},
+  {step:3,time:trade.entryTime+360,price:50,cost:4000,qty:80,avgPrice:66.66666667}
+ ];
+ h.ctx.render();
+ assert.match(h.report.innerHTML,/3차 · 매 봉<\/strong><span class="bt-entry-multiple">직전 회차의 1배<\/span>[\s\S]*?체결가 50 · 수량 80<br>투입 4000 USDT · <b>3차 후 평단 66\.66666667<\/b>/);
+});
 test('intentional inspection on another timeframe is labelled as viewing the original result',()=>{
  const source=fs.readFileSync(require.resolve('../backtest-ui.js'),'utf8'),market={ex:'BYBIT',symbol:'PUFFERUSDT',int:'3m'},viewMarket={...market,int:'1m'},ctx={view:'trades',single:{meta:{market,config:{},coverage:{},fundingCoverage:{},cell:1},inspection:{market:viewMarket,cell:2}},comparison:null,optimized:null,M,target:()=>viewMarket,follow:true,lastFailure:false,busy:false,chartWorkspace:{activeCell:()=>2},resultContext:{},modeNotice:{},dataNotice:{}};
  vm.createContext(ctx);vm.runInContext(source.slice(source.indexOf('function updateResultContext()'),source.indexOf('  function updateTarget()')),ctx);ctx.updateResultContext();assert.equal(ctx.resultContext.hidden,false);assert.match(ctx.resultContext.textContent,/3분 백테스트 결과를 1분 차트에서 확인 중/);assert.doesNotMatch(ctx.resultContext.textContent,/이전 결과/);
