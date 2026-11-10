@@ -311,14 +311,23 @@ function drawInner(){const w=$('unified-chart').clientWidth,h=$('unified-chart')
 }
 
 const rulerColors=RulerSettings.create();
-let chartDrawings;
+let chartDrawings,pageTouchScroll=false,compactTouchOverview=false;
 let rulerEnabled=false,rulerStart=null,rulerEnd=null,rulerLocked=false,shiftHeld=false,rulerTemporary=false,rulerDragging=false,rulerPointer=null,rulerCapture=null;
 const rulerBtn=$('btnRuler');rulerBtn.className='btn-toggle';rulerBtn.textContent='📏 줄자';rulerBtn.title='드래그로 측정 · Shift+드래그: 임시 줄자 · Esc 종료';rulerBtn.setAttribute('aria-pressed','false');
 const rulerLabel=document.createElement('div');rulerLabel.id='rulerMeasurementLabel';rulerLabel.hidden=true;rulerLabel.style.cssText='position:absolute;pointer-events:none;z-index:7;background:#2563eb;color:#fff;border:1px solid #93c5fd;padding:8px 12px;border-radius:4px;font-size:13px;font-weight:700;line-height:1.6;text-align:center;white-space:pre-line;box-shadow:0 2px 8px #0009;max-width:280px';$('unified-chart').append(rulerLabel);
 function priceChange(start,end){if(!Number.isFinite(start)||!Number.isFinite(end)||start<=0)return null;return {difference:end-start,percent:(end-start)/start*100};}
 function clearRuler(){rulerStart=null;rulerEnd=null;rulerLocked=false;rulerTemporary=false;rulerLabel.hidden=true;schedule();}
 function rulerWheelActive(){return rulerEnabled||shiftHeld||rulerDragging||Boolean(chartDrawings?.usesRuler());}
-function rulerInteraction(){const measuring=rulerWheelActive(),active=measuring||Boolean(chartDrawings?.capturesChart());chart.applyOptions({handleScroll:active?false:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:{mouseWheel:measuring||!active,pinch:!active,axisPressedMouseMove:{time:!active,price:true},axisDoubleClickReset:{time:!active,price:false}}});$('unified-chart').style.cursor=active?'crosshair':'';}
+function canPageSwipe(){return pageTouchScroll&&!rulerWheelActive()&&!chartDrawings?.capturesChart();}
+function rulerInteraction(){
+ const measuring=rulerWheelActive(),active=measuring||Boolean(chartDrawings?.capturesChart()),host=$('unified-chart');
+ chart.applyOptions({handleScroll:active?false:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:!pageTouchScroll},handleScale:{mouseWheel:measuring||!active,pinch:!active,axisPressedMouseMove:{time:!active,price:true},axisDoubleClickReset:{time:!active,price:false}}});
+ host.classList.toggle('chart-page-pan',pageTouchScroll&&!active);host.style.cursor=active?'crosshair':'';
+}
+function applyTouchLayout({pageScroll,overview}){
+ if(pageTouchScroll!==pageScroll){pageTouchScroll=pageScroll;rulerInteraction();}
+ if(compactTouchOverview!==overview){compactTouchOverview=overview;chart.applyOptions({layout:{fontSize:overview?10:12},rightPriceScale:{minimumWidth:overview?42:100}});schedule();}
+}
 function endRulerDrag(){if(rulerPointer!==null&&rulerCapture?.hasPointerCapture(rulerPointer))rulerCapture.releasePointerCapture(rulerPointer);rulerCapture=null;rulerDragging=false;rulerPointer=null;rulerInteraction();}
 function toggleRuler(enabled){if(enabled&&chartDrawings?.capturesChart())chartDrawings.setTool('cross');endRulerDrag();rulerEnabled=enabled;rulerBtn.classList.toggle('active',enabled);rulerBtn.setAttribute('aria-pressed',String(enabled));clearRuler();rulerInteraction();if(enabled)status('줄자: 가격 차트에서 누른 채 드래그하세요. Shift+드래그도 가능 · Esc 종료');}
 rulerBtn.onclick=()=>toggleRuler(!rulerEnabled);
@@ -354,7 +363,7 @@ function placeChartClock(){
  if(priceClock.hidden)return;
  priceClock.replaceChildren(Object.assign(document.createElement('span'),{textContent:latest.close.toFixed(8)}),Object.assign(document.createElement('span'),{textContent:live?ChartData.countdown(latest.time,step,now,TimeframeEngine.end(latest.time,loadedMarket.int)):'00:00'}));
  priceClock.dataset.live=String(Boolean(live));priceClock.title=live?'현재 '+$('intervalSelect').selectedOptions[0].text+' 봉 마감까지 남은 시간':'다음 실시간 캔들 확인 대기';
- setStyle(priceClock,'left',width+'px');setStyle(priceClock,'width',Math.max(70,rulerHost.clientWidth-width)+'px');setStyle(priceClock,'top',pane.top+Math.max(0,Math.min(pane.height-30,y-13))+'px');setStyle(priceClock,'background',latest.close>=latest.open?'#22c55e':'#ef4444');
+ setStyle(priceClock,'left',width+'px');setStyle(priceClock,'width',Math.max(compactTouchOverview?0:70,rulerHost.clientWidth-width)+'px');setStyle(priceClock,'top',pane.top+Math.max(0,Math.min(pane.height-30,y-13))+'px');setStyle(priceClock,'background',latest.close>=latest.open?'#22c55e':'#ef4444');
 }
 function placeCursorPrice(hit){
  const pane=hit?.pane,width=chart.timeScale().width();
@@ -606,6 +615,7 @@ const legendStyle = document.createElement('style');
 legendStyle.textContent = '.legend-collapsed .pane-header-left{display:none!important}';
 document.head.append(legendStyle);
 const legendToggle = document.createElement('button');
+legendToggle.id = 'chartLegendToggle';
 legendToggle.type = 'button';
 legendToggle.dataset.chartNav = 'true';
 legendToggle.style.cssText = 'position:absolute;left:6px;z-index:9;width:26px;height:20px;padding:0;display:flex;align-items:center;justify-content:center;background:#111827dd;border:1px solid #475569;border-radius:4px;color:#cbd5e1;cursor:pointer';
@@ -1270,7 +1280,9 @@ for(const id of ['warnThresh','extThresh'])$(id).onchange=()=>{try{rebuild();ren
 studyPanels=new StudyPanelManager();buildFundingCards();
 rulerColors.bind({workspace:chartWorkspace,buttonAfter:rulerBtn,onChange:()=>{chartDrawings?.setRulerLocked(rulerColors.isLocked());schedule();},onStatus:status});
 chartDrawings=bindChartDrawings({
- host:rulerHost,workspace:chartWorkspace,chart,rulerColors,rulerButton:rulerBtn,
+ host:rulerHost,workspace:chartWorkspace,chart,rulerColors,rulerButton:rulerBtn,embedded:globalThis.ChartWorkspace?.embedded,
+ drawOnActive:id=>globalThis.ChartWorkspace?.drawOnActive(id),toolChanged:id=>globalThis.ChartWorkspace?.drawingToolChanged(id),
+ editFavorite:command=>globalThis.ChartWorkspace?.editFavorite(command),favoritesChanged:()=>globalThis.ChartWorkspace?.favoritesChanged(),
  data:()=>all,market:()=>loadedMarket,windowStart:()=>windowStart,step:()=>duration[loadedMarket?.int]||60,
  layout:()=>getPaneLayout().map(p=>{const panel=studyPanels.panelForPane(chart.panes()[p.index]);return {...p,id:panel?.id,visible:Boolean(panel&&studyPanels.isVisible(panel))};}),
  jumpDrawing:item=>{const points=item.points,time=(points[0].time+points.at(-1).time)/2;void jumpToChartDate(time,new AbortController().signal,loadedMarket.int).catch(error=>{if(error.name!=='AbortError')status('그리기 날짜 이동 실패 · '+error.message,true);});},
@@ -1790,7 +1802,10 @@ function loadInputMarket(){
  void loadData();
 }
 globalThis.ChartWorkspace?.bind({
- workspace:chartWorkspace,host:rulerHost,symbolButton:chartSymbolLabel,
+ workspace:chartWorkspace,host:rulerHost,symbolButton:chartSymbolLabel,touchLayout:applyTouchLayout,canPageSwipe,
+ drawingTool:id=>chartDrawings.setTool(id),favoritesHost:host=>chartDrawings.setFavoritesHost(host),
+ favoritesTarget:(index,id)=>chartDrawings.setFavoritesTarget(index,id),favoritesSnapshot:()=>chartDrawings.favoritesSnapshot(),
+ favoritesState:state=>chartDrawings.syncFavorites(state),applyFavoriteEdit:command=>chartDrawings.applyFavoriteEdit(command),
  signalSnapshot:localSignalSnapshot,signalCommand:applySignalCommand,
  backtest:setChartBacktest,getMarket:()=>loadedMarket||{ex:$('exchangeSelect').value,symbol:$('symbolInput').value,int:$('intervalSelect').value},
  selectMarket:selectWorkspaceMarket,action:action=>chartViewActions[action]?.(),

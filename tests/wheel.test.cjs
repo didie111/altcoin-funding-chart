@@ -18,7 +18,7 @@ function wheelHarness() {
     {index: 1, top: 350, bottom: 570, height: 220, series: {name: 'funding'}}
   ];
   const context = {
-    document: {getElementById: () => ({style: {}})},
+    document: {getElementById: () => ({style: {},classList:{toggle(){}}})},
     LightweightCharts: {CrosshairMode: {Normal: 0}, createChart: (_host, value) => {options = value; return chart;}},
     Element: class Element {},
     rulerHost: {
@@ -27,7 +27,7 @@ function wheelHarness() {
       style: {}
     },
     getPaneInfoAtY: y => panes.find(pane => y >= pane.top && y < pane.bottom),
-    rulerEnabled: false, shiftHeld: false, rulerDragging: false, chartDrawings: null, chartDateFocus: null,
+    rulerEnabled: false, shiftHeld: false, rulerDragging: false, chartDrawings: null, chartDateFocus: null,pageTouchScroll:false,compactTouchOverview:false,
     holdPriceAxisWidth: () => {},
     zoomPanePrice: (pane, y, factor) => priceChanges.push({pane: pane.series.name, y, factor}),
     requestAnimationFrame: callback => {frames.set(++frameId, callback); return frameId;},
@@ -139,6 +139,16 @@ test('other drawing tools still reserve plot input', () => {
   const h=wheelHarness();h.interaction({chartDrawings:{capturesChart:()=>true,usesRuler:()=>false}});
   assert.equal(h.options().handleScale.mouseWheel,false);
   assert.equal(h.wheel(600,170,-100).stopped,true);
+});
+
+test('a mobile page keeps horizontal pan and pinch while returning vertical swipes to the page',()=>{
+  const h=wheelHarness();h.interaction({pageTouchScroll:true});
+  assert.equal(h.options().handleScroll.horzTouchDrag,true);
+  assert.equal(h.options().handleScroll.vertTouchDrag,false);
+  assert.equal(h.options().handleScale.pinch,true);
+  h.ruler(true);assert.equal(h.options().handleScroll,false);assert.equal(h.options().handleScale.mouseWheel,true);
+  h.ruler(false);h.interaction({pageTouchScroll:false});
+  assert.equal(h.options().handleScroll.vertTouchDrag,true);
 });
 
 test('wheel over the time axis is available to native time zoom without manual price changes', () => {

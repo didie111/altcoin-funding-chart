@@ -13,6 +13,7 @@ const iconPaths={
 function icon(id){return `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${iconPaths[id]||iconPaths.trend}"/></svg>`;}
 function button(label,iconId,click,className=''){const b=document.createElement('button');b.type='button';b.className=className;b.title=label;b.setAttribute('aria-label',label);b.innerHTML=icon(iconId);b.onclick=click;return b;}
 const prefKey='funding-chart-drawing-tools-v1';
+const favoriteList=value=>Array.isArray(value)?[...new Set(value.filter(t=>typeof t==='string'&&Object.hasOwn(E.catalog,t)&&E.catalog[t].points!==0))]:E.defaultFavorites.slice();
 function logicalCoordinate(scale,index){
  // LWC 5.0.8 returns 0 for fractional indices. Project both candle centers
  // with integer indices, preserving the saved timestamp between those bars.
@@ -24,20 +25,26 @@ class ChartDrawings {
  constructor(api){
   this.api=api;this.host=api.host;this.workspace=api.workspace;this.tool='cross';this.selected=null;this.draft=null;this.gesture=null;this.preview=null;this.rendered=[];this.menu=null;this.activeGroup=new Map(E.groups.map(([g,,id])=>[g,id]));this.store=new E.Store(this.safeStorage());
   let pref;try{pref=JSON.parse(this.safeStorage()?.getItem(prefKey));}catch{}
-  this.preferences={favorites:Array.isArray(pref?.favorites)?[...new Set(pref.favorites.filter(t=>E.catalog[t]&&E.catalog[t].points!==0))]:E.defaultFavorites.slice(),favoritesVisible:pref?.favoritesVisible!==false,favoritesPosition:pref?.favoritesPosition||{left:230,top:18},magnet:[0,1,2].includes(pref?.magnet)?pref.magnet:0,stay:Boolean(pref?.stay),color:/^#[0-9a-f]{6}$/i.test(pref?.color)?pref.color:'#60a5fa',width:Math.max(1,Math.min(5,Number(pref?.width)||2)),dash:0};
+  this.preferences={favorites:favoriteList(pref?.favorites),favoritesVisible:pref?.favoritesVisible!==false,favoritesPosition:pref?.favoritesPosition||{left:230,top:18},sharedFavoritesPosition:pref?.sharedFavoritesPosition||null,magnet:[0,1,2].includes(pref?.magnet)?pref.magnet:0,stay:Boolean(pref?.stay),color:/^#[0-9a-f]{6}$/i.test(pref?.color)?pref.color:'#60a5fa',width:Math.max(1,Math.min(5,Number(pref?.width)||2)),dash:0};
   this.scene=document.createElementNS('http://www.w3.org/2000/svg','svg');this.scene.id='drawingScene';this.scene.setAttribute('aria-label','차트 그리기');this.host.append(this.scene);
   this.labelScene=document.createElementNS('http://www.w3.org/2000/svg','svg');this.labelScene.id='drawingRulerLabels';this.labelScene.setAttribute('aria-label','줄자 측정값');this.host.append(this.labelScene);this.measurement=null;this.axisScene=document.createElementNS('http://www.w3.org/2000/svg','svg');this.axisScene.id='drawingAxisLabels';this.axisScene.setAttribute('aria-label','그리기 가격·날짜 표시');this.host.append(this.axisScene);
-  this.buildRail();this.buildTopbar();this.buildFavorites();this.buildObjectToolbar();this.buildDialog();this.bind();this.render();
+  this.buildRail();this.buildTopbar();if(!api.embedded)this.buildFavorites();this.buildObjectToolbar();this.buildDialog();this.bind();this.render();
  }
  safeStorage(){try{return localStorage;}catch{return null;}}
- savePreferences(){try{this.safeStorage()?.setItem(prefKey,JSON.stringify(this.preferences));}catch{this.api.status('브라우저 저장 공간이 부족해 도구 설정을 저장하지 못했습니다.',true);}}
+ savePreferences(){try{
+  const storage=this.safeStorage(),prefs={...this.preferences};
+  // Only the workspace owns shared favorites. A child saving its drawing style
+  // must not replace a favorite edited in another chart.
+  if(this.api.embedded){const saved=JSON.parse(storage?.getItem(prefKey)||'{}');for(const key of ['favorites','favoritesVisible','favoritesPosition','sharedFavoritesPosition']){if(Object.hasOwn(saved,key))prefs[key]=saved[key];else delete prefs[key];}}
+  storage?.setItem(prefKey,JSON.stringify(prefs));
+ }catch{this.api.status('브라우저 저장 공간이 부족해 도구 설정을 저장하지 못했습니다.',true);}}
  capturesChart(){return Boolean(this.gesture||this.draft||!['cross','dot','pointer','demo'].includes(this.tool));}
  usesRuler(){return this.tool==='ruler'||this.draft?.tool==='ruler'||this.gesture?.item?.tool==='ruler';}
  typing(target){return target instanceof Element&&Boolean(target.closest('input,textarea,select,[contenteditable="true"],dialog'));}
  blockUI(node){node.dataset.drawingUi='true';for(const type of ['pointerdown','dblclick','wheel'])node.addEventListener(type,e=>e.stopPropagation());}
  changed(){if(!this.store.persist())this.api.status('브라우저 저장 공간이 부족해 그리기를 저장하지 못했습니다.',true);this.api.schedule();this.refreshUI();}
  sync(){const market=this.api.market(),key=market?market.ex+':'+market.symbol:'';if(key&&this.store.switchMarket(key)){this.cancel();this.selected=null;this.closeMenu();}if(market?.id!==this.marketRun){this.marketRun=market?.id;this.measurement=null;this.cancel();}}
- setTool(id){if(!E.catalog[id])return;this.api.beforeTool();this.cancel();this.tool=id;this.closeMenu();const def=E.catalog[id];this.activeGroup.set(def.group,id);this.api.interaction();this.api.cursor(id);this.host.dataset.drawingCursor=id;this.host.style.cursor=['cross','pointer'].includes(id)?(id==='pointer'?'default':'crosshair'):id==='eraser'?'cell':id==='dot'?'crosshair':'crosshair';this.refreshUI();this.api.status(def.points===0?def.name: def.name+' · '+(def.points===1?'위치를 클릭하세요':def.points<0?'드래그해 그리세요':def.points===99?'점을 클릭해 연결 · 더블클릭 또는 Enter로 완료':def.points+'개 지점을 클릭하거나 드래그하세요')+' · Esc 취소');}
+ setTool(id){if(!E.catalog[id])return;this.api.beforeTool();this.cancel();this.tool=id;this.closeMenu();const def=E.catalog[id];this.activeGroup.set(def.group,id);this.api.interaction();this.api.cursor(id);this.api.toolChanged?.(id);this.host.dataset.drawingCursor=id;this.host.style.cursor=['cross','pointer'].includes(id)?(id==='pointer'?'default':'crosshair'):id==='eraser'?'cell':id==='dot'?'crosshair':'crosshair';this.refreshUI();this.api.status(def.points===0?def.name: def.name+' · '+(def.points===1?'위치를 클릭하세요':def.points<0?'드래그해 그리세요':def.points===99?'점을 클릭해 연결 · 더블클릭 또는 Enter로 완료':def.points+'개 지점을 클릭하거나 드래그하세요')+' · Esc 취소');}
  cancel(){this.draft=null;this.preview=null;this.releaseGesture(this.gesture);this.gesture=null;this.api.schedule();this.api.interaction();}
  buildRail(){
   this.rail=document.getElementById('drawingToolbar');this.rail.setAttribute('role','toolbar');this.rail.setAttribute('aria-label','그리기 도구');this.blockUI(this.rail);
@@ -50,15 +57,66 @@ class ChartDrawings {
   this.lockAll=button('모든 그리기 잠금','lock',()=>{this.cancel();this.store.commit({...this.store.state,locked:!this.store.state.locked});this.changed();},'drawing-utility');this.lockAll.id='drawingLockAll';scroll.append(this.lockAll);
   this.hideAll=button('모든 그리기 숨기기','hide',()=>{this.store.commit({...this.store.state,hidden:!this.store.state.hidden});this.changed();},'drawing-utility');this.hideAll.id='drawingHideAll';scroll.append(this.hideAll);
   const clear=button('현재 코인의 모든 그리기 삭제','trash',()=>{this.cancel();this.selected=null;this.measurement=null;this.store.commit({...this.store.state,items:[]});this.changed();},'drawing-utility');clear.id='drawingClear';scroll.append(clear);
-  this.favoritesToggle=button('즐겨찾기 도구 모음 표시','star',()=>{this.preferences.favoritesVisible=!this.preferences.favoritesVisible;this.savePreferences();this.refreshUI();},'drawing-utility drawing-favorites-toggle');this.favoritesToggle.id='drawingFavoritesToggle';this.rail.append(this.favoritesToggle);
+  this.favoritesToggle=button('즐겨찾기 도구 모음 표시','star',()=>this.editFavorite({kind:'visibility'}),'drawing-utility drawing-favorites-toggle');this.favoritesToggle.id='drawingFavoritesToggle';this.rail.append(this.favoritesToggle);
  }
  buildTopbar(){const bar=document.getElementById('drawingHistoryControls');this.blockUI(bar);this.undoButton=button('실행 취소 (Ctrl+Z)','undo',()=>this.undo());this.undoButton.id='drawingUndo';this.redoButton=button('다시 실행 (Ctrl+Y)','redo',()=>this.redo());this.redoButton.id='drawingRedo';const objects=button('그리기 목록','objects',e=>this.openObjects(e.currentTarget));objects.id='drawingObjectsToggle';bar.append(this.undoButton,this.redoButton,objects);}
  buildFavorites(){this.favorites=document.createElement('div');this.favorites.id='drawingFavorites';this.favorites.className='drawing-floating';this.favorites.setAttribute('role','toolbar');this.favorites.setAttribute('aria-label','즐겨찾기 그리기 도구');this.blockUI(this.favorites);this.host.append(this.favorites);this.renderFavorites();}
- renderFavorites(){this.favorites.replaceChildren();const handle=button('즐겨찾기 도구 모음 이동','',null,'drawing-grip');handle.innerHTML='⠿';this.favorites.append(handle);this.bindDrag(handle,this.favorites);for(const id of this.preferences.favorites){const b=button(E.catalog[id].name+' 선택',id,()=>this.setTool(id));b.dataset.drawingTool=id;this.favorites.append(b);}if(!this.preferences.favorites.length){const hint=document.createElement('span');hint.className='drawing-empty-favorites';hint.textContent='도구 메뉴의 ☆로 추가';this.favorites.append(hint);}this.placeFavorites();}
- placeFavorites(){const max=Math.max(0,this.host.clientWidth-this.favorites.offsetWidth-8),pos=this.preferences.favoritesPosition;this.favorites.style.left=Math.max(4,Math.min(max,Number(pos.left)||0))+'px';this.favorites.style.top=Math.max(4,Math.min(this.host.clientHeight-42,Number(pos.top)||0))+'px';}
- bindDrag(handle,node){let drag=null;handle.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();e.stopPropagation();drag={x:e.clientX,y:e.clientY,left:node.offsetLeft,top:node.offsetTop};handle.setPointerCapture(e.pointerId);});handle.addEventListener('pointermove',e=>{if(!drag)return;this.preferences.favoritesPosition={left:drag.left+e.clientX-drag.x,top:drag.top+e.clientY-drag.y};this.placeFavorites();});for(const type of ['pointerup','pointercancel'])handle.addEventListener(type,e=>{if(!drag)return;if(handle.hasPointerCapture(e.pointerId))handle.releasePointerCapture(e.pointerId);drag=null;this.savePreferences();});}
+ favoritesSnapshot(){return {tools:this.preferences.favorites.slice(),visible:this.preferences.favoritesVisible};}
+ editFavorite(command){if(!this.api.editFavorite?.(command))this.applyFavoriteEdit(command);}
+ applyFavoriteEdit(command){
+  if(command?.kind==='visibility')this.preferences.favoritesVisible=!this.preferences.favoritesVisible;
+  else if(command?.kind==='tool'&&typeof command.tool==='string'&&Object.hasOwn(E.catalog,command.tool)&&E.catalog[command.tool].points!==0){
+   const index=this.preferences.favorites.indexOf(command.tool);
+   if(index>=0)this.preferences.favorites.splice(index,1);else this.preferences.favorites.push(command.tool);
+   this.renderFavorites();
+  }else return;
+  this.savePreferences();this.updateFavoriteStars();this.refreshUI();this.api.favoritesChanged?.();
+ }
+ syncFavorites(state){
+  if(!Array.isArray(state?.tools)||typeof state.visible!=='boolean')return;
+  const tools=favoriteList(state.tools),previous=this.preferences.favorites;
+  this.preferences.favorites=tools;this.preferences.favoritesVisible=state.visible;
+  if(tools.length!==previous.length||tools.some((tool,i)=>tool!==previous[i]))this.renderFavorites();
+  this.updateFavoriteStars();this.refreshUI();
+ }
+ updateFavoriteStars(){
+  for(const star of this.menu?.querySelectorAll('[data-drawing-favorite]')||[]){
+   const on=this.preferences.favorites.includes(star.dataset.drawingFavorite);star.classList.toggle('is-favorite',on);star.setAttribute('aria-pressed',String(on));
+  }
+ }
+ setFavoritesHost(host){
+  const bar=this.favorites,parent=host||this.host;if(!bar||bar.parentElement===parent)return;
+  if(this.favoriteBounds&&this.favoriteBounds!==this.host)this.resizeObserver?.unobserve(this.favoriteBounds);
+  this.favoriteBounds=parent;bar.classList.toggle('drawing-favorites-shared',Boolean(host));parent.append(bar);
+  if(parent!==this.host)this.resizeObserver?.observe(parent);
+  this.placeFavorites();
+ }
+ setFavoritesTarget(index,tool){
+  if(!this.favorites||this.favoriteIndex===index&&this.favoriteTool===tool)return;
+  this.favoriteIndex=index;this.favoriteTool=tool;
+  this.favorites.setAttribute('aria-label',index===null?'즐겨찾기 그리기 도구':'즐겨찾기 그리기 도구 · '+(index+1)+'번 차트');
+  for(const b of this.favorites.querySelectorAll('[data-drawing-tool]')){const on=b.dataset.drawingTool===(tool??this.tool);b.classList.toggle('active',on);b.setAttribute('aria-pressed',String(on));}
+ }
+ renderFavorites(){
+  const bar=this.favorites;if(!bar)return;const scroll=bar.scrollLeft;bar.replaceChildren();
+  const handle=button('즐겨찾기 도구 모음 이동','',null,'drawing-grip');handle.innerHTML='⠿';bar.append(handle);this.bindDrag(handle,bar);
+  for(const id of this.preferences.favorites){const b=button(E.catalog[id].name+' 선택',id,()=>{if(!this.api.drawOnActive?.(id))this.setTool(id);});b.dataset.drawingTool=id;bar.append(b);}
+  if(!this.preferences.favorites.length){const hint=document.createElement('span');hint.className='drawing-empty-favorites';hint.textContent='도구 메뉴의 ☆로 추가';bar.append(hint);}bar.scrollLeft=scroll;this.placeFavorites();
+ }
+ placeFavorites(){
+  const bar=this.favorites,parent=bar?.parentElement;if(!parent||bar.hidden||!parent.clientWidth||!parent.clientHeight)return;
+  const shared=parent!==this.host,pos=(shared?this.preferences.sharedFavoritesPosition:this.preferences.favoritesPosition)??{left:(parent.clientWidth-bar.offsetWidth)/2,top:parent.clientHeight-bar.offsetHeight-36};
+  const left=Math.max(4,Math.min(parent.clientWidth-bar.offsetWidth-4,Number(pos.left)||0))+'px',top=Math.max(4,Math.min(parent.clientHeight-bar.offsetHeight-4,Number(pos.top)||0))+'px';
+  if(bar.style.left!==left)bar.style.left=left;if(bar.style.top!==top)bar.style.top=top;
+ }
+ bindDrag(handle,node){
+  let drag=null;
+  handle.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();e.stopPropagation();drag={id:e.pointerId,x:e.clientX,y:e.clientY,left:node.offsetLeft,top:node.offsetTop,key:node.parentElement===this.host?'favoritesPosition':'sharedFavoritesPosition'};handle.setPointerCapture(e.pointerId);});
+  handle.addEventListener('pointermove',e=>{if(drag?.id!==e.pointerId)return;this.preferences[drag.key]={left:drag.left+e.clientX-drag.x,top:drag.top+e.clientY-drag.y};this.placeFavorites();});
+  for(const type of ['pointerup','pointercancel'])handle.addEventListener(type,e=>{if(drag?.id!==e.pointerId)return;if(handle.hasPointerCapture(e.pointerId))handle.releasePointerCapture(e.pointerId);drag=null;this.savePreferences();});
+ }
  openTools(group,anchor){this.closeMenu();const menu=this.newMenu(anchor);menu.setAttribute('aria-label',E.groups.find(g=>g[0]===group)?.[1]||'도구');const title=document.createElement('div');title.className='drawing-menu-title';title.textContent=menu.getAttribute('aria-label');menu.append(title);
-  for(const tool of E.tools.filter(t=>t.group===group)){const row=document.createElement('div');row.className='drawing-menu-row';const choose=button(tool.name,tool.id,()=>this.setTool(tool.id),'drawing-menu-choice');choose.innerHTML=icon(tool.id)+`<span>${R.esc(tool.name)}</span>`+(tool.shortcut?`<kbd>${R.esc(tool.shortcut)}</kbd>`:'');row.append(choose);if(tool.points!==0){const star=button(tool.name+' 즐겨찾기','star',()=>{const i=this.preferences.favorites.indexOf(tool.id);if(i>=0)this.preferences.favorites.splice(i,1);else this.preferences.favorites.push(tool.id);this.savePreferences();this.renderFavorites();this.refreshUI();star.classList.toggle('is-favorite',i<0);star.setAttribute('aria-pressed',String(i<0));},'drawing-menu-star');star.classList.toggle('is-favorite',this.preferences.favorites.includes(tool.id));star.setAttribute('aria-pressed',String(this.preferences.favorites.includes(tool.id)));row.append(star);}menu.append(row);}this.positionMenu(anchor);}
+  for(const tool of E.tools.filter(t=>t.group===group)){const row=document.createElement('div');row.className='drawing-menu-row';const choose=button(tool.name,tool.id,()=>this.setTool(tool.id),'drawing-menu-choice');choose.innerHTML=icon(tool.id)+`<span>${R.esc(tool.name)}</span>`+(tool.shortcut?`<kbd>${R.esc(tool.shortcut)}</kbd>`:'');row.append(choose);if(tool.points!==0){const star=button(tool.name+' 즐겨찾기','star',()=>this.editFavorite({kind:'tool',tool:tool.id}),'drawing-menu-star');star.dataset.drawingFavorite=tool.id;star.classList.toggle('is-favorite',this.preferences.favorites.includes(tool.id));star.setAttribute('aria-pressed',String(this.preferences.favorites.includes(tool.id)));row.append(star);}menu.append(row);}this.positionMenu(anchor);}
  newMenu(anchor){const m=document.createElement('div');m.className='drawing-menu';m.setAttribute('role','menu');m.dataset.drawingUi='true';this.blockUI(m);this.workspace.append(m);this.menu=m;this.positionMenu(anchor);return m;}
  positionMenu(anchor){if(!this.menu)return;const host=this.workspace.getBoundingClientRect(),rect=anchor.getBoundingClientRect(),width=Math.min(320,host.width-50);this.menu.style.width=width+'px';this.menu.style.maxHeight=Math.max(100,host.height-46)+'px';this.menu.style.left=Math.max(45,Math.min(host.width-width-5,rect.right-host.left+4))+'px';this.menu.style.top=Math.max(37,Math.min(host.height-this.menu.offsetHeight-6,rect.top-host.top))+'px';}
  closeMenu(){this.menu?.remove();this.menu=null;}
@@ -77,9 +135,9 @@ class ChartDrawings {
  refreshUI(){
   const set=(b,on)=>{b.classList.toggle('active',Boolean(on));b.setAttribute('aria-pressed',String(Boolean(on)));};
   for(const [group,,fallback]of E.groups){const id=this.activeGroup.get(group)||fallback,b=this.rail.querySelector('[data-drawing-group="'+group+'"]');b.innerHTML=icon(id);b.dataset.drawingTool=id;b.title=E.catalog[id].name;b.setAttribute('aria-label',E.catalog[id].name);set(b,this.tool===id);}
-  for(const b of this.workspace.querySelectorAll('[data-drawing-tool]'))set(b,b.dataset.drawingTool===this.tool);
+  for(const b of this.workspace.querySelectorAll('[data-drawing-tool]'))set(b,b.dataset.drawingTool===(this.favorites?.contains(b)?(this.favoriteTool??this.tool):this.tool));
   if(this.api.rulerButton)set(this.api.rulerButton,this.tool==='ruler');
-  set(this.magnet,this.preferences.magnet);this.magnet.title=this.magnet.getAttribute('aria-label')?.split(':')[0]+': '+['끄기','약한 자석','강한 자석'][this.preferences.magnet];this.magnet.setAttribute('aria-label',this.magnet.title);set(this.stay,this.preferences.stay);set(this.lockAll,this.store.state.locked);set(this.hideAll,this.store.state.hidden);set(this.favoritesToggle,this.preferences.favoritesVisible);this.favorites.hidden=!this.preferences.favoritesVisible;this.undoButton.disabled=!this.store.past.length;this.redoButton.disabled=!this.store.future.length;
+  set(this.magnet,this.preferences.magnet);this.magnet.title=this.magnet.getAttribute('aria-label')?.split(':')[0]+': '+['끄기','약한 자석','강한 자석'][this.preferences.magnet];this.magnet.setAttribute('aria-label',this.magnet.title);set(this.stay,this.preferences.stay);set(this.lockAll,this.store.state.locked);set(this.hideAll,this.store.state.hidden);set(this.favoritesToggle,this.preferences.favoritesVisible);if(this.favorites)this.favorites.hidden=!this.preferences.favoritesVisible;this.undoButton.disabled=!this.store.past.length;this.redoButton.disabled=!this.store.future.length;
   const item=this.item();this.objectBar.hidden=!item||this.store.state.hidden||item.hidden;if(item){if(document.activeElement!==this.colorInput)this.colorInput.value=item.color;this.widthInput.value=String(item.width);this.dashInput.value=String(item.dash);set(this.objectLock,item.locked);}
   const label=document.getElementById('drawingToolLabel');if(label)label.textContent=E.catalog[this.tool].name;this.placeFavorites();
  }
@@ -124,7 +182,7 @@ class ChartDrawings {
   document.addEventListener('pointerdown',e=>{if(!e.target.closest?.('[data-drawing-ui]'))this.closeMenu();});
   document.addEventListener('keydown',e=>{if(this.typing(e.target))return;const ctrl=e.ctrlKey||e.metaKey;if(ctrl&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?this.redo():this.undo();return;}if(ctrl&&e.key.toLowerCase()==='y'){e.preventDefault();this.redo();return;}if(e.key==='Escape'){this.cancel();this.measurement=null;this.closeMenu();this.selected=null;this.setTool('cross');return;}if(e.key==='Enter'&&this.draft?.tool==='polyline'&&this.draft.points.length>=2){e.preventDefault();this.finish(this.draft);return;}if((e.key==='Delete'||e.key==='Backspace')&&this.selected){e.preventDefault();this.removeSelected();return;}if(ctrl&&e.key.toLowerCase()==='d'&&this.selected){e.preventDefault();this.duplicate();return;}if(e.altKey){const key=e.key.toLowerCase(),id=({t:'trend',h:'hline',j:'hray',v:'vline',c:'crossline',f:'fib'})[key]||(e.shiftKey&&key==='r'?'rectangle':null);if(id){e.preventDefault();this.setTool(id);}}});
   window.addEventListener('storage',event=>{if(event.key===this.store.key+':'+this.store.market&&this.store.sync()){this.cancel();if(!this.item())this.selected=null;this.refreshUI();this.api.schedule();}});
-  window.addEventListener('blur',()=>{if(this.gesture){this.cancel();}});new ResizeObserver(()=>{this.placeFavorites();this.api.schedule();}).observe(this.host);
+  window.addEventListener('blur',()=>{if(this.gesture){this.cancel();}});this.resizeObserver=new ResizeObserver(()=>{this.placeFavorites();this.api.schedule();});this.resizeObserver.observe(this.host);
  }
  visibleTimes(){const range=this.api.chart.timeScale().getVisibleLogicalRange();return range?[E.logicalTime(this.api.data(),range.from+this.api.windowStart()-1,this.api.step()),E.logicalTime(this.api.data(),range.to+this.api.windowStart()+1,this.api.step())]:null;}
  render(){

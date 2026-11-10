@@ -66,6 +66,10 @@
 @media(max-width:650px){#drawingToolLabel{display:none}.drawing-object-toolbar{left:4px;transform:none;gap:1px}.drawing-object-toolbar button{width:25px}#chartTopbar{gap:4px}#chartTopbar #chartIdentityControls{max-width:calc(100% - 112px)}#drawingToolbar{width:40px}.drawing-tool-group [data-drawing-group]{width:30px!important}#drawingToolbar .drawing-utility{width:33px}}
 
 #drawingFavorites{overflow-x:auto;scrollbar-width:thin}#drawingFavorites button{flex-shrink:0}
+.drawing-favorites-shared{z-index:16;background:#172132f5}
+.chart-touch-device #drawingFavorites{touch-action:pan-x;overscroll-behavior-x:contain;scrollbar-width:none}
+.chart-touch-device #drawingFavorites button{width:40px;height:38px}
+.chart-touch-device #drawingFavorites .drawing-grip{position:sticky;left:0;width:25px;background:#202b3e}
 
 #drawingToolbar .drawing-ruler-tool{height:32px;width:33px}
 .ruler-colors-button{width:30px;height:28px;padding:3px!important;font-size:15px}

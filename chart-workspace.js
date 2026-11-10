@@ -8,13 +8,39 @@
  function preferences(value){return {layout:value?.layout===4?4:1,markets:Array.isArray(value?.markets)?value.markets.slice(0,4).map(m=>m?market(m):null):[]};}
  function assetRevision(sources){let hash=2166136261;for(const char of sources.join('|')){hash^=char.charCodeAt(0);hash=Math.imul(hash,16777619);}return (hash>>>0).toString(36);}
  function embedUrl(href,value,index,revision){const url=new URL(href);url.hash='';url.search='';url.searchParams.set('chart-embed','1');url.searchParams.set('cell',String(index));if(revision)url.searchParams.set('build',revision);const m=market(value);for(const [key,v]of Object.entries(m))url.searchParams.set(key,v);return url.href;}
+ function forwardPageSwipes(surface,enabled,scroll){
+  // Split charts are separate documents with no scroll range of their own.
+  // Send only vertical, single-finger gestures to the outer page.
+  let drag=null;
+  surface.addEventListener('touchstart',event=>{
+   const t=event.touches[0];
+   drag=enabled()&&event.touches.length===1&&!event.target.closest?.('[data-panel-ui],[data-chart-nav],[data-chart-fullscreen],[data-pane-scale],[data-drawing-ui]')?{id:t.identifier,x:t.clientX,y:t.clientY,last:t.clientY,axis:null}:null;
+  },{capture:true,passive:true});
+  surface.addEventListener('touchmove',event=>{
+   if(!drag)return;
+   const t=event.touches[0];
+   if(!enabled()||event.touches.length!==1||t.identifier!==drag.id){drag=null;return;}
+   if(!drag.axis){
+    const x=Math.abs(t.clientX-drag.x),y=Math.abs(t.clientY-drag.y);
+    if(Math.max(x,y)<7)return;
+    drag.axis=y>x?'y':'x';
+   }
+   if(drag.axis!=='y'||!event.cancelable)return;
+   event.preventDefault();event.stopPropagation();
+   const delta=drag.last-t.clientY;drag.last=t.clientY;if(delta)scroll(delta);
+  },{capture:true,passive:false});
+  for(const type of ['touchend','touchcancel'])surface.addEventListener(type,()=>{drag=null;},{capture:true,passive:true});
+ }
  function create(win){
   const doc=win.document,$=id=>doc.getElementById(id),params=new URLSearchParams(win.location.search),embedded=params.get('chart-embed')==='1';
+  const touchQuery=win.matchMedia?.('(hover: none), (pointer: coarse)'),isTouch=()=>touchQuery?.matches===true;
   let saved;try{saved=preferences(JSON.parse(win.localStorage.getItem(storageKey)||'{}'));}catch{saved=preferences();}
   let mode=1,api,grid,firstCell,picker,toggle,active=0,frames=[],startup=[],disposed=false,statusNode,maximized=-1,workspaceFullscreen=false,maximizeButton,workspaceButton;
   const ownCell=embedded?Number(params.get('cell')):0;
   const markets=saved.markets;
-  const controls=[],listeners=new Set(),actions=new Set(['ruler','ruler-settings','lines','indicators']);
+  const controls=[],drawingTools=[],listeners=new Set(),actions=new Set(['ruler','ruler-settings','lines','indicators']);
+  const knownTool=id=>typeof id==='string'&&Object.hasOwn(win.DrawingEngine?.catalog||{},id);
+  let pageDelta=0,pageScrollFrame=null;
   const signalViews=[],signalRevisions=[],signalListeners=new Set();let signalsWatched=false;
   const sameMarket=(a,b)=>a&&b&&a.ex===b.ex&&a.symbol===b.symbol&&a.int===b.int;
   function notifySignals(){for(const listener of signalListeners)listener();}
@@ -31,15 +57,43 @@
   function notify(){for(const listener of listeners)listener();}
   let lastControls='';
   if(embedded)doc.documentElement.classList.add('chart-embedded');
+  function refreshPresentation(){
+   const touch=isTouch(),overview=touch&&(embedded||mode===4)&&maximized<0,pageScroll=touch&&!workspaceFullscreen;
+   doc.documentElement.classList.toggle('chart-touch-device',touch);
+   doc.documentElement.classList.toggle('chart-touch-overview',overview);
+   doc.documentElement.classList.toggle('chart-mobile-page',pageScroll&&!embedded);
+   api?.touchLayout?.({pageScroll,overview});
+  }
+  refreshPresentation();
   const explicit=params.has('symbol')||params.has('ex')||params.has('int'),initial=embedded||explicit?market(Object.fromEntries(['ex','symbol','int'].map(k=>[k,params.get(k)]))):markets[0];
   if(initial){$('exchangeSelect').value=initial.ex;$('symbolInput').value=initial.symbol;$('intervalSelect').value=initial.int;}
   function send(message){if(embedded&&win.parent!==win)win.parent.postMessage({channel,...message},win.location.origin);}
   function persist(){if(embedded)return;try{win.localStorage.setItem(storageKey,JSON.stringify({layout:mode,markets}));}catch{}}
   function applyControls(){const state=controls[active];if(!state)return;for(const [id,key]of [['btnRuler','ruler'],['btnToggleLines','lines']]){const button=$(id);button?.classList.toggle('active',state[key]);button?.setAttribute('aria-pressed',String(state[key]));}}
-  function selected(index){const changed=active!==index;active=index;firstCell?.classList.toggle('selected',index===0);for(const frame of frames)frame.classList.toggle('selected',Number(frame.dataset.chartCell)===index);applyControls();notify();if(changed){watchSignals();notifySignals();}}
+  function syncFavoritesTarget(){if(!embedded)api?.favoritesTarget?.(mode===4?active:null,active>0?drawingTools[active]||'cross':null);}
+  function selected(index){const changed=active!==index;active=index;firstCell?.classList.toggle('selected',index===0);for(const frame of frames)frame.classList.toggle('selected',Number(frame.dataset.chartCell)===index);applyControls();syncFavoritesTarget();notify();if(changed){watchSignals();notifySignals();}}
   function controlsChanged(value){const state={ruler:value.ruler===true,lines:value.lines===true},key=JSON.stringify(state);controls[ownCell]=state;if(embedded&&key!==lastControls)send({type:'controls',state});lastControls=key;if(!embedded)applyControls();}
   function hasRemoteTarget(){return !embedded&&mode===4&&active>0;}
   function deliver(frame,message){if(frame.chartReady)frame.contentWindow.postMessage({channel,...message},win.location.origin);else{frame.chartQueue??=[];if(message.type==='select')frame.chartQueue=frame.chartQueue.filter(item=>item.type==='backtest-result').slice(-1);frame.chartQueue.push(message);}}
+  function sendFavorites(frame){
+   const state=api?.favoritesSnapshot?.();if(frame.chartReady&&state)deliver(frame,{type:'drawing-favorites-state',state});
+  }
+  function favoritesChanged(){if(!embedded)for(const frame of frames)sendFavorites(frame);}
+  function editFavorite(command){if(!embedded)return false;send({type:'drawing-favorite-edit',command});return true;}
+  function drawingToolChanged(tool){if(embedded&&knownTool(tool))send({type:'drawing-tool-state',tool});}
+  function drawOnActive(tool){
+   if(!hasRemoteTarget()||!knownTool(tool))return false;
+   const frame=frames.find(f=>Number(f.dataset.chartCell)===active);if(!frame)return false;
+   deliver(frame,{type:'drawing-tool-select',tool});return true;
+  }
+  function scrollFromFrame(delta){
+   if(!isTouch()||workspaceFullscreen||!Number.isFinite(delta)||Math.abs(delta)>win.innerHeight)return;
+   pageDelta+=delta;if(pageScrollFrame!==null)return;
+   pageScrollFrame=win.requestAnimationFrame(()=>{
+    pageScrollFrame=null;const delta=pageDelta;pageDelta=0;
+    if(mode===4&&isTouch()&&!workspaceFullscreen&&delta)win.scrollBy(0,delta);
+   });
+  }
   function expandControl(button,pressed,label,kind='chart'){
    if(!button)return;button.title=label;button.setAttribute('aria-label',label);button.setAttribute('aria-pressed',String(pressed));
    const shape=kind==='workspace'
@@ -51,13 +105,13 @@
   function fullscreenState(){return embedded||mode===4?{active:maximized===ownCell,label:maximized===ownCell?'4분할로 돌아가기 (Alt+Enter)':'이 차트 최대화 (Alt+Enter)'}:null;}
   function updateControls(){const state=fullscreenState();if(maximizeButton)maximizeButton.hidden=!state;if(workspaceButton)workspaceButton.hidden=false;expandControl(maximizeButton,Boolean(state?.active),state?.label||'이 차트 최대화 (Alt+Enter)');expandControl(workspaceButton,workspaceFullscreen,workspaceFullscreen?'작업 영역 전체화면 해제':'작업 영역 전체화면','workspace');}
   function broadcastLayout(){if(!embedded)for(const frame of frames)frame.contentWindow.postMessage({channel,type:'layout-state',maximized,fullscreen:workspaceFullscreen},win.location.origin);}
-  function syncWorkspaceFullscreen(value){if(embedded||workspaceFullscreen===value)return;workspaceFullscreen=value;updateControls();broadcastLayout();}
+  function syncWorkspaceFullscreen(value){if(embedded||workspaceFullscreen===value)return;workspaceFullscreen=value;refreshPresentation();updateControls();broadcastLayout();}
   function setMaximized(index){
    if(embedded||mode!==4||!Number.isInteger(index)||index< -1||index>3)return;
    if(index>0&&!frames.some(frame=>Number(frame.dataset.chartCell)===index))return;
    maximized=index;grid.classList.toggle('cell-maximized',index>=0);firstCell.classList.toggle('maximized',index===0);
    for(const frame of frames)frame.classList.toggle('maximized',Number(frame.dataset.chartCell)===index);
-   if(index>=0)selected(index);updateControls();broadcastLayout();api.syncFullscreen?.();api.schedule();
+   if(index>=0)selected(index);refreshPresentation();updateControls();broadcastLayout();api.syncFullscreen?.();api.schedule();
   }
   function toggleMaximized(index){setMaximized(maximized===index?-1:index);}
   function restoreMaximized(){if(maximized<0)return false;if(embedded)send({type:'restore'});else setMaximized(-1);return true;}
@@ -73,9 +127,10 @@
   function setLayout(next){
    if(embedded||!api)return;next=next===4?4:1;if(mode===next)return;if(maximized>=0)setMaximized(-1);mode=next;
    doc.body.classList.toggle('chart-layout-four',mode===4);api.workspace.classList.toggle('chart-quad',mode===4);grid.classList.toggle('four',mode===4);
+   api.favoritesHost?.(mode===4?grid:null);refreshPresentation();
    toggle.setAttribute('aria-pressed',String(mode===4));toggle.title=mode===4?'1화면으로 돌아가기':'4분할 차트';toggle.setAttribute('aria-label',toggle.title);toggle.textContent=mode===4?'▣ 1화면':'⊞ 4분할';
    for(const timer of startup)clearTimeout(timer);startup=[];
-   if(mode===1){for(const frame of frames){frame.contentWindow.postMessage({channel,type:'dispose'},win.location.origin);frame.remove();}frames=[];signalViews.length=0;signalRevisions.length=0;selected(0);}
+   if(mode===1){for(const frame of frames){frame.contentWindow.postMessage({channel,type:'dispose'},win.location.origin);frame.remove();}frames=[];signalViews.length=0;signalRevisions.length=0;drawingTools.length=0;selected(0);}
    else{
     const primary=current();markets[0]=primary;const intervals=[primary.int,'1h','15m','5m'],revision=assetRevision(Array.from(doc.querySelectorAll?.('script[src],link[rel="stylesheet"]')||[],element=>element.src||element.href));
     for(let index=1;index<=3;index++){
@@ -101,14 +156,17 @@
    doc.addEventListener('keydown',event=>{if(event.defaultPrevented||!event.altKey||event.ctrlKey||event.metaKey||event.shiftKey||event.key!=='Enter'||event.target?.closest?.('input,textarea,select,[contenteditable="true"]')||doc.querySelector('dialog[open]'))return;event.preventDefault();if(embedded)send({type:'maximize'});else if(mode===4)toggleMaximized(maximized>=0?maximized:active);else void api.fullscreen({workspace:true});});
    if(embedded){
     doc.addEventListener('pointerdown',()=>send({type:'active'}),{capture:true,passive:true});doc.addEventListener('focusin',()=>send({type:'active'}));
+    forwardPageSwipes(api.host,()=>!disposed&&isTouch()&&!workspaceFullscreen&&api.canPageSwipe?.()===true,delta=>send({type:'page-scroll',delta}));
     win.addEventListener('message',event=>{if(event.origin!==win.location.origin||event.source!==win.parent||event.data?.channel!==channel)return;
      if(event.data.type==='backtest-result')api.backtest?.(event.data.value);
      else if(event.data.type==='signals-watch'){signalsWatched=event.data.enabled===true;signalsChanged();}
      else if(event.data.type==='signal-command'&&sameMarket(event.data.market,current())&&event.data.revision===api?.signalSnapshot?.()?.revision&&['settings','filter','page','focus'].includes(event.data.command?.kind))api.signalCommand?.(event.data.command);
      else if(event.data.type==='select')api.selectMarket(market(event.data.market,current()),event.data.navigation);
      else if(event.data.type==='action'&&actions.has(event.data.action))api.action?.(event.data.action);
+     else if(event.data.type==='drawing-tool-select'&&knownTool(event.data.tool))api.drawingTool?.(event.data.tool);
+     else if(event.data.type==='drawing-favorites-state')api.favoritesState?.(event.data.state);
      else if(event.data.type==='dispose'){disposed=true;api.dispose();}
-     else if(event.data.type==='layout-state'){maximized=Number.isInteger(event.data.maximized)&&event.data.maximized>=-1&&event.data.maximized<=3?event.data.maximized:-1;workspaceFullscreen=event.data.fullscreen===true;updateControls();api.syncFullscreen?.();}
+     else if(event.data.type==='layout-state'){maximized=Number.isInteger(event.data.maximized)&&event.data.maximized>=-1&&event.data.maximized<=3?event.data.maximized:-1;workspaceFullscreen=event.data.fullscreen===true;refreshPresentation();updateControls();api.syncFullscreen?.();}
     });
    }else{
     grid=doc.createElement('div');grid.id='chartGrid';firstCell=doc.createElement('section');firstCell.className='chart-cell chart-cell-main selected';firstCell.setAttribute('aria-label','1번 독립 차트');firstCell.append($('chartTopbar'),$('chartBody'));grid.append(firstCell);api.workspace.prepend(grid);
@@ -136,14 +194,18 @@
      else if(data.type==='restore')setMaximized(-1);
      else if(data.type==='workspace-fullscreen')void api.fullscreen({workspace:true});
      else if(data.type==='exit-workspace-fullscreen'&&workspaceFullscreen)void api.fullscreen({workspace:true});
-     else if(data.type==='ready'){frame.chartReady=true;for(const message of frame.chartQueue||[])deliver(frame,message);frame.chartQueue=[];broadcastLayout();watchSignals();}
+     else if(data.type==='drawing-tool-state'&&knownTool(data.tool)){drawingTools[index]=data.tool;if(active===index)syncFavoritesTarget();}
+     else if(data.type==='drawing-favorite-edit')api.applyFavoriteEdit?.(data.command);
+     else if(data.type==='page-scroll'&&(maximized<0||maximized===index))scrollFromFrame(data.delta);
+     else if(data.type==='ready'){frame.chartReady=true;for(const message of frame.chartQueue||[])deliver(frame,message);frame.chartQueue=[];broadcastLayout();sendFavorites(frame);watchSignals();}
     });
     if(saved.layout===4)setLayout(4);
    }
+   refreshPresentation();touchQuery?.addEventListener?.('change',refreshPresentation);
    updateControls();marketChanged(current());if(embedded)send({type:'ready'});api.syncFullscreen?.();
    win.addEventListener('pagehide',()=>{disposed=true;api.dispose();},{once:true});
   }
-  return {openPicker,embedded,bind,marketChanged,reportStatus,selectActive,runOnActive,controlsChanged,setBacktest,signalsChanged,activeSignals,signalCommand,subscribeSignals:listener=>{signalListeners.add(listener);return ()=>signalListeners.delete(listener);},activeCell:()=>active,subscribe:listener=>{listeners.add(listener);return ()=>listeners.delete(listener);},activeMarket:()=>hasRemoteTarget()?market(markets[active],current()):current(),isMulti:()=>embedded||mode===4,visible:()=>!disposed&&!doc.hidden,requestFullscreen,requestWorkspaceFullscreen,exitWorkspaceFullscreen,restoreMaximized,fullscreenState,syncWorkspaceFullscreen,setLayout};
+  return {openPicker,embedded,bind,marketChanged,reportStatus,selectActive,runOnActive,controlsChanged,drawOnActive,drawingToolChanged,editFavorite,favoritesChanged,setBacktest,signalsChanged,activeSignals,signalCommand,subscribeSignals:listener=>{signalListeners.add(listener);return ()=>signalListeners.delete(listener);},activeCell:()=>active,subscribe:listener=>{listeners.add(listener);return ()=>listeners.delete(listener);},activeMarket:()=>hasRemoteTarget()?market(markets[active],current()):current(),isMulti:()=>embedded||mode===4,visible:()=>!disposed&&!doc.hidden,requestFullscreen,requestWorkspaceFullscreen,exitWorkspaceFullscreen,restoreMaximized,fullscreenState,syncWorkspaceFullscreen,setLayout};
  }
- return {create,market,preferences,embedUrl,assetRevision};
+ return {create,market,preferences,embedUrl,assetRevision,forwardPageSwipes};
 });

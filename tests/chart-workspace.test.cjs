@@ -56,7 +56,7 @@ test('partial backtest symbol searches rank prefixes, ignore case and keep the s
  assert.ok(Catalog.suggest(Array.from({length:20000},(_,i)=>({base:'BT'+i,symbol:'BT'+i+'USDT',volume:i})),'bt',1000).length<=20);
 });
 // Exercise the real controller without mounting chart engines or issuing network requests.
-function workspaceHarness({embedded=false,saved={},signalSnapshot=null}={}){
+function workspaceHarness({embedded=false,saved={},signalSnapshot=null,touch=false}={}){
  const ids=new Map(),messages=[],events={},docEvents={},storage=new Map([['funding-chart-layout-v1',JSON.stringify(saved)]]);
  class Element{
   constructor(tag){this.tagName=tag;this.children=[];this.attrs={};this.dataset={};this.classes=new Set();this.classList={add:name=>this.classes.add(name),toggle:(name,on)=>{if(on)this.classes.add(name);else this.classes.delete(name);},contains:name=>this.classes.has(name)};if(tag==='iframe')this.contentWindow={postMessage:data=>messages.push({frame:this,data})};}
@@ -71,11 +71,11 @@ function workspaceHarness({embedded=false,saved={},signalSnapshot=null}={}){
  const doc={body:new Element('body'),documentElement:new Element('html'),createElement:tag=>new Element(tag),getElementById:id=>ids.get(id),addEventListener:(name,fn)=>docEvents[name]=fn,querySelector:()=>null};
  for(const id of ['exchangeSelect','symbolInput','intervalSelect','chartWorkspace','chartTopbar','chartBody','drawingHistoryControls','chartSymbolLabel','host']){const element=new Element('div');element.id=id;doc.body.append(element);}
  ids.get('exchangeSelect').value='BITGET';ids.get('symbolInput').value='SAHARAUSDT';ids.get('intervalSelect').value='1h';
- const parent={postMessage:data=>messages.push({data})},win={document:doc,location:new URL('https://example.test/'+(embedded?'?chart-embed=1&cell=2':'')),parent:embedded?parent:null,localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},addEventListener:(name,fn)=>events[name]=fn,CoinFavorites:Favorites,SymbolPicker:{bind:()=>({open(...args){calls.picker.push(args);}})},MarketCatalog:{create:()=>({})}};
+ const animation=[],parent={postMessage:data=>messages.push({data})},win={document:doc,innerHeight:800,scrollBy:(x,y)=>calls.scroll.push(y),requestAnimationFrame:fn=>animation.push(fn),matchMedia:()=>({matches:touch}),DrawingEngine:require('../drawing-engine.js'),location:new URL('https://example.test/'+(embedded?'?chart-embed=1&cell=2':'')),parent:embedded?parent:null,localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)},addEventListener:(name,fn)=>events[name]=fn,CoinFavorites:Favorites,SymbolPicker:{bind:()=>({open(...args){calls.picker.push(args);}})},MarketCatalog:{create:()=>({})}};
  if(!embedded)win.parent=win;
- const calls={picker:[],schedule:0,dispose:0,split:0,fullscreen:[],market:[],navigation:[],action:[],backtest:[],signalCommands:[]},controller=Workspace.create(win);
- controller.bind({signalSnapshot:()=>signalSnapshot,signalCommand:value=>calls.signalCommands.push(value),workspace:ids.get('chartWorkspace'),host:ids.get('host'),symbolButton:ids.get('chartSymbolLabel'),getMarket:()=>({ex:'BITGET',symbol:'SAHARAUSDT',int:'1h'}),selectMarket:(m,n)=>{calls.market.push(m);calls.navigation.push(n);},action:a=>calls.action.push(a),backtest:value=>calls.backtest.push(value),onSplit:()=>calls.split++,dispose:()=>calls.dispose++,schedule:()=>calls.schedule++,fullscreen:options=>calls.fullscreen.push(options),syncFullscreen(){},jumpDate(){}});
- return {ids,doc,messages,calls,controller,parent,win,storage,frames:()=>ids.get('chartGrid')?.children.filter(x=>x.tagName==='iframe')||[],message:(source,data,origin=win.location.origin)=>events.message({source,origin,data:{channel:'funding-chart-workspace-v1',...data}}),key:event=>docEvents.keydown({target:{closest:()=>null},preventDefault(){this.defaultPrevented=true;},...event})};
+ const calls={picker:[],schedule:0,dispose:0,split:0,fullscreen:[],market:[],navigation:[],action:[],backtest:[],signalCommands:[],scroll:[],touch:[],host:[],target:[],edit:[],state:[],tool:[]},controller=Workspace.create(win);
+ controller.bind({touchLayout:value=>calls.touch.push(value),canPageSwipe:()=>true,favoritesHost:host=>calls.host.push(host),favoritesTarget:(...value)=>calls.target.push(value),favoritesSnapshot:()=>({tools:['hline'],visible:true}),applyFavoriteEdit:command=>calls.edit.push(command),favoritesState:state=>calls.state.push(state),drawingTool:tool=>calls.tool.push(tool),signalSnapshot:()=>signalSnapshot,signalCommand:value=>calls.signalCommands.push(value),workspace:ids.get('chartWorkspace'),host:ids.get('host'),symbolButton:ids.get('chartSymbolLabel'),getMarket:()=>({ex:'BITGET',symbol:'SAHARAUSDT',int:'1h'}),selectMarket:(m,n)=>{calls.market.push(m);calls.navigation.push(n);},action:a=>calls.action.push(a),backtest:value=>calls.backtest.push(value),onSplit:()=>calls.split++,dispose:()=>calls.dispose++,schedule:()=>calls.schedule++,fullscreen:options=>calls.fullscreen.push(options),syncFullscreen(){},jumpDate(){}});
+ return {ids,doc,messages,calls,controller,parent,win,storage,flush:()=>animation.splice(0).forEach(fn=>fn()),frames:()=>ids.get('chartGrid')?.children.filter(x=>x.tagName==='iframe')||[],message:(source,data,origin=win.location.origin)=>events.message({source,origin,data:{channel:'funding-chart-workspace-v1',...data}}),key:event=>docEvents.keydown({target:{closest:()=>null},preventDefault(){this.defaultPrevented=true;},...event})};
 }
 test('loading a panel coin into a selected remote cell immediately updates backtest subscribers',t=>{
  const h=workspaceHarness();t.after(()=>h.controller.setLayout(1));h.controller.setLayout(4);const frame=h.frames()[1];h.message(frame.contentWindow,{type:'ready'});h.message(frame.contentWindow,{type:'active'});
@@ -216,4 +216,69 @@ test('embedded signal settings and focus commands require the current market, re
 
 test('top input bulk paste and Enter open exact symbols in the active cell without loading an invalid chart',()=>{
  const h=workspaceHarness();h.controller.setLayout(4);const frame=h.frames()[1];h.message(frame.contentWindow,{type:'ready'});h.message(frame.contentWindow,{type:'active'});const text='AKEUSDT\n1000TOSHIUSDT\nBIRBUSDT',event={clipboardData:{getData:()=>text},preventDefault(){this.prevented=true;},stopImmediatePropagation(){this.stopped=true;}};h.ids.get('symbolInput').events.paste(event);assert.equal(event.prevented,true);assert.equal(event.stopped,true);assert.equal(h.calls.picker.at(-1)[1],2);assert.equal(h.calls.picker.at(-1)[2].query,text);assert.equal(h.calls.market.length,0);h.ids.get('symbolInput').value='AKEUSDT BIRBUSDT';h.ids.get('symbolInput').events.keydown({...event,key:'Enter'});assert.equal(h.calls.picker.at(-1)[2].query,'AKEUSDT BIRBUSDT');h.controller.setLayout(1);
+});
+
+test('mobile overview, workspace fullscreen, and single-chart focus have independent layout state',t=>{
+ const phone=workspaceHarness({touch:true}),desktop=workspaceHarness();t.after(()=>{phone.controller.setLayout(1);desktop.controller.setLayout(1);});
+ assert.deepEqual(phone.calls.touch.at(-1),{pageScroll:true,overview:false});
+ phone.controller.setLayout(4);desktop.controller.setLayout(4);
+ assert.deepEqual(phone.calls.touch.at(-1),{pageScroll:true,overview:true});
+ assert.deepEqual(desktop.calls.touch.at(-1),{pageScroll:false,overview:false});
+ phone.controller.syncWorkspaceFullscreen(true);
+ assert.deepEqual(phone.calls.touch.at(-1),{pageScroll:false,overview:true});
+ const frame=phone.frames()[1];phone.message(frame.contentWindow,{type:'maximize'});
+ assert.deepEqual(phone.calls.touch.at(-1),{pageScroll:false,overview:false});
+ phone.controller.syncWorkspaceFullscreen(false);
+ assert.deepEqual(phone.calls.touch.at(-1),{pageScroll:true,overview:false});
+ phone.controller.restoreMaximized();
+ assert.deepEqual(phone.calls.touch.at(-1),{pageScroll:true,overview:true});
+ const child=workspaceHarness({embedded:true,touch:true});
+ assert.deepEqual(child.calls.touch.at(-1),{pageScroll:true,overview:true});
+ child.message(child.parent,{type:'layout-state',maximized:2,fullscreen:false});
+ assert.deepEqual(child.calls.touch.at(-1),{pageScroll:true,overview:false});
+});
+
+test('one favorite toolbar follows the active chart and child changes go through the workspace',t=>{
+ const h=workspaceHarness();h.controller.setLayout(4);t.after(()=>h.controller.setLayout(1));
+ const grid=h.ids.get('chartGrid'),frames=h.frames();assert.equal(h.calls.host.at(-1),grid);
+ for(const frame of frames)h.message(frame.contentWindow,{type:'ready'});
+ h.message(frames[1].contentWindow,{type:'active'});h.messages.length=0;
+ assert.equal(h.controller.drawOnActive('hline'),true);
+ assert.deepEqual(h.messages.map(({frame,data})=>[frame,data.type,data.tool]),[[frames[1],'drawing-tool-select','hline']]);
+ h.message(frames[1].contentWindow,{type:'drawing-tool-state',tool:'hline'});
+ h.message(frames[0].contentWindow,{type:'drawing-tool-state',tool:'trend'});
+ assert.deepEqual(h.calls.target.at(-1),[2,'hline']);
+ h.message(frames[0].contentWindow,{type:'active'});assert.deepEqual(h.calls.target.at(-1),[1,'trend']);
+ h.message(frames[1].contentWindow,{type:'drawing-favorite-edit',command:{kind:'visibility'}},'https://foreign.test');
+ assert.equal(h.calls.edit.length,0);
+ h.message(frames[1].contentWindow,{type:'drawing-favorite-edit',command:{kind:'visibility'}});
+ assert.deepEqual(h.calls.edit,[{kind:'visibility'}]);
+ h.messages.length=0;h.controller.favoritesChanged();
+ assert.deepEqual(h.messages.filter(m=>m.data.type==='drawing-favorites-state').map(m=>m.frame),frames);
+ h.controller.setLayout(1);assert.equal(h.calls.host.at(-1),null);assert.equal(h.controller.drawOnActive('hline'),false);
+ const child=workspaceHarness({embedded:true});
+ child.message(child.parent,{type:'drawing-tool-select',tool:'hline'});
+ child.message(child.parent,{type:'drawing-tool-select',tool:'constructor'});
+ assert.deepEqual(child.calls.tool,['hline']);
+ assert.equal(child.controller.editFavorite({kind:'visibility'}),true);assert.equal(child.messages.at(-1).data.type,'drawing-favorite-edit');
+});
+
+test('a split chart forwards both directions of vertical swipes but leaves horizontal drags and pinches with the chart',()=>{
+ const events={},deltas=[];let enabled=true;
+ Workspace.forwardPageSwipes({addEventListener:(name,fn)=>{events[name]=fn;}},()=>enabled,delta=>deltas.push(delta));
+ const at=(x,y,id=1)=>({clientX:x,clientY:y,identifier:id}),event=(...touches)=>({touches,target:{closest:()=>null},cancelable:true,preventDefault(){this.prevented=true;},stopPropagation(){}});
+ events.touchstart(event(at(50,100)));const up=event(at(52,50)),down=event(at(51,90));
+ events.touchmove(up);events.touchmove(down);assert.ok(up.prevented&&down.prevented);assert.deepEqual(deltas,[50,-40]);
+ events.touchend();events.touchstart(event(at(30,50)));const horizontal=event(at(70,52));events.touchmove(horizontal);assert.equal(horizontal.prevented,undefined);
+ events.touchstart(event(at(30,50)));const pinch=event(at(30,30),at(70,20,2));events.touchmove(pinch);assert.equal(pinch.prevented,undefined);
+ enabled=false;events.touchstart(event(at(30,50)));events.touchmove(event(at(30,20)));assert.deepEqual(deltas,[50,-40]);
+});
+
+test('only a visible mobile frame can scroll the outer page and it cannot do so in workspace fullscreen',t=>{
+ const h=workspaceHarness({touch:true});h.controller.setLayout(4);t.after(()=>h.controller.setLayout(1));const [a,b]=h.frames();
+ h.message(a.contentWindow,{type:'page-scroll',delta:80});h.message(b.contentWindow,{type:'page-scroll',delta:-20});
+ h.message(a.contentWindow,{type:'page-scroll',delta:999999});h.flush();assert.deepEqual(h.calls.scroll,[60]);
+ h.message(b.contentWindow,{type:'maximize'});h.message(a.contentWindow,{type:'page-scroll',delta:80});h.flush();assert.deepEqual(h.calls.scroll,[60]);
+ h.message(b.contentWindow,{type:'page-scroll',delta:-30});h.flush();assert.deepEqual(h.calls.scroll,[60,-30]);
+ h.controller.syncWorkspaceFullscreen(true);h.message(b.contentWindow,{type:'page-scroll',delta:80});h.flush();assert.deepEqual(h.calls.scroll,[60,-30]);
 });
