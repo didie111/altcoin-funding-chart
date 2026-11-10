@@ -18,6 +18,9 @@ const run=(d,extra={})=>E.runBacktest(d.main,d.funding,{...d.config,...extra},{m
 test('1h first entry follows the 1h close; a closed 1m RSI cross adds at 01:04 instead of the next hour',()=>{
  const d=dataset(),r=run(d),trade=r.trades[0];
  assert.equal(trade.entryTime,base+3600);assert.equal(trade.entries[1].time,base+64*60);assert.equal(trade.entries[1].price,99);
+ assert.equal(trade.entries[0].signal.timeframe,'1h');assert.equal(trade.entries[0].signal.barTime,base);
+ const signal=trade.entries[1].signal;assert.equal(signal.timeframe,'1m');assert.equal(signal.barTime,base+63*60);
+ assert.ok(signal.previousRsi<=30&&signal.rsi>30);
  assert.equal(r.model.executionTimeframe,'1m');assert.equal(r.model.dcaTimeframe,'1m');assert.equal(r.config.timeframe,'1h');
  assert.ok(trade.entries[1].time<base+7200);
 });
@@ -48,7 +51,10 @@ test('missing, truncated or gapped minute history cannot silently become an hour
 test('a 1m test uses the same RSI crossing and fills for chart-RSI and fixed-1m modes',()=>{
  const d=dataset(),cfg={...d.config,timeframe:'1m',splitCount:3};
  const a=E.runBacktest(d.minute,d.funding,{...cfg,splitTrigger:'rsi_cross_up'}),b=E.runBacktest(d.minute,d.funding,{...cfg,splitTrigger:'rsi_cross_up_1m'});
- assert.deepEqual(a.trades,b.trades);assert.deepEqual(a.signals,b.signals);
+ const accounting=trade=>({...trade,entries:trade.entries.map(({signal,...fill})=>fill)});
+ assert.deepEqual(a.trades.map(accounting),b.trades.map(accounting));assert.deepEqual(a.signals,b.signals);
+ assert.equal(a.trades[0].entries[1].signal.kind,'rsi_cross_up');
+ assert.equal(b.trades[0].entries[1].signal.kind,'rsi_cross_up_1m');
 });
 test('comparison and strategy search pass the shared actual minute series to the engine',()=>{
  const d=dataset(),comparison=E.runAllTimeframes({'1m':d.minute,'1h':d.main},d.funding,d.config);

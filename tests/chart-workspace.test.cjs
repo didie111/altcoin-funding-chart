@@ -282,3 +282,17 @@ test('only a visible mobile frame can scroll the outer page and it cannot do so 
  h.message(b.contentWindow,{type:'page-scroll',delta:-30});h.flush();assert.deepEqual(h.calls.scroll,[60,-30]);
  h.controller.syncWorkspaceFullscreen(true);h.message(b.contentWindow,{type:'page-scroll',delta:80});h.flush();assert.deepEqual(h.calls.scroll,[60,-30]);
 });
+
+test('vertical gestures use the finger position on screen even as the chart moves beneath it',()=>{
+ const h=workspaceHarness({touch:true}),events=h.ids.get('host').events;
+ const touch=(clientY,screenY)=>({clientX:120,screenX:120,clientY,screenY,identifier:1});
+ const event=t=>({touches:[t],target:{closest:()=>null},cancelable:true,preventDefault(){},stopPropagation(){}});
+ events.touchstart(event(touch(180,500)));
+ events.touchmove(event(touch(150,470)));h.flush();
+ // After the parent moves, clientY is unchanged. The finger still moves.
+ events.touchmove(event(touch(150,445)));h.flush();
+ events.touchmove(event(touch(150,462)));h.flush();
+ assert.deepEqual(h.calls.scroll,[30,25,-17]);
+ h.controller.syncWorkspaceFullscreen(true);events.touchmove(event(touch(150,400)));h.flush();
+ assert.deepEqual(h.calls.scroll,[30,25,-17]);
+});

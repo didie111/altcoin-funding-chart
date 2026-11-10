@@ -62,7 +62,7 @@
   function stopWorker(slot){clearTimeout(slot.timer);slot.worker.terminate();workerSlots.delete(slot);}
   function acquireWorker(){
    let slot=[...workerSlots].find(w=>!w.busy);
-   if(!slot){slot={worker:new Worker('backtest-batch-worker.js?v=20261109-verified-backtest-1'),timer:0,busy:false};workerSlots.add(slot);}
+   if(!slot){slot={worker:new Worker('backtest-batch-worker.js?v=20261110-trade-traces-mobile-1'),timer:0,busy:false};workerSlots.add(slot);}
    clearTimeout(slot.timer);slot.busy=true;return slot;
   }
   function officialRequest(signal,load){

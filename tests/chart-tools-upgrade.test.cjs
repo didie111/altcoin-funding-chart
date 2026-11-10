@@ -25,7 +25,7 @@ test('vertical date tools do not acquire a misleading price label when selected'
 });
 function tradeUI(){
  const source=fs.readFileSync(require.resolve('../backtest-ui.js'),'utf8'),report={innerHTML:'',classList:{toggle(){}}},jumps=[],overlays=[],market={ex:'BYBIT',symbol:'PUFFERUSDT',int:'3m'},trade={id:1,entryTime:1793000010,exitTime:1793000590,entries:[],dcaSteps:1,splitTarget:3,netPnl:1};
- const ctx={M,dock:{dataset:{}},E:require('../backtest-engine.js'),single:{meta:{market,startTime:trade.entryTime,endTime:trade.exitTime,config:{}},result:{summary:{},trades:[trade]}},tradeJumpTimeframe:null,view:'trades',page:0,comparison:null,optimized:null,$:()=>report,number:String,money:String,stamp:String,escape:String,updateResultContext(){},requestChartView(){},chartWorkspace:{setBacktest:v=>overlays.push(v)},onJump:async(m,t)=>jumps.push({market:m,time:t}),setStatus(){}};
+ const ctx={M,O:Overlay,dock:{dataset:{}},E:require('../backtest-engine.js'),single:{meta:{market,startTime:trade.entryTime,endTime:trade.exitTime,config:{}},result:{summary:{},trades:[trade]}},tradeJumpTimeframe:null,view:'trades',page:0,comparison:null,optimized:null,$:()=>report,number:String,money:String,stamp:String,escape:String,updateResultContext(){},requestChartView(){},chartWorkspace:{setBacktest:v=>overlays.push(v)},onJump:async(m,t)=>jumps.push({market:m,time:t}),setStatus(){}};
  vm.createContext(ctx);vm.runInContext(source.slice(source.indexOf('  function table('),source.indexOf('  function provenance('))+source.slice(source.indexOf('  function render(){'),source.indexOf("  $('btExportCsv').onclick")),ctx);return {ctx,report,jumps,overlays,market};
 }
 test('the actual trade table defaults to its backtest frame and retains a selected viewing frame across pages',()=>{
@@ -36,6 +36,16 @@ test('trade entry and exit buttons pass the chosen frame and exact recorded time
  const h=tradeUI(),click=point=>h.report.onclick({target:{closest:()=>({dataset:{jump:'0',point}})}});await click('entry');assert.equal(h.jumps[0].market.int,'3m');
  for(const tf of Object.keys(M.labels)){h.report.onchange({target:{id:'btTradeJumpTimeframe',value:tf}});await click('entry');await click('exit');assert.equal(h.jumps.at(-2).market.int,tf);assert.equal(h.jumps.at(-2).time,1793000010);assert.equal(h.jumps.at(-1).time,1793000590);assert.equal(h.overlays.at(-1).market,h.market);assert.equal(h.overlays.at(-1).displayMarket.int,tf);}
  assert.equal(h.market.int,'3m');h.report.onchange({target:{id:'btTradeJumpTimeframe',value:'invalid'}});assert.equal(h.ctx.tradeJumpTimeframe,'1M');
+});
+test('expanded entry records can jump to the signal bar or its actual fill with an independently selected viewing timeframe',async()=>{
+ const h=tradeUI(),result=h.ctx.single.result,trade=result.trades[0],fill=1793000400;
+ result.config={timeframe:'3m',splitTrigger:'rsi_cross_up_1m'};
+ trade.entries=[{step:1,time:1793000010,price:100},{step:2,time:fill,price:95,signal:{kind:'rsi_cross_up_1m',timeframe:'1m',time:fill,barTime:fill-60,threshold:28,previousRsi:27,rsi:29}}];
+ h.ctx.render();assert.match(h.report.innerHTML,/과매도선 28 · RSI 27 → 29/);
+ h.report.onchange({target:{id:'btTradeJumpTimeframe',value:'1h'}});
+ for(const point of ['signal','fill'])await h.report.onclick({target:{closest:()=>({dataset:{jump:'0',step:'1',point}})}});
+ assert.deepEqual(h.jumps.map(({market,time})=>[market.int,time]),[['1h',fill-60],['1h',fill]]);
+ assert.equal(result.config.timeframe,'3m');
 });
 test('intentional inspection on another timeframe is labelled as viewing the original result',()=>{
  const source=fs.readFileSync(require.resolve('../backtest-ui.js'),'utf8'),market={ex:'BYBIT',symbol:'PUFFERUSDT',int:'3m'},viewMarket={...market,int:'1m'},ctx={view:'trades',single:{meta:{market,config:{},coverage:{},fundingCoverage:{},cell:1},inspection:{market:viewMarket,cell:2}},comparison:null,optimized:null,M,target:()=>viewMarket,follow:true,lastFailure:false,busy:false,chartWorkspace:{activeCell:()=>2},resultContext:{},modeNotice:{},dataNotice:{}};

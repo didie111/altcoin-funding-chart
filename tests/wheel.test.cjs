@@ -10,7 +10,7 @@ function wheelHarness() {
   const priceChanges = [], frames = new Map();
   let options, handler, frameId = 0;
   const chart = {
-    timeScale: () => ({width: () => 1100}),
+    timeScale: () => ({width: () => 1100,height: () => 20}),
     applyOptions: next => {options = {...options, ...next};}
   };
   const panes = [
@@ -22,7 +22,7 @@ function wheelHarness() {
     LightweightCharts: {CrosshairMode: {Normal: 0}, createChart: (_host, value) => {options = value; return chart;}},
     Element: class Element {},
     rulerHost: {
-      getBoundingClientRect: () => ({left: 100, top: 200, width: 1200}),
+      getBoundingClientRect: () => ({left: 100, top: 200, width: 1200,height:600}),
       addEventListener: (name, callback) => {assert.equal(name, 'wheel'); handler = callback;},
       style: {}
     },
@@ -52,6 +52,7 @@ function wheelHarness() {
   return {
     wheel, priceChanges, frames, options: () => options,
     interaction: state => {Object.assign(context,state);vm.runInContext('rulerInteraction()',context);},
+    pageSwipe: (x,y) => context.canPageSwipe({clientX:x+100,clientY:y+200}),
     ruler: active => {context.rulerEnabled = active; vm.runInContext('rulerInteraction()', context);},
     flush: () => {const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback());}
   };
@@ -146,7 +147,11 @@ test('a mobile page keeps horizontal pan and pinch while returning vertical swip
   assert.equal(h.options().handleScroll.horzTouchDrag,true);
   assert.equal(h.options().handleScroll.vertTouchDrag,false);
   assert.equal(h.options().handleScale.pinch,true);
+  assert.equal(h.pageSwipe(550,280),true);
+  assert.equal(h.pageSwipe(1120,280),false);
+  assert.equal(h.pageSwipe(550,585),false);
   h.ruler(true);assert.equal(h.options().handleScroll,false);assert.equal(h.options().handleScale.mouseWheel,true);
+  assert.equal(h.pageSwipe(550,280),false);
   h.ruler(false);h.interaction({pageTouchScroll:false});
   assert.equal(h.options().handleScroll.vertTouchDrag,true);
 });

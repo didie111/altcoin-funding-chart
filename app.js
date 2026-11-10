@@ -274,7 +274,17 @@ function drawSurgeHighlight(w, h, plotWidth) {
 
 const WINDOW=10000, duration=TimeframeEngine.seconds;
 let dateNavigation=null, navigationController=null, loadedMarket=null, chartDateFocus=null, chartBacktestResult=null;
-const backtestLines=globalThis.BacktestOverlay?.create(()=>({result:chartBacktestResult,market:loadedMarket,bars:all}));
+const backtestOverlay=globalThis.BacktestOverlay;
+let chartBacktestDisplay=backtestOverlay?.readDisplay();
+const backtestLines=backtestOverlay?.create(()=>({result:chartBacktestResult,market:loadedMarket,bars:all,display:chartBacktestDisplay}));
+function applyBacktestDisplay(display){
+ chartBacktestDisplay=backtestOverlay.displayOptions(display);
+ backtestLines?.invalidate();renderSignalMarkers(all.slice(windowStart,windowEnd));
+}
+if(backtestOverlay){
+ window.addEventListener(backtestOverlay.displayEvent,event=>applyBacktestDisplay(event.detail));
+ window.addEventListener('storage',event=>{if(event.key===backtestOverlay.displayKey)applyBacktestDisplay(backtestOverlay.readDisplay());});
+}
 if(backtestLines)candles.attachPrimitive(backtestLines);
 let historyState={id:0,buffer:[],pending:new Set(),exhausted:new Set()};
 let paneScaleSeries=[candles,volume,funding,settlementCycle];
@@ -318,11 +328,17 @@ const rulerLabel=document.createElement('div');rulerLabel.id='rulerMeasurementLa
 function priceChange(start,end){if(!Number.isFinite(start)||!Number.isFinite(end)||start<=0)return null;return {difference:end-start,percent:(end-start)/start*100};}
 function clearRuler(){rulerStart=null;rulerEnd=null;rulerLocked=false;rulerTemporary=false;rulerLabel.hidden=true;schedule();}
 function rulerWheelActive(){return rulerEnabled||shiftHeld||rulerDragging||Boolean(chartDrawings?.usesRuler());}
-function canPageSwipe(){return pageTouchScroll&&!rulerWheelActive()&&!chartDrawings?.capturesChart();}
+function canPageSwipe(touch){
+ if(!pageTouchScroll||rulerWheelActive()||chartDrawings?.capturesChart())return false;
+ if(!touch)return true;
+ if(touch.target?.closest?.('.tv-lightweight-charts td[colspan="3"]'))return false;
+ const bounds=rulerHost.getBoundingClientRect(),scale=chart.timeScale(),x=touch.clientX-bounds.left,y=touch.clientY-bounds.top;
+ return x>=0&&x<scale.width()&&y>=0&&y<bounds.height-scale.height();
+}
 function rulerInteraction(){
  const measuring=rulerWheelActive(),active=measuring||Boolean(chartDrawings?.capturesChart()),host=$('unified-chart');
  chart.applyOptions({handleScroll:active?false:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:!pageTouchScroll},handleScale:{mouseWheel:measuring||!active,pinch:!active,axisPressedMouseMove:{time:!active,price:true},axisDoubleClickReset:{time:!active,price:false}}});
- host.classList.toggle('chart-page-pan',pageTouchScroll&&!active);host.style.cursor=active?'crosshair':'';
+ host.style.cursor=active?'crosshair':'';
 }
 function applyTouchLayout({pageScroll,overview}){
  if(pageTouchScroll!==pageScroll){pageTouchScroll=pageScroll;rulerInteraction();}
@@ -831,7 +847,8 @@ function renderSignalMarkers(part){if(!part.length){markers.setMarkers([]);retur
    }
  }
 
- if(globalThis.BacktestOverlay?.matches(chartBacktestResult,loadedMarket))markerList.push(...globalThis.BacktestOverlay.markers(chartBacktestResult,part));
+ const resultOverlay=globalThis.BacktestOverlay;
+ if(resultOverlay?.matches(chartBacktestResult,loadedMarket))markerList.push(...resultOverlay.markers(chartBacktestResult,part,chartBacktestDisplay,{nativeEntries:false}));
  markers.setMarkers(markerList.length<=400?markerList.sort((a,b)=>a.time-b.time):[]);
 }
 function renderWindow(center,focus=true,span=240,preservedRange=null){if(!all.length)return;changingWindow=true;clearTimeout(navTimer);windowStart=windowStartFor(center);windowEnd=Math.min(all.length,windowStart+WINDOW);const part=all.slice(windowStart,windowEnd),{warn,ext}=thresholds();
