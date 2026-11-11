@@ -166,3 +166,5 @@
 .bt-indicator-list li[aria-disabled="true"]{color:#6d778c;cursor:not-allowed}
 .bt-indicator-list li[aria-disabled="true"]:hover{background:transparent}
 .bt-indicator-list li b{font-size:11px;font-weight:700}
+.bt-settings-right{display:grid;gap:14px;min-width:0;align-content:start}
+.bt-settings-strategy [hidden]{display:none!important}

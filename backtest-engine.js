@@ -12,6 +12,10 @@
   if(!T.seconds[c.timeframe])throw Error('지원하지 않는 타임프레임입니다.');
   for(const [key,choices]of Object.entries({fundingIntervalBasis:['known','chart'],entryTrigger:['rsi_cross_up','rsi_oversold'],splitTrigger:['rsi_cross_up','rsi_cross_up_1m','rsi_oversold','step_pct','bar'],dcaMethod:['equal','martingale','cumulative'],stopLossMode:['immediate','after_all_dca'],exitType:['tp_sl','rsi_rebound','settle_exit','composite'],positionSizing:['budget','first_entry'],rsiSource:['close','open','high','low','hl2','hlc3','ohlc4','hlcc4']}))if(!choices.includes(c[key]))throw Error(key+' 옵션이 올바르지 않습니다.');
   c.includeFundingPayment=c.includeFundingPayment!==false;
+  // 지표: 'funding_rsi'(음펀비 + RSI, 기본) 또는 'rsi'(RSI 단독). 지표는 합치지 않고 하나만 쓴다.
+  if(c.indicator!==undefined&&!['funding_rsi','rsi'].includes(c.indicator))throw Error('indicator 옵션이 올바르지 않습니다.');
+  // 기본 지표는 키를 만들지 않아 이전 결과·백업의 설정 객체와 그대로 같다.
+  if(c.indicator==='rsi')c.indicator='rsi';else delete c.indicator;
   c.oneEntryPerFunding=c.oneEntryPerFunding===true;c.requireFreshFundingAfterCooldown=c.requireFreshFundingAfterCooldown===true;
   for(const key of ['startTime','endTime'])if(c[key]!==undefined&&!Number.isFinite(c[key]))throw Error('기간을 확인하세요.');
   if(c.startTime!==undefined&&c.endTime!==undefined&&c.startTime>=c.endTime)throw Error('테스트 기간을 확인하세요.');
@@ -176,7 +180,7 @@
    pos.totalQty+=qty;pos.totalCost+=budget;pos.purchaseCost+=qty*price;pos.entryFees+=entryFee;pos.avgPrice=pos.purchaseCost/pos.totalQty;
    const tp=['tp_sl','composite'].includes(c.exitType)&&c.takeProfitPct>0?pos.avgPrice*(1+c.takeProfitPct/100):null,sl=c.stopLossPct>0&&(c.stopLossMode==='immediate'||step===splitCount)?pos.avgPrice*(1-c.stopLossPct/100):null;
    pos.entries.push({step,time:bar.time,price,qty,cost:budget,fee:entryFee,avgPrice:pos.avgPrice,takeProfit:tp,stopLoss:sl,...(signal?{signal}:{})});
-   if(initial){if(c.oneEntryPerFunding)lastUsedFundingTime=fundingCondition.settleTime;lastEntrySignalIndex=signalIndex;lastCooldownClose=fundingCondition.signalTime;}
+   if(initial){if(c.oneEntryPerFunding&&fundingCondition)lastUsedFundingTime=fundingCondition.settleTime;lastEntrySignalIndex=signalIndex;if(fundingCondition)lastCooldownClose=fundingCondition.signalTime;}
    if(!context.summaryOnly)signals.push({time:bar.time,type:initial?'BUY_INITIAL':'DCA_BUY',step,price,avgPrice:pos.avgPrice,takeProfit:tp,stopLoss:sl,...(initial?{fundingCondition}: {})});
   }
   function close(bar,price,reason,details={}){
@@ -218,8 +222,8 @@
     diagnostics.rsiSignals++;const rateWindow=fundingSessionAt(rateSessions,end),matched=fundingSessionAt(fundingSessions,end),interval=knownFunding(intervals,end),negative=rateWindow?.rawRecord??knownFunding(negativeRecords,end);
     // Count test-timeframe candles, even when DCA executes on 1m candles.
     // Suppressed signals do not extend the wait or consume a new settlement.
-    const reason=pos?'position':!rateWindow?'funding_window':!matched?'funding_cycle':c.entryCooldownBars>0&&checkpoint-lastEntrySignalIndex<=c.entryCooldownBars?'entry_cooldown':c.entryCooldownBars>0&&c.requireFreshFundingAfterCooldown&&matched.settleTime<lastCooldownClose?'funding_before_cooldown':c.oneEntryPerFunding&&matched.settleTime<=lastUsedFundingTime?'funding_reuse':capital<=0?'capital':'match';
-    if(reason==='match'){entrySession=matched;diagnostics.entrySignals++;}else diagnostics.rejected[reason]++;
+    const rsiOnly=c.indicator==='rsi',reason=rsiOnly?(pos?'position':capital<=0?'capital':'match'):pos?'position':!rateWindow?'funding_window':!matched?'funding_cycle':c.entryCooldownBars>0&&checkpoint-lastEntrySignalIndex<=c.entryCooldownBars?'entry_cooldown':c.entryCooldownBars>0&&c.requireFreshFundingAfterCooldown&&matched.settleTime<lastCooldownClose?'funding_before_cooldown':c.oneEntryPerFunding&&matched.settleTime<=lastUsedFundingTime?'funding_reuse':capital<=0?'capital':'match';
+    if(reason==='match'){entrySession=rsiOnly?{settleTime:end,rate:null,intervalHours:null}:matched;diagnostics.entrySignals++;}else diagnostics.rejected[reason]++;
     if(!context.summaryOnly){diagnostics.samples.push({time:end,rsi:entryRsi,previousRsi:Number.isFinite(entryPrev)?entryPrev:null,reason,intervalHours:interval?.hours??null,intervalSource:interval?.source??'unknown',fundingTime:negative?.time??null,fundingRate:negative?.rate??null,validUntil:matched?.transitionTime?matched.validUntil:negative?negative.time+(c.fundingWindowSeconds||negative.intervalHours*3600||0):null,...(matched?.transitionTime?{transitionTime:matched.transitionTime}:{})});if(diagnostics.samples.length>30)diagnostics.samples.shift();}
    }
    if(pos){
@@ -238,7 +242,7 @@
     }
     equity(capital-pos.totalCost+pos.totalQty*bar.close*(1-slip)*(1-fee)+pos.fundingEarned,bar.time);
    }else{
-    if(entrySession)pending={kind:'entry',signalIndex:checkpoint,signal:entrySignal(c.entryTrigger,signalBar,end,c.timeframe,{threshold:c.rsiOversold,rsi:entryRsi,previousRsi:entryPrev??null}),fundingCondition:{signalTime:end,settleTime:entrySession.settleTime,rate:entrySession.rate,intervalHours:entrySession.intervalHours,intervalSource:entrySession.intervalSource,validUntil:entrySession.validUntil,...(entrySession.transitionTime?{transitionTime:entrySession.transitionTime}:{})}};
+    if(entrySession)pending={kind:'entry',signalIndex:checkpoint,signal:entrySignal(c.entryTrigger,signalBar,end,c.timeframe,{threshold:c.rsiOversold,rsi:entryRsi,previousRsi:entryPrev??null}),fundingCondition:c.indicator==='rsi'?undefined:{signalTime:end,settleTime:entrySession.settleTime,rate:entrySession.rate,intervalHours:entrySession.intervalHours,intervalSource:entrySession.intervalSource,validUntil:entrySession.validUntil,...(entrySession.transitionTime?{transitionTime:entrySession.transitionTime}:{})}};
    }
   }
   if(pos&&lastIndex>=0){const last=B.get(bars,lastIndex,previousBar);close(last,last.close,'END_OF_TEST');}

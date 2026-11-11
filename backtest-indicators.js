@@ -5,7 +5,7 @@
  const DEFAULT='funding_rsi';
  const list=[
   {id:'funding_rsi',name:'음펀비 + RSI',category:'기본',ready:true},
-  {id:'rsi',name:'RSI',category:'모멘텀',ready:false},
+  {id:'rsi',name:'RSI',category:'모멘텀',ready:true},
   {id:'bollinger',name:'볼린저 밴드',category:'변동성',ready:false},
   {id:'ma_cross',name:'이동평균 교차',category:'추세',ready:false},
   {id:'stoch_rsi',name:'스토캐스틱 RSI',category:'모멘텀',ready:false},

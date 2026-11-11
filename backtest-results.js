@@ -7,6 +7,8 @@
   const normalized=E.normalizeConfig({...c,timeframe:tf}),values=strategyFields.map(k=>[k,effective&&k==='splitCount'?Math.max(1,normalized[k]):normalized[k]]);
   // Only the new mode adds a field. Keep the exact keys of older results and backups.
   if(normalized.dcaMethod==='cumulative')values.push(['dcaMultipliers',normalized.dcaMultipliers.join(',')]);
+  // 기본 지표(음펀비 + RSI)는 키를 추가하지 않아 이전 결과·백업과 그대로 호환된다. 다른 지표만 구분 키를 더한다.
+  if(normalized.indicator==='rsi')values.push(['indicator',normalized.indicator]);
   return values;
  }
  // The engine gives 0 and 1 the same single entry. Preserve both legacy file keys.

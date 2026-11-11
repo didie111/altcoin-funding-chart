@@ -3,7 +3,7 @@
  function bind({workspace,dock,dialog,chartWorkspace,getPreferences,openSettings,dataSource,onJump,requestChartView,openPanel}){
   const doc=workspace.ownerDocument,$=id=>doc.getElementById(id),E=root.BacktestEngine,M=root.DashboardModel,O=root.BacktestOverlay,key='funding-chart-backtest-strategy-v2';
   let saved={};try{saved=JSON.parse(root.localStorage.getItem(key)||'{}');}catch{}
-  let strategy;try{const {dcaMultiplierDraft,...values}=saved;strategy=E.normalizeConfig(values);}catch{strategy=E.normalizeConfig();}
+  let strategy;try{const {dcaMultiplierDraft,indicator:savedIndicator,...values}=saved;strategy=E.normalizeConfig(values);}catch{strategy=E.normalizeConfig();}
   let batchBusy=false,batchUI=null;const reportNavigation=root.ListNavigation.create();
   let runningExchange=null,runningMarket=null,runningCell=0,collecting=false,lastFailure=false;
   let indicator=root.BacktestIndicators.resolve(saved.indicator),custom=saved.target||null,follow=saved.follow!==false,followTimeframe=typeof saved.followTimeframe==='boolean'?saved.followTimeframe:follow,worker=null,controller=null,job=0,busy=false,view='overview',page=0,tradeJumpTimeframe=null,single=null,comparison=null,optimized=null;
@@ -22,23 +22,32 @@
   body.append(extra);
   const I=root.BacktestIndicators,picker=doc.createElement('fieldset');picker.className='bt-indicator-picker';
   picker.innerHTML='<legend>지표 선택</legend><div class="bt-indicator-row"><button id="btIndicatorButton" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="btIndicatorList"><span></span><i aria-hidden="true">▾</i></button><small>한 번에 지표 1개만 · 지표마다 전용 설정</small></div><ul id="btIndicatorList" class="bt-indicator-list" role="listbox" aria-label="지표 선택" hidden></ul>';
-  body.insertBefore(picker,extra);
+  const right=doc.createElement('div');right.className='bt-settings-right';body.append(right);right.append(picker,extra);
+  const fundingOnly=[],mark=el=>{if(el&&!fundingOnly.includes(el))fundingOnly.push(el);},sibling=el=>el?.nextElementSibling?.tagName==='SMALL'?el.nextElementSibling:null;
+  let fundingOnlyReady=false;
+  function collectFundingOnly(){
+   if(fundingOnlyReady)return;const q=id=>extra.querySelector('#'+id);
+   if(!['btIntervalBasis','btIntervalHours','btOneEntryPerFunding','btEntryCooldownBars','btFundingTransitionLookback','btMinFunding'].every(q))return;
+   const basis=q('btIntervalBasis').closest('label'),hours=q('btIntervalHours').closest('.research-field-row');mark(basis);mark(sibling(basis));mark(hours);mark(sibling(hours));mark(q('btOneEntryPerFunding').closest('.bt-funding-reentry'));mark(q('btEntryCooldownBars').closest('.bt-entry-cooldown'));mark(q('btFundingTransitionLookback').closest('.bt-funding-reentry'));mark(q('btMinFunding').closest('label'));fundingOnlyReady=true;
+  }
   const indicatorButton=picker.querySelector('#btIndicatorButton'),indicatorList=picker.querySelector('#btIndicatorList');
   function renderIndicators(){
    indicatorButton.firstElementChild.textContent=I.find(indicator).name;
    indicatorList.innerHTML=I.list.map(item=>'<li role="option" tabindex="'+(item.ready?'0':'-1')+'" data-indicator="'+item.id+'" aria-selected="'+(item.id===indicator)+'"'+(item.ready?'':' aria-disabled="true"')+'><span>'+escape(item.name)+' <small>'+escape(item.category)+'</small></span><b>'+(item.id===indicator?'✓':(item.ready?'':'준비 중'))+'</b></li>').join('');
-   extra.hidden=indicator!=='funding_rsi';
+   extra.querySelector('legend').textContent=indicator==='rsi'?'RSI 분할 매수':'음펀비 + RSI 분할 매수';
+   collectFundingOnly();for(const el of fundingOnly)el.hidden=indicator==='rsi';
+   const runButton=$('btStrategySettings');if(runButton?.firstChild)runButton.firstChild.nodeValue=I.find(indicator).name+' 분할매수 ';
   }
   function setIndicatorMenu(open){indicatorList.hidden=!open;indicatorButton.setAttribute('aria-expanded',String(open));}
   function chooseIndicator(id){
    const item=I.find(id);if(!item||!item.ready)return;
-   indicator=item.id;persistStrategy();renderIndicators();setIndicatorMenu(false);indicatorButton.focus();
+   indicator=item.id;strategy=E.normalizeConfig({...strategy,indicator});persistStrategy();renderIndicators();setIndicatorMenu(false);indicatorButton.focus();
   }
   indicatorButton.onclick=()=>setIndicatorMenu(indicatorList.hidden);
   indicatorList.onclick=e=>{const li=e.target.closest('li');if(li)chooseIndicator(li.dataset.indicator);};
   indicatorList.onkeydown=e=>{const li=e.target.closest('li');if(li&&(e.key==='Enter'||e.key===' ')){e.preventDefault();chooseIndicator(li.dataset.indicator);}if(e.key==='Escape'){setIndicatorMenu(false);indicatorButton.focus();}};
   doc.addEventListener('click',e=>{if(!indicatorList.hidden&&!picker.contains(e.target))setIndicatorMenu(false);});
-  renderIndicators();
+  strategy=E.normalizeConfig({...strategy,indicator});renderIndicators();
   const dcaOptions=Array.from({length:10},(_,i)=>[i+1,(i+1)+'배']);
   const dcaPlan=doc.createElement('section');dcaPlan.className='bt-dca-plan';dcaPlan.hidden=true;dcaPlan.setAttribute('aria-labelledby','btDcaTitle');
   dcaPlan.innerHTML=`<div class="bt-dca-heading"><strong id="btDcaTitle">회차별 진입 계획</strong>
@@ -158,7 +167,7 @@
   symbolInput.addEventListener('keydown',event=>{if(matches.hidden||!searchRows.length)return;if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeSearch();}else if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();searchIndex=Math.max(0,Math.min(searchRows.length-1,searchIndex+(event.key==='ArrowDown'?1:-1)));highlightSymbol();}else if(event.key==='Enter'){event.preventDefault();chooseSymbol(Math.max(0,searchIndex));}});
   $('btExchangeSelect').addEventListener('change',()=>void searchSymbols());dialog.addEventListener('close',closeSearch);
   dock.querySelector('.backtest-body').innerHTML='<div class="bt-runbar"><button type="button" id="btStrategySettings" aria-haspopup="dialog" aria-controls="backtestSettingsDialog">음펀비 + RSI 분할매수 <span aria-hidden="true">⌄</span></button><span id="btRunTarget"></span><div class="bt-run-actions"><button type="button" id="btRunBtn" class="bt-primary" title="같은 종목·전략의 완료 결과 우선. 설정한 기간으로 새로 계산하려면 최신 재계산">실행 · 저장 결과 우선</button><button type="button" id="btResearchRun" title="보관한 실제 1분봉과 펀딩으로 현재 설정·선택 주기를 계산합니다" hidden>원본으로 실행</button><button type="button" id="btRunAllBtn">주기 비교</button><button type="button" id="btFreshRun" title="설정한 종료 시점까지 확정 봉과 펀딩을 검증합니다. 원본이 부족하면 결과를 보류합니다.">최신 재계산</button><button type="button" id="btOptimizeBtn">조건 탐색</button><button type="button" id="btFavoriteRunBtn">★ 즐겨찾기</button><button type="button" id="btCancelBtn" hidden>중지</button><button type="button" id="btExportCsv" disabled>CSV</button></div></div><div class="bt-progress-row"><span id="btStatusMsg" role="status">기간과 전략 설정을 확인한 뒤 실행하세요.</span><button type="button" id="btShowChart" disabled>차트에 표시</button><button type="button" id="btChartDisplay" aria-haspopup="dialog" aria-controls="btChartDisplayDialog">표시 설정</button><button type="button" id="btClearChart">표시 지우기</button></div><nav class="backtest-tabs" role="tablist" aria-label="백테스팅 리포트">'+[['overview','개요'],['performance','성과 요약'],['analysis','거래 분석'],['trades','거래 목록'],['compare','주기 비교'],['optimize','조건 탐색'],['batch','★ 일괄 결과']].map(([id,label])=>'<button type="button" id="btView-'+id+'" role="tab" aria-controls="btReport" aria-selected="'+(id==='overview')+'" tabindex="'+(id==='overview'?'0':'-1')+'" data-bt-view="'+id+'">'+label+'</button>').join('')+'</nav><div id="btReport" class="bt-report" role="tabpanel" aria-labelledby="btView-overview"></div>';
-  const strategySettings=$('btStrategySettings'),runbar=strategySettings.parentElement;
+  const strategySettings=$('btStrategySettings'),runbar=strategySettings.parentElement;renderIndicators();
   if(O){
    const displayDialog=doc.createElement('dialog');displayDialog.id='btChartDisplayDialog';displayDialog.className='bt-chart-display';displayDialog.setAttribute('aria-labelledby','btChartDisplayTitle');
    displayDialog.innerHTML='<form method="dialog"><header><h2 id="btChartDisplayTitle">백테스팅 차트 표시</h2><button aria-label="닫기">×</button></header><div class="bt-display-body"><p>◇ 신호를 만든 봉 · ● 체결가<br>청산 뒤 흐린 선은 짧은 선을 읽기 위한 표시입니다.</p>'+O.displaySections.map(({label,items})=>'<fieldset><legend>'+label+'</legend>'+items.map(([key,name,color])=>'<label><input type="checkbox" name="'+key+'"><span class="bt-display-swatch" style="--line-color:'+color+'" aria-hidden="true"></span>'+name+'</label>').join('')+'</fieldset>').join('')+'</div><footer><button id="btDisplayReset" type="button">기본 표시</button><button class="bt-display-close">닫기</button></footer></form>';
