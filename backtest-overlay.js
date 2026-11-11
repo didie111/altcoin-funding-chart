@@ -58,6 +58,12 @@
    const end=T.end(bar.time,interval);if(time>end)return null;
    return Number.isFinite(anchor)?anchor+(time-bar.time)/(end-bar.time)*spacing:null;
   };
+  // The candle that actually filled the exit (wicks included) and the TP/SL level
+  // that was in force, so the chart shows the real touch or gap instead of a guess.
+  const exitCandle=trade=>{const i=T.indexAt(bars,trade.exitTime,interval),bar=i>=0?bars[i]:null,cx=bar?scale.timeToCoordinate(bar.time):null,
+   last=trade.entries.at(-1),level=trade.exitReason==='STOP_LOSS'?last?.stopLoss:trade.exitReason==='TAKE_PROFIT'?last?.takeProfit:null,levelY=Number.isFinite(level)&&level>0?series.priceToCoordinate(level):null,out={level:Number.isFinite(level)?level:null,levelY:Number.isFinite(levelY)?levelY:null};
+   if(bar&&Number.isFinite(bar.high)&&Number.isFinite(bar.low)&&Number.isFinite(cx)){const top=series.priceToCoordinate(bar.high),bottom=series.priceToCoordinate(bar.low);if(Number.isFinite(top)&&Number.isFinite(bottom))out.range={x:cx,top:Math.min(top,bottom),bottom:Math.max(top,bottom)};}
+   return out;};
   const trades=result.trades,last=lower(trades,to,'entryTime');let index=Math.max(lower(trades,from,'exitTime'),last-80);
   for(;index<last;index++){
    const trade=trades[index],tradeId=trade.id??index+1,phases=[];
@@ -105,7 +111,7 @@
    for(let j=0;j<phases.length-1;j++)for(const line of phases[j].lines)line.prior=true;
    if(phases.length)scene.groups.push(phases.at(-1));
    if(display?.exit!==false&&trade.exitTime>=from&&trade.exitTime<to){const px=x(trade.exitTime),py=series.priceToCoordinate(trade.exitPrice);
-    if(Number.isFinite(px)&&Number.isFinite(py)&&px>=0&&px<=width&&py>=0&&py<=height)scene.exits.push({x:px,y:py,color:trade.exitReason==='STOP_LOSS'?'#fb7185':trade.exitReason==='TAKE_PROFIT'?'#34d399':'#c4b5fd',tradeId,reason:trade.exitReason,returnPct:trade.returnPct,price:trade.exitPrice,netPnl:trade.netPnl});
+    if(Number.isFinite(px)&&Number.isFinite(py)&&px>=0&&px<=width&&py>=0&&py<=height)scene.exits.push({x:px,y:py,color:trade.exitReason==='STOP_LOSS'?'#fb7185':trade.exitReason==='TAKE_PROFIT'?'#34d399':'#c4b5fd',tradeId,reason:trade.exitReason,returnPct:trade.returnPct,price:trade.exitPrice,netPnl:trade.netPnl,...exitCandle(trade)});
    }
   }return scene;
  }
@@ -129,7 +135,7 @@
   // Recent visible trades get first choice when the chart is very dense. Bounds
   // and text measurement come from this pane, so split/fullscreen sizes agree.
   for(const group of [...groups].reverse())for(const line of [...group.lines].sort((a,b)=>a.y-b.y)){
-   if(labels.length>=48)return labels;const lineHeight=line.big?22:16;let text=line.noValue?line.label:line.label+' '+format(line.value)+(line.exitPnl?' · '+line.exitPnl+' USDT':''),w=Math.ceil(measure(text,line.big))+10;
+   if(labels.length>=48)return labels;const lineHeight=line.big?22:16;let text=line.noValue?line.label:line.label+' '+format(line.value)+(line.exitPnl?' · '+line.exitPnl+' USDT'+(line.gapNote||''):''),w=Math.ceil(measure(text,line.big))+10;
    const compact=line.compact||(line.key==='avgPrice'?line.label+' '+format(line.value):'');
    if(w>width-2*padding&&compact){text=compact;w=Math.ceil(measure(text,line.big))+10;}
    if(w>width-2*padding)continue;const labelEnd=line.tailEnd??line.x2,anchorX=clamp(group.prior?(line.x1+line.x2)/2:line.x2,padding,width-padding),anchorY=line.y;
@@ -156,7 +162,7 @@
    // Exit notes: TP/SL, return %, fill price and net P&L beside the exact exit candle.
    const exitName={TAKE_PROFIT:'TP 익절',STOP_LOSS:'SL 손절'},signed=(v,d)=>Number.isFinite(v)?(v>0?'+':v<0?'−':'')+Math.abs(v).toFixed(d):'—';
    const exits=scene.exits.slice(-18).map(p=>{const name=exitName[p.reason]||'청산',pct=Number.isFinite(p.returnPct)?' '+signed(p.returnPct,2)+'%':'',short=name.slice(0,2)+pct;
-    return {tradeId:p.tradeId,lines:[{x1:p.x-8,x2:p.x,tailEnd:p.x+8,y:p.y,color:p.color,key:'exit',tradeId:p.tradeId,value:p.price,label:name+pct,noValue:false,exitPnl:Number.isFinite(p.netPnl)?signed(p.netPnl,2):'',compact:short,fillStep:'exit'}]};});
+    return {tradeId:p.tradeId,lines:[{x1:p.x-8,x2:p.x,tailEnd:p.x+8,y:p.y,color:p.color,key:'exit',tradeId:p.tradeId,value:p.price,label:name+pct,noValue:false,exitPnl:Number.isFinite(p.netPnl)?signed(p.netPnl,2):'',gapNote:Number.isFinite(p.level)&&(p.reason==='STOP_LOSS'&&p.price<p.level*.9995||p.reason==='TAKE_PROFIT'&&p.price>p.level*1.0005)?' · 시가 갭':'',compact:short,fillStep:'exit'}]};});
    const fills=scene.entries.filter(e=>e.fill).slice(-18).map(e=>({tradeId:e.tradeId,lines:[{...e,x1:e.fill.x-8,x2:e.fill.x,tailEnd:e.fill.x+8,y:e.fill.y,compact:e.label,noValue:true,big:e.key==='initial',fillStep:e.step}]}));
    const formatter=series.priceFormatter(),font=big=>big?'bold 14px sans-serif':'10.5px sans-serif',labels=labelLayout([...scene.groups.map(g=>{const out=scene.exits.find(p=>p.tradeId===g.tradeId&&!g.prior);return out?{...g,lines:g.lines.filter(l=>!(l.key==='takeProfit'&&out.reason==='TAKE_PROFIT'||l.key==='stopLoss'&&out.reason==='STOP_LOSS'))}:g;}),...fills,...exits],{width,height,measure:(text,big)=>{ctx.font=font(big);const w=ctx.measureText(text).width;ctx.font=font(false);return w;},format:value=>formatter.format(value),blocked:candleBoxes(options)});
    // Zoomed in, a label can cover the whole line. Keep it readable by
@@ -180,6 +186,12 @@
      ctx.moveTo(x,y-4);ctx.lineTo(x+4,y);ctx.lineTo(x,y+4);ctx.lineTo(x-4,y);ctx.lineTo(x,y-4);ctx.fill();ctx.stroke();
     }
     if(fill){stroke(fill.x-6,fill.y,fill.x+6,fill.y,color,1.6);dot(fill,'#111827',3.6);dot(fill,color,2.6);}
+   }
+   // Exit candle: bracket over the full high-low range, the TP/SL level across the candle, and a dashed gap to the fill when it opened past the level.
+   const barHalf=Math.max(3,(chart.timeScale().options().barSpacing||0)*.45);
+   for(const p of scene.exits){
+    if(Number.isFinite(p.levelY)){if(Math.abs(p.levelY-p.y)>3){ctx.globalAlpha=.75;ctx.setLineDash([3,3]);stroke(p.x,p.levelY,p.x,p.y,p.color,1.2);ctx.setLineDash([]);ctx.globalAlpha=1;}stroke(p.x-barHalf-5,p.levelY,p.x+barHalf+5,p.levelY,p.color,1.8);}
+    if(p.range){const bx=p.range.x+barHalf+6;ctx.globalAlpha=.9;stroke(bx-4,p.range.top,bx,p.range.top,p.color,1.6);stroke(bx,p.range.top,bx,p.range.bottom,p.color,1.6);stroke(bx-4,p.range.bottom,bx,p.range.bottom,p.color,1.6);ctx.globalAlpha=1;}
    }
    for(const p of scene.exits){dot(p,'#111827',4.8);dot(p,p.color,3.4);}
    // Fills whose note found no room keep just their step number.
