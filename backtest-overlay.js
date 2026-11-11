@@ -82,7 +82,9 @@
     // Clip the dates before projection: a spanning position can start outside
     // the loaded chart window, but its visible part still has exact coordinates.
     const a=x(Math.max(from,entry.time)),b=x(Math.min(to,until));if(!Number.isFinite(a)||!Number.isFinite(b))continue;
-    const x1=Math.max(0,a),x2=Math.min(width,b);if(x2<x1)continue;
+    const x1=Math.max(0,a);let x2=Math.min(width,b);if(x2<x1)continue;
+    // A phase that ends quickly still gets a readable average line (at least 24px).
+    if(next&&x2-x1<24)x2=Math.min(width,x1+24);
     // The muted tail is a display aid after the actual exit. Never extend a
     // previous average or TP/SL into the next DCA phase or the next trade.
     const following=trades[index+1]?.entryTime,followingX=Number.isFinite(following)&&following<to?x(following):null;
@@ -119,7 +121,7 @@
   }return {boxes:out,half};
  }
  function labelLayout(groups,{width,height,measure,format,blocked}){
-  const labels=[],padding=4,lineHeight=16,top=22,boxes=blocked?.boxes||[],reach=(blocked?.half||0)*2;if(width<60||height<top+lineHeight+padding)return labels;
+  const labels=[],padding=4,top=22,boxes=blocked?.boxes||[],reach=(blocked?.half||0)*2;if(width<60||height<top+16+padding)return labels;
   const overlaps=(a,b)=>a.x<b.x+b.width+3&&a.x+a.width+3>b.x&&a.y<b.y+b.height+3&&a.y+a.height+3>b.y;
   // Area of candles under a label. Candles are sorted by x, so only scan the label's columns.
   const covered=box=>{let lo=0,hi=boxes.length;while(lo<hi){const mid=(lo+hi)>>>1;if(boxes[mid].x<box.x-reach)lo=mid+1;else hi=mid;}
@@ -127,9 +129,9 @@
   // Recent visible trades get first choice when the chart is very dense. Bounds
   // and text measurement come from this pane, so split/fullscreen sizes agree.
   for(const group of [...groups].reverse())for(const line of [...group.lines].sort((a,b)=>a.y-b.y)){
-   if(labels.length>=48)return labels;let text=line.label+' '+format(line.value),w=Math.ceil(measure(text))+10;
+   if(labels.length>=48)return labels;const lineHeight=line.big?22:16;let text=line.noValue?line.label:line.label+' '+format(line.value),w=Math.ceil(measure(text,line.big))+10;
    const compact=line.compact||(line.key==='avgPrice'?line.label+' '+format(line.value):'');
-   if(w>width-2*padding&&compact){text=compact;w=Math.ceil(measure(text))+10;}
+   if(w>width-2*padding&&compact){text=compact;w=Math.ceil(measure(text,line.big))+10;}
    if(w>width-2*padding)continue;const labelEnd=line.tailEnd??line.x2,anchorX=clamp(group.prior?(line.x1+line.x2)/2:line.x2,padding,width-padding),anchorY=line.y;
    const positions=group.prior?[clamp(anchorX-w/2,padding,width-padding-w),line.x1+3,line.x2-w-3]:[labelEnd+6,line.x2-w-4,line.x1-w-8,clamp(anchorX-w/2,padding,width-padding-w)];let best=null;
    for(const left of positions){if(left<padding||left+w>width-padding)continue;
@@ -140,7 +142,8 @@
     }if(best&&best.cost<1)break;
    }
    // A label that would sit on candles is dropped for prior phases and fill notes; the line itself stays visible.
-   if(best&&(best.cost<1||!group.prior&&!line.compact))labels.push({...best.box,text,color:line.color,anchorX,anchorY,tradeId:group.tradeId,key:line.key});
+   // Entry notes may cover a little of a candle (never most of it); earlier-average labels never do.
+   if(best&&(best.cost<1||!group.prior&&(!line.compact||best.cost<best.box.width*best.box.height*.3)))labels.push({...best.box,text,color:line.color,anchorX,anchorY,tradeId:group.tradeId,key:line.key,big:!!line.big,fillStep:line.fillStep});
   }return labels;
  }
  function draw(ctx,result,options){
@@ -167,15 +170,17 @@
     if(fill){stroke(fill.x-6,fill.y,fill.x+6,fill.y,color,1.6);dot(fill,'#111827',3.6);dot(fill,color,2.6);}
    }
    for(const p of scene.exits){dot(p,'#111827',3.8);dot(p,p.color,2.8);}
-   const formatter=series.priceFormatter(),labels=labelLayout(scene.groups,{width,height,measure:text=>ctx.measureText(text).width,format:value=>formatter.format(value),blocked:candleBoxes(options)});
-   // Fill notes are just the step number beside the marker; the full reason is in the legend/report.
+   // Entry notes ("2차 · 하락 7%") sit beside each fill; the first BUY is larger.
+   const fills=scene.entries.filter(e=>e.fill).slice(-18).map(e=>({tradeId:e.tradeId,lines:[{...e,x1:e.fill.x-8,x2:e.fill.x,tailEnd:e.fill.x+8,y:e.fill.y,compact:e.label,noValue:true,big:e.key==='initial',fillStep:e.step}]}));
+   const formatter=series.priceFormatter(),font=big=>big?'bold 14px sans-serif':'10.5px sans-serif',labels=labelLayout([...scene.groups,...fills],{width,height,measure:(text,big)=>{ctx.font=font(big);const w=ctx.measureText(text).width;ctx.font=font(false);return w;},format:value=>formatter.format(value),blocked:candleBoxes(options)});
+   // Fills whose note found no room keep just their step number.
    if(scene.entries.length<=40){ctx.font='bold 9px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.shadowColor='#0b1020';ctx.shadowBlur=3;
-    for(const e of scene.entries)if(e.fill){ctx.fillStyle=e.color;ctx.fillText(String(e.step),e.fill.x,e.fill.y-5);}ctx.shadowBlur=0;ctx.font='10.5px sans-serif';}
+    for(const e of scene.entries)if(e.fill&&!labels.some(l=>l.fillStep===e.step&&l.tradeId===e.tradeId)){ctx.fillStyle=e.color;ctx.fillText(String(e.step),e.fill.x,e.fill.y-5);}ctx.shadowBlur=0;ctx.font='10.5px sans-serif';}
    ctx.textAlign='left';ctx.textBaseline='middle';ctx.lineWidth=1;
    for(const label of labels){
     const edgeX=clamp(label.anchorX,label.x,label.x+label.width),edgeY=clamp(label.anchorY,label.y,label.y+label.height);
     ctx.globalAlpha=.7;ctx.strokeStyle=label.color;ctx.beginPath();ctx.moveTo(label.anchorX,label.anchorY);ctx.lineTo(edgeX,edgeY);ctx.stroke();ctx.globalAlpha=1;
-    ctx.fillStyle='#111827b8';ctx.fillRect(label.x,label.y,label.width,label.height);ctx.fillStyle=label.color;ctx.fillRect(label.x,label.y,2,label.height);ctx.fillText(label.text,label.x+5,label.y+label.height/2);
+    ctx.fillStyle='#111827b8';ctx.fillRect(label.x,label.y,label.width,label.height);ctx.fillStyle=label.color;ctx.fillRect(label.x,label.y,2,label.height);ctx.font=font(label.big);ctx.fillText(label.text,label.x+5,label.y+label.height/2);ctx.font=font(false);
    }
   }finally{ctx.restore();}
  }
