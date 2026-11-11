@@ -105,7 +105,7 @@
    for(let j=0;j<phases.length-1;j++)for(const line of phases[j].lines)line.prior=true;
    if(phases.length)scene.groups.push(phases.at(-1));
    if(display?.exit!==false&&trade.exitTime>=from&&trade.exitTime<to){const px=x(trade.exitTime),py=series.priceToCoordinate(trade.exitPrice);
-    if(Number.isFinite(px)&&Number.isFinite(py)&&px>=0&&px<=width&&py>=0&&py<=height)scene.exits.push({x:px,y:py,color:trade.exitReason==='STOP_LOSS'?'#fb7185':trade.exitReason==='TAKE_PROFIT'?'#34d399':'#c4b5fd'});
+    if(Number.isFinite(px)&&Number.isFinite(py)&&px>=0&&px<=width&&py>=0&&py<=height)scene.exits.push({x:px,y:py,color:trade.exitReason==='STOP_LOSS'?'#fb7185':trade.exitReason==='TAKE_PROFIT'?'#34d399':'#c4b5fd',tradeId,reason:trade.exitReason,returnPct:trade.returnPct,price:trade.exitPrice,netPnl:trade.netPnl});
    }
   }return scene;
  }
@@ -129,7 +129,7 @@
   // Recent visible trades get first choice when the chart is very dense. Bounds
   // and text measurement come from this pane, so split/fullscreen sizes agree.
   for(const group of [...groups].reverse())for(const line of [...group.lines].sort((a,b)=>a.y-b.y)){
-   if(labels.length>=48)return labels;const lineHeight=line.big?22:16;let text=line.noValue?line.label:line.label+' '+format(line.value),w=Math.ceil(measure(text,line.big))+10;
+   if(labels.length>=48)return labels;const lineHeight=line.big?22:16;let text=line.noValue?line.label:line.label+' '+format(line.value)+(line.exitPnl?' · '+line.exitPnl+' USDT':''),w=Math.ceil(measure(text,line.big))+10;
    const compact=line.compact||(line.key==='avgPrice'?line.label+' '+format(line.value):'');
    if(w>width-2*padding&&compact){text=compact;w=Math.ceil(measure(text,line.big))+10;}
    if(w>width-2*padding)continue;const labelEnd=line.tailEnd??line.x2,anchorX=clamp(group.prior?(line.x1+line.x2)/2:line.x2,padding,width-padding),anchorY=line.y;
@@ -153,8 +153,12 @@
    const stroke=(x1,y1,x2,y2,color,weight)=>{ctx.strokeStyle=color;ctx.lineWidth=weight;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();};
    const dot=(p,color,r)=>{ctx.fillStyle=color;ctx.beginPath();ctx.arc(p.x,p.y,r,0,2*Math.PI);ctx.fill();};
    // Entry notes ("2차 · 하락 7%") sit beside each fill; the first BUY is larger.
+   // Exit notes: TP/SL, return %, fill price and net P&L beside the exact exit candle.
+   const exitName={TAKE_PROFIT:'TP 익절',STOP_LOSS:'SL 손절'},signed=(v,d)=>Number.isFinite(v)?(v>0?'+':v<0?'−':'')+Math.abs(v).toFixed(d):'—';
+   const exits=scene.exits.slice(-18).map(p=>{const name=exitName[p.reason]||'청산',pct=Number.isFinite(p.returnPct)?' '+signed(p.returnPct,2)+'%':'',short=name.slice(0,2)+pct;
+    return {tradeId:p.tradeId,lines:[{x1:p.x-8,x2:p.x,tailEnd:p.x+8,y:p.y,color:p.color,key:'exit',tradeId:p.tradeId,value:p.price,label:name+pct,noValue:false,exitPnl:Number.isFinite(p.netPnl)?signed(p.netPnl,2):'',compact:short,fillStep:'exit'}]};});
    const fills=scene.entries.filter(e=>e.fill).slice(-18).map(e=>({tradeId:e.tradeId,lines:[{...e,x1:e.fill.x-8,x2:e.fill.x,tailEnd:e.fill.x+8,y:e.fill.y,compact:e.label,noValue:true,big:e.key==='initial',fillStep:e.step}]}));
-   const formatter=series.priceFormatter(),font=big=>big?'bold 14px sans-serif':'10.5px sans-serif',labels=labelLayout([...scene.groups,...fills],{width,height,measure:(text,big)=>{ctx.font=font(big);const w=ctx.measureText(text).width;ctx.font=font(false);return w;},format:value=>formatter.format(value),blocked:candleBoxes(options)});
+   const formatter=series.priceFormatter(),font=big=>big?'bold 14px sans-serif':'10.5px sans-serif',labels=labelLayout([...scene.groups.map(g=>{const out=scene.exits.find(p=>p.tradeId===g.tradeId&&!g.prior);return out?{...g,lines:g.lines.filter(l=>!(l.key==='takeProfit'&&out.reason==='TAKE_PROFIT'||l.key==='stopLoss'&&out.reason==='STOP_LOSS'))}:g;}),...fills,...exits],{width,height,measure:(text,big)=>{ctx.font=font(big);const w=ctx.measureText(text).width;ctx.font=font(false);return w;},format:value=>formatter.format(value),blocked:candleBoxes(options)});
    // Zoomed in, a label can cover the whole line. Keep it readable by
    // continuing every line 20 candles past the right edge of its own label.
    const reach=20*(chart.timeScale().options().barSpacing||0);
@@ -177,7 +181,7 @@
     }
     if(fill){stroke(fill.x-6,fill.y,fill.x+6,fill.y,color,1.6);dot(fill,'#111827',3.6);dot(fill,color,2.6);}
    }
-   for(const p of scene.exits){dot(p,'#111827',3.8);dot(p,p.color,2.8);}
+   for(const p of scene.exits){dot(p,'#111827',4.8);dot(p,p.color,3.4);}
    // Fills whose note found no room keep just their step number.
    if(scene.entries.length<=40){ctx.font='bold 9px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.shadowColor='#0b1020';ctx.shadowBlur=3;
     for(const e of scene.entries)if(e.fill&&!labels.some(l=>l.fillStep===e.step&&l.tradeId===e.tradeId)){ctx.fillStyle=e.color;ctx.fillText(String(e.step),e.fill.x,e.fill.y-5);}ctx.shadowBlur=0;ctx.font='10.5px sans-serif';}
