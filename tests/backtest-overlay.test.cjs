@@ -39,7 +39,7 @@ test('lines and labels outside the visible dates never turn into backwards strok
 });
 test('a real fill inside the final displayed candle is visible, including fixed-minute DCA on a higher timeframe',()=>{
  const h=harness({interval:'1h',state:{from:base,to:base+3600,spacing:60},trade:{entryTime:base+3600,exitTime:base+64*60,entries:[entry(60),entry(62,.099,2)]}}),s=h.scene();
- assert.equal(s.segments.length,6);assert.deepEqual(s.groups.map(g=>g.step),[1,2]);assert.ok(s.segments[0].x2-s.segments[0].x1>=24);assert.equal(s.exits.length,1);
+ assert.equal(s.segments.length,6);assert.deepEqual(s.groups.map(g=>g.step),[1,2]);assert.ok(s.segments[0].x2-s.segments[0].x1>=200);assert.equal(s.exits.length,1);
  assert.equal(s.segments[3].x1,182);assert.equal(s.exits[0].x,184);
 });
 test('visible DCA phases identify their own average, with TP/SL labels on the latest visible phase',()=>{
@@ -48,7 +48,7 @@ test('visible DCA phases identify their own average, with TP/SL labels on the la
  assert.deepEqual(s.segments.filter(x=>x.key==='avgPrice').map(x=>x.value),[.1,.09,.08]);assert.ok(s.groups.at(-1).lines.every(x=>x.value<.09));
  assert.ok(s.groups.slice(0,-1).every(g=>g.lines.length===1&&g.lines[0].label===g.step+'차 평단'));
  const labels=O.labelLayout(s.groups,{width:500,height:200,measure:t=>t.length*5,format:v=>v.toFixed(4)});
- assert.ok(labels.some(l=>l.text.includes('2차 평단 0.0900')&&l.anchorX===210));
+ assert.ok(labels.some(l=>l.text.includes('2차 평단 0.0900')&&l.anchorX===(s.segments.find(x=>x.key==='avgPrice'&&x.step===2).x1+s.segments.find(x=>x.key==='avgPrice'&&x.step===2).x2)/2));
  h.state.to=base+8*60;const earlier=h.scene();assert.equal(earlier.groups.at(-1).step,2);assert.equal(earlier.segments.length,6);
 });
 test('stop loss after all splits stays absent until the engine has actually activated it',()=>{
