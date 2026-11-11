@@ -39,7 +39,7 @@ test('lines and labels outside the visible dates never turn into backwards strok
 });
 test('a real fill inside the final displayed candle is visible, including fixed-minute DCA on a higher timeframe',()=>{
  const h=harness({interval:'1h',state:{from:base,to:base+3600,spacing:60},trade:{entryTime:base+3600,exitTime:base+64*60,entries:[entry(60),entry(62,.099,2)]}}),s=h.scene();
- assert.equal(s.segments.length,6);assert.equal(s.groups[0].step,2);assert.equal(s.exits.length,1);
+ assert.equal(s.segments.length,6);assert.deepEqual(s.groups.map(g=>g.step),[1,2]);assert.ok(s.segments[0].x2-s.segments[0].x1>=24);assert.equal(s.exits.length,1);
  assert.equal(s.segments[3].x1,182);assert.equal(s.exits[0].x,184);
 });
 test('visible DCA phases identify their own average, with TP/SL labels on the latest visible phase',()=>{
