@@ -27,7 +27,7 @@
 .bt-display-swatch{height:3px;width:15px;flex:none;border-radius:2px;background:var(--line-color)}
 .bt-report{overflow:auto;min-height:0;flex:1;padding:12px 14px;scrollbar-width:thin;scrollbar-color:#465c7b #121b2a;color-scheme:dark;font-size:12px}
 .bt-empty{display:grid;place-content:center;min-height:100%;text-align:center;color:#9eafc7;line-height:1.9;padding:14px}.bt-empty strong{font-size:15px;color:#d4e0f2;font-weight:600}.bt-empty p{font-size:12px;margin:7px 0 10px}.bt-empty button{justify-self:center}
-.bt-result-heading{display:flex;gap:8px;justify-content:space-between;font-size:11px;font-weight:600;color:#b9cce8;margin:0 0 11px;flex-wrap:wrap}.bt-result-heading span{font-weight:400;font-size:10px;color:#8fa5c3}
+.bt-result-heading{display:flex;gap:8px;align-items:center;font-size:11px;font-weight:600;color:#b9cce8;margin:0 0 11px;flex-wrap:wrap}.bt-result-heading b{font-size:15px;font-weight:800;line-height:1;padding:7px 12px;border-radius:8px;border:1px solid #30486f;background:#14233d;color:#e8f0ff;letter-spacing:.01em}.bt-result-heading .bt-sym{font-size:17px;color:#fff;background:linear-gradient(135deg,#1d4ed8,#2563eb);border-color:#3b82f6}.bt-result-heading .bt-tf{color:#fbbf24;border-color:#6b5320;background:#2a2110}.bt-tf-cell{display:inline-block;padding:3px 9px;border-radius:6px;background:#2a2110;border:1px solid #6b5320;color:#fbbf24;font-size:12px;font-weight:700;white-space:nowrap}.bt-result-heading span{font-weight:400;font-size:10px;color:#8fa5c3}
 .bt-summary-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
 .bt-summary-card{display:flex;flex-direction:column;gap:7px;padding:12px;background:#19263b;border:1px solid #30425e;border-radius:6px;min-width:0}
 .bt-summary-card>span{font-size:11px;color:#9eb3d0}.bt-summary-card strong{font-size:16px;font-weight:650;letter-spacing:-.3px;color:#e0ebfb;overflow-wrap:anywhere}.bt-summary-card small{font-size:10px;color:#839bbd;line-height:1.4}.bt-summary-card.positive strong,.bt-positive{color:#55d5ad}.bt-summary-card.negative strong,.bt-negative{color:#fa9da8}
@@ -151,3 +151,5 @@
 #btResearchRun{border-color:#427b76;color:#a9ead4}
 
 .bt-table td small.bt-batch-best{color:#8bc5ff;font-weight:600}
+
+.bt-result-heading span{margin-left:auto}
