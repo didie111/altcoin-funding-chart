@@ -100,40 +100,62 @@
     const phase=phases[j],average=phase.lines.find(line=>line.key==='avgPrice');
     if(average&&average.x2-average.x1>=20)scene.groups.push({...phase,prior:true,lines:[average]});
    }
+   for(let j=0;j<phases.length-1;j++)for(const line of phases[j].lines)line.prior=true;
    if(phases.length)scene.groups.push(phases.at(-1));
    if(display?.exit!==false&&trade.exitTime>=from&&trade.exitTime<to){const px=x(trade.exitTime),py=series.priceToCoordinate(trade.exitPrice);
     if(Number.isFinite(px)&&Number.isFinite(py)&&px>=0&&px<=width&&py>=0&&py<=height)scene.exits.push({x:px,y:py,color:trade.exitReason==='STOP_LOSS'?'#fb7185':trade.exitReason==='TAKE_PROFIT'?'#34d399':'#c4b5fd'});
    }
   }return scene;
  }
- function labelLayout(groups,{width,height,measure,format}){
-  const labels=[],padding=4,lineHeight=18,top=24;if(width<60||height<top+lineHeight+padding)return labels;
+ // Candle boxes (sorted by x) let labels find empty chart space. A label may
+ // only cover candles when no free spot exists; prior-phase labels never do.
+ function candleBoxes({chart,series,bars,width}){
+  const out=[],scale=chart?.timeScale?.(),range=scale?.getVisibleRange?.();if(!range||!bars?.length)return {boxes:out,half:0};
+  const half=Math.max(1,(scale.options().barSpacing||0)*.4);
+  for(let i=Math.max(0,lower(bars,Number(range.from))-1);i<bars.length&&bars[i].time<=Number(range.to);i++){
+   const b=bars[i];if(!Number.isFinite(b.high)||!Number.isFinite(b.low))continue;
+   const cx=scale.timeToCoordinate(b.time),y1=series.priceToCoordinate(b.high),y2=series.priceToCoordinate(b.low);
+   if(Number.isFinite(cx)&&Number.isFinite(y1)&&Number.isFinite(y2)&&cx>=-half&&cx<=width+half)out.push({x:cx-half,y:Math.min(y1,y2),width:half*2,height:Math.abs(y2-y1)+1});
+  }return {boxes:out,half};
+ }
+ function labelLayout(groups,{width,height,measure,format,blocked}){
+  const labels=[],padding=4,lineHeight=16,top=22,boxes=blocked?.boxes||[],reach=(blocked?.half||0)*2;if(width<60||height<top+lineHeight+padding)return labels;
   const overlaps=(a,b)=>a.x<b.x+b.width+3&&a.x+a.width+3>b.x&&a.y<b.y+b.height+3&&a.y+a.height+3>b.y;
+  // Area of candles under a label. Candles are sorted by x, so only scan the label's columns.
+  const covered=box=>{let lo=0,hi=boxes.length;while(lo<hi){const mid=(lo+hi)>>>1;if(boxes[mid].x<box.x-reach)lo=mid+1;else hi=mid;}
+   let area=0;for(;lo<boxes.length&&boxes[lo].x<box.x+box.width;lo++){const c=boxes[lo],w=Math.min(box.x+box.width,c.x+c.width)-Math.max(box.x,c.x),h=Math.min(box.y+box.height,c.y+c.height)-Math.max(box.y,c.y);if(w>0&&h>0)area+=w*h;}return area;};
   // Recent visible trades get first choice when the chart is very dense. Bounds
   // and text measurement come from this pane, so split/fullscreen sizes agree.
   for(const group of [...groups].reverse())for(const line of [...group.lines].sort((a,b)=>a.y-b.y)){
-   if(labels.length>=48)return labels;let text='#'+group.tradeId+' · '+line.label+' '+format(line.value),w=Math.ceil(measure(text))+10;
+   if(labels.length>=48)return labels;let text=line.label+' '+format(line.value),w=Math.ceil(measure(text))+10;
    const compact=line.compact||(line.key==='avgPrice'?line.label+' '+format(line.value):'');
    if(w>width-2*padding&&compact){text=compact;w=Math.ceil(measure(text))+10;}
    if(w>width-2*padding)continue;const labelEnd=line.tailEnd??line.x2,anchorX=clamp(group.prior?(line.x1+line.x2)/2:line.x2,padding,width-padding),anchorY=line.y;
-   const positions=group.prior?[clamp(anchorX-w/2,padding,width-padding-w),line.x1+3,line.x2-w-3]:[labelEnd+6,line.x2-w-4,line.x1-w-8,clamp(anchorX-w/2,padding,width-padding-w)];let placed=null;
+   const positions=group.prior?[clamp(anchorX-w/2,padding,width-padding-w),line.x1+3,line.x2-w-3]:[labelEnd+6,line.x2-w-4,line.x1-w-8,clamp(anchorX-w/2,padding,width-padding-w)];let best=null;
    for(const left of positions){if(left<padding||left+w>width-padding)continue;
-    for(const offset of [0,-21,21,-42,42,-63,63]){const box={x:left,y:clamp(anchorY-lineHeight/2+offset,top,height-padding-lineHeight),width:w,height:lineHeight};
-     if(!labels.some(other=>overlaps(box,other))){placed={...box,text,color:line.color,anchorX,anchorY,tradeId:group.tradeId,key:line.key};break;}
-    }if(placed)break;
-   }if(placed)labels.push(placed);
+    for(const offset of [0,-18,18,-36,36,-54,54,-72,72,-90,90]){const box={x:left,y:clamp(anchorY-lineHeight/2+offset,top,height-padding-lineHeight),width:w,height:lineHeight};
+     if(labels.some(other=>overlaps(box,other)))continue;
+     const cost=covered(box)+Math.abs(offset)*.01;if(!best||cost<best.cost)best={box,cost};
+     if(cost<1)break;
+    }if(best&&best.cost<1)break;
+   }
+   // A label that would sit on candles is dropped for prior phases and fill notes; the line itself stays visible.
+   if(best&&(best.cost<1||!group.prior&&!line.compact))labels.push({...best.box,text,color:line.color,anchorX,anchorY,tradeId:group.tradeId,key:line.key});
   }return labels;
  }
  function draw(ctx,result,options){
   const {width,height,series}=options,scene=geometry(result,options);if(!scene.segments.length&&!scene.exits.length&&!scene.entries.length)return;
   ctx.save();try{
-   ctx.beginPath();ctx.rect(0,0,width,height);ctx.clip();ctx.font='11px sans-serif';ctx.setLineDash([]);ctx.lineCap='round';
+   ctx.beginPath();ctx.rect(0,0,width,height);ctx.clip();ctx.font='10.5px sans-serif';ctx.setLineDash([]);ctx.lineCap='round';
    const stroke=(x1,y1,x2,y2,color,weight)=>{ctx.strokeStyle=color;ctx.lineWidth=weight;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();};
    const dot=(p,color,r)=>{ctx.fillStyle=color;ctx.beginPath();ctx.arc(p.x,p.y,r,0,2*Math.PI);ctx.fill();};
    for(const s of scene.segments){
-    if(s.tailEnd>s.x2){ctx.globalAlpha=.56;stroke(s.x2,s.y,s.tailEnd,s.y,s.color,1.8);ctx.globalAlpha=1;}
-    if(s.tailEnd>s.x2||s.x2===s.x1)dot({x:s.x2,y:s.y},s.color,2);
-    if(s.x2>s.x1)stroke(s.x1,s.y,s.x2,s.y,s.color,1.8);
+    if(s.prior&&s.key!=='avgPrice')continue;// replaced TP/SL levels are no longer active; hiding them keeps the chart clear
+    // Earlier averages are thin, dashed and faint so the current phase stands out.
+    const weight=s.prior?1:1.5;
+    if(s.tailEnd>s.x2){ctx.globalAlpha=.5;stroke(s.x2,s.y,s.tailEnd,s.y,s.color,weight);ctx.globalAlpha=1;}
+    if(s.tailEnd>s.x2||s.x2===s.x1)dot({x:s.x2,y:s.y},s.color,1.8);
+    if(s.x2>s.x1){if(s.prior){ctx.globalAlpha=.6;ctx.setLineDash([5,4]);}stroke(s.x1,s.y,s.x2,s.y,s.color,weight);ctx.setLineDash([]);ctx.globalAlpha=1;}
    }
    for(const e of scene.entries){
     const {fill,signal,color}=e;
@@ -142,16 +164,18 @@
      const {x,y}=signal;ctx.fillStyle='#111827';ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.beginPath();
      ctx.moveTo(x,y-4);ctx.lineTo(x+4,y);ctx.lineTo(x,y+4);ctx.lineTo(x-4,y);ctx.lineTo(x,y-4);ctx.fill();ctx.stroke();
     }
-    if(fill){stroke(fill.x-8,fill.y,fill.x+8,fill.y,color,2.2);dot(fill,'#111827',4.5);dot(fill,color,3.2);}
+    if(fill){stroke(fill.x-6,fill.y,fill.x+6,fill.y,color,1.6);dot(fill,'#111827',3.6);dot(fill,color,2.6);}
    }
-   for(const p of scene.exits){dot(p,'#111827',4.8);dot(p,p.color,3.5);}
-   const fills=scene.entries.filter(e=>e.fill).slice(-18).map(e=>({tradeId:e.tradeId,lines:[{...e,x1:e.fill.x-8,x2:e.fill.x,tailEnd:e.fill.x+8,y:e.fill.y,compact:e.label}]}));
-   const formatter=series.priceFormatter(),labels=labelLayout([...scene.groups,...fills],{width,height,measure:text=>ctx.measureText(text).width,format:value=>formatter.format(value)});
+   for(const p of scene.exits){dot(p,'#111827',3.8);dot(p,p.color,2.8);}
+   const formatter=series.priceFormatter(),labels=labelLayout(scene.groups,{width,height,measure:text=>ctx.measureText(text).width,format:value=>formatter.format(value),blocked:candleBoxes(options)});
+   // Fill notes are just the step number beside the marker; the full reason is in the legend/report.
+   if(scene.entries.length<=40){ctx.font='bold 9px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.shadowColor='#0b1020';ctx.shadowBlur=3;
+    for(const e of scene.entries)if(e.fill){ctx.fillStyle=e.color;ctx.fillText(String(e.step),e.fill.x,e.fill.y-5);}ctx.shadowBlur=0;ctx.font='10.5px sans-serif';}
    ctx.textAlign='left';ctx.textBaseline='middle';ctx.lineWidth=1;
    for(const label of labels){
     const edgeX=clamp(label.anchorX,label.x,label.x+label.width),edgeY=clamp(label.anchorY,label.y,label.y+label.height);
-    ctx.strokeStyle=label.color;ctx.beginPath();ctx.moveTo(label.anchorX,label.anchorY);ctx.lineTo(edgeX,edgeY);ctx.stroke();
-    ctx.fillStyle='#111827ed';ctx.fillRect(label.x,label.y,label.width,label.height);ctx.fillStyle=label.color;ctx.fillRect(label.x,label.y,2,label.height);ctx.fillText(label.text,label.x+5,label.y+label.height/2);
+    ctx.globalAlpha=.7;ctx.strokeStyle=label.color;ctx.beginPath();ctx.moveTo(label.anchorX,label.anchorY);ctx.lineTo(edgeX,edgeY);ctx.stroke();ctx.globalAlpha=1;
+    ctx.fillStyle='#111827b8';ctx.fillRect(label.x,label.y,label.width,label.height);ctx.fillStyle=label.color;ctx.fillRect(label.x,label.y,2,label.height);ctx.fillText(label.text,label.x+5,label.y+label.height/2);
    }
   }finally{ctx.restore();}
  }
@@ -165,5 +189,5 @@
   }},views=[{zOrder:()=> 'top',renderer:()=>renderer}];
   return {attached:parameters=>{attached=parameters;parameters.requestUpdate();},detached:()=>{attached=null;},paneViews:()=>views,updateAllViews(){},invalidate:()=>attached?.requestUpdate()};
  }
- return {matches,markers,geometry,labelLayout,draw,create,entryTrace,displaySections,displayOptions,readDisplay,displayKey,displayEvent};
+ return {matches,markers,geometry,candleBoxes,labelLayout,draw,create,entryTrace,displaySections,displayOptions,readDisplay,displayKey,displayEvent};
 });
