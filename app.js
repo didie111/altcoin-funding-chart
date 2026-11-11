@@ -351,7 +351,7 @@ function typingTarget(t){return t instanceof Element&&Boolean(t.closest('input,t
 document.addEventListener('keydown',e=>{if(typingTarget(e.target))return;if(e.key==='Shift'&&!shiftHeld&&!chartDrawings?.capturesChart()){shiftHeld=true;rulerInteraction();}if(e.key==='Escape'){shiftHeld=false;toggleRuler(false);}});
 document.addEventListener('keyup',e=>{if(e.key==='Shift'){shiftHeld=false;rulerInteraction();}});
 window.addEventListener('blur',()=>{shiftHeld=false;if(rulerDragging){endRulerDrag();rulerLocked=true;}rulerInteraction();});
-const rulerHost=$('unified-chart');
+const rulerHost=$('unified-chart');rulerHost.addEventListener('touchmove',e=>{if(e.cancelable&&!e.target.closest?.('[data-panel-ui],[data-chart-nav],[data-chart-fullscreen],[data-pane-scale],[data-chart-identity],[data-drawing-ui]'))e.preventDefault();},{passive:false}); // Chart and price-axis drags never scroll the page.
 // A chosen date remains stable during backfill until the user navigates the chart.
 rulerHost.addEventListener('pointerdown',event=>{
  if(event.button!==0||rulerEnabled||event.shiftKey||event.target.closest?.('[data-panel-ui],[data-chart-nav],[data-chart-identity],[data-chart-fullscreen],[data-pane-scale],[data-drawing-ui]'))return;
