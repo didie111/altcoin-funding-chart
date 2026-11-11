@@ -133,7 +133,7 @@
    const compact=line.compact||(line.key==='avgPrice'?line.label+' '+format(line.value):'');
    if(w>width-2*padding&&compact){text=compact;w=Math.ceil(measure(text,line.big))+10;}
    if(w>width-2*padding)continue;const labelEnd=line.tailEnd??line.x2,anchorX=clamp(group.prior?(line.x1+line.x2)/2:line.x2,padding,width-padding),anchorY=line.y;
-   const positions=group.prior?[clamp(anchorX-w/2,padding,width-padding-w),line.x1+3,line.x2-w-3]:[labelEnd+6,line.x2-w-4,line.x1-w-8,clamp(anchorX-w/2,padding,width-padding-w)];let best=null;
+   const positions=group.prior?[line.x1+3,clamp(anchorX-w/2,padding,width-padding-w),line.x2-w-3]:[labelEnd+6,line.x2-w-4,line.x1-w-8,clamp(anchorX-w/2,padding,width-padding-w)];let best=null;
    for(const left of positions){if(left<padding||left+w>width-padding)continue;
     for(const offset of [0,-18,18,-36,36,-54,54,-72,72,-90,90]){const box={x:left,y:clamp(anchorY-lineHeight/2+offset,top,height-padding-lineHeight),width:w,height:lineHeight};
      if(labels.some(other=>overlaps(box,other)))continue;
@@ -143,15 +143,23 @@
    }
    // A label that would sit on candles is dropped for prior phases and fill notes; the line itself stays visible.
    // Entry notes may cover a little of a candle (never most of it); earlier-average labels never do.
-   if(best&&(best.cost<1||(group.prior?best.cost<best.box.width*best.box.height*.15:!line.compact||best.cost<best.box.width*best.box.height*.3)))labels.push({...best.box,text,color:line.color,anchorX,anchorY,tradeId:group.tradeId,key:line.key,big:!!line.big,fillStep:line.fillStep});
+   if(best&&(best.cost<1||(group.prior?best.cost<best.box.width*best.box.height*.15:!line.compact||best.cost<best.box.width*best.box.height*.3)))labels.push({...best.box,text,color:line.color,anchorX,anchorY,tradeId:group.tradeId,key:line.key,big:!!line.big,fillStep:line.fillStep,prior:!!group.prior,line});
   }return labels;
  }
  function draw(ctx,result,options){
-  const {width,height,series}=options,scene=geometry(result,options);if(!scene.segments.length&&!scene.exits.length&&!scene.entries.length)return;
+  const {chart,width,height,series}=options,scene=geometry(result,options);if(!scene.segments.length&&!scene.exits.length&&!scene.entries.length)return;
   ctx.save();try{
    ctx.beginPath();ctx.rect(0,0,width,height);ctx.clip();ctx.font='10.5px sans-serif';ctx.setLineDash([]);ctx.lineCap='round';
    const stroke=(x1,y1,x2,y2,color,weight)=>{ctx.strokeStyle=color;ctx.lineWidth=weight;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();};
    const dot=(p,color,r)=>{ctx.fillStyle=color;ctx.beginPath();ctx.arc(p.x,p.y,r,0,2*Math.PI);ctx.fill();};
+   // Entry notes ("2차 · 하락 7%") sit beside each fill; the first BUY is larger.
+   const fills=scene.entries.filter(e=>e.fill).slice(-18).map(e=>({tradeId:e.tradeId,lines:[{...e,x1:e.fill.x-8,x2:e.fill.x,tailEnd:e.fill.x+8,y:e.fill.y,compact:e.label,noValue:true,big:e.key==='initial',fillStep:e.step}]}));
+   const formatter=series.priceFormatter(),font=big=>big?'bold 14px sans-serif':'10.5px sans-serif',labels=labelLayout([...scene.groups,...fills],{width,height,measure:(text,big)=>{ctx.font=font(big);const w=ctx.measureText(text).width;ctx.font=font(false);return w;},format:value=>formatter.format(value),blocked:candleBoxes(options)});
+   // Zoomed in, a label can cover the whole line. Keep it readable by
+   // continuing every line 20 candles past the right edge of its own label.
+   const reach=20*(chart.timeScale().options().barSpacing||0);
+   for(const label of labels){if(label.fillStep!==undefined)continue;const line=label.line,end=Math.min(width,label.x+label.width+reach);
+    if(label.x<line.x2){if(line.x2<end)line.x2=end;}else if((line.tailEnd??line.x2)<end)line.tailEnd=end;}
    for(const s of scene.segments){
     if(s.prior&&s.key!=='avgPrice')continue;// replaced TP/SL levels are no longer active; hiding them keeps the chart clear
     // Earlier averages are thin and slightly faint so the current phase stands out.
@@ -170,9 +178,6 @@
     if(fill){stroke(fill.x-6,fill.y,fill.x+6,fill.y,color,1.6);dot(fill,'#111827',3.6);dot(fill,color,2.6);}
    }
    for(const p of scene.exits){dot(p,'#111827',3.8);dot(p,p.color,2.8);}
-   // Entry notes ("2차 · 하락 7%") sit beside each fill; the first BUY is larger.
-   const fills=scene.entries.filter(e=>e.fill).slice(-18).map(e=>({tradeId:e.tradeId,lines:[{...e,x1:e.fill.x-8,x2:e.fill.x,tailEnd:e.fill.x+8,y:e.fill.y,compact:e.label,noValue:true,big:e.key==='initial',fillStep:e.step}]}));
-   const formatter=series.priceFormatter(),font=big=>big?'bold 14px sans-serif':'10.5px sans-serif',labels=labelLayout([...scene.groups,...fills],{width,height,measure:(text,big)=>{ctx.font=font(big);const w=ctx.measureText(text).width;ctx.font=font(false);return w;},format:value=>formatter.format(value),blocked:candleBoxes(options)});
    // Fills whose note found no room keep just their step number.
    if(scene.entries.length<=40){ctx.font='bold 9px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.shadowColor='#0b1020';ctx.shadowBlur=3;
     for(const e of scene.entries)if(e.fill&&!labels.some(l=>l.fillStep===e.step&&l.tradeId===e.tradeId)){ctx.fillStyle=e.color;ctx.fillText(String(e.step),e.fill.x,e.fill.y-5);}ctx.shadowBlur=0;ctx.font='10.5px sans-serif';}
