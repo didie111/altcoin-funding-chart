@@ -328,7 +328,7 @@ const rulerLabel=document.createElement('div');rulerLabel.id='rulerMeasurementLa
 function priceChange(start,end){if(!Number.isFinite(start)||!Number.isFinite(end)||start<=0)return null;return {difference:end-start,percent:(end-start)/start*100};}
 function clearRuler(){rulerStart=null;rulerEnd=null;rulerLocked=false;rulerTemporary=false;rulerLabel.hidden=true;schedule();}
 function rulerWheelActive(){return rulerEnabled||shiftHeld||rulerDragging||Boolean(chartDrawings?.usesRuler());}
-function canPageSwipe(touch){
+function canPageSwipe(touch){return false; // Chart touches (pan, zoom, price axes) never scroll the page.
  if(!pageTouchScroll||rulerWheelActive()||chartDrawings?.capturesChart())return false;
  if(!touch)return true;
  if(touch.target?.closest?.('.tv-lightweight-charts td[colspan="3"]'))return false;
