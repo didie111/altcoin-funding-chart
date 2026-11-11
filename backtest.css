@@ -153,3 +153,16 @@
 .bt-table td small.bt-batch-best{color:#8bc5ff;font-weight:600}
 
 .bt-result-heading span{margin-left:auto}
+.bt-indicator-picker{position:relative}
+.bt-indicator-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.bt-indicator-row small{color:#8fa6c6;font-size:11px}
+#btIndicatorButton{flex:1;min-width:200px;min-height:38px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;border-radius:8px;border:1px solid #3b6fc4;background:#15305c;color:#fff;font-size:13px;font-weight:700;cursor:pointer}
+.bt-indicator-list{list-style:none;margin:8px 0 0;padding:4px;max-height:230px;overflow-y:auto;background:#0f1622;border:1px solid #2b4573;border-radius:10px}
+.bt-indicator-list[hidden]{display:none}
+.bt-indicator-list li{display:flex;align-items:center;justify-content:space-between;min-height:34px;padding:0 10px;border-radius:6px;color:#cfd7e6;font-size:13px;cursor:pointer}
+.bt-indicator-list li small{opacity:.6;font-size:11px}
+.bt-indicator-list li:hover,.bt-indicator-list li:focus{background:#1a2c4d;outline:none}
+.bt-indicator-list li[aria-selected="true"]{background:#1a2c4d;color:#fff}
+.bt-indicator-list li[aria-disabled="true"]{color:#6d778c;cursor:not-allowed}
+.bt-indicator-list li[aria-disabled="true"]:hover{background:transparent}
+.bt-indicator-list li b{font-size:11px;font-weight:700}

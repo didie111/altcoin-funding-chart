@@ -6,7 +6,7 @@
   let strategy;try{const {dcaMultiplierDraft,...values}=saved;strategy=E.normalizeConfig(values);}catch{strategy=E.normalizeConfig();}
   let batchBusy=false,batchUI=null;const reportNavigation=root.ListNavigation.create();
   let runningExchange=null,runningMarket=null,runningCell=0,collecting=false,lastFailure=false;
-  let custom=saved.target||null,follow=saved.follow!==false,followTimeframe=typeof saved.followTimeframe==='boolean'?saved.followTimeframe:follow,worker=null,controller=null,job=0,busy=false,view='overview',page=0,tradeJumpTimeframe=null,single=null,comparison=null,optimized=null;
+  let indicator=root.BacktestIndicators.resolve(saved.indicator),custom=saved.target||null,follow=saved.follow!==false,followTimeframe=typeof saved.followTimeframe==='boolean'?saved.followTimeframe:follow,worker=null,controller=null,job=0,busy=false,view='overview',page=0,tradeJumpTimeframe=null,single=null,comparison=null,optimized=null;
   const moneyFormat=new Intl.NumberFormat('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}),smallMoneyFormat=new Intl.NumberFormat('en-US',{minimumFractionDigits:4,maximumFractionDigits:8}),numberFormats=new Map();
   const money=value=>{const n=Number(value)||0;return (n!==0&&Math.abs(n)<.01?smallMoneyFormat:moneyFormat).format(n);};
   const number=(value,d=2)=>{if(!Number.isFinite(value))return '—';const digits=value!==0&&Math.abs(value)<10**(-d)?Math.max(d,6):d;if(!numberFormats.has(digits))numberFormats.set(digits,new Intl.NumberFormat('ko-KR',{maximumFractionDigits:digits}));return numberFormats.get(digits).format(value);};
@@ -20,6 +20,25 @@
   const select=(label,id,options)=>'<label for="'+id+'">'+label+'<select id="'+id+'">'+options.map(([value,text])=>'<option value="'+value+'">'+text+'</option>').join('')+'</select></label>';
   const extra=doc.createElement('fieldset');extra.className='bt-settings-strategy';extra.innerHTML='<legend>음펀비 + RSI 분할 매수</legend><label class="bt-check"><input id="btFollowChart" type="checkbox">거래소·코인 심볼 따라가기</label><label class="bt-check"><input id="btFollowTimeframe" type="checkbox">타임프레임 따라가기</label><div class="research-field-row">'+select('거래소','btExchangeSelect',Object.entries(M.exchanges))+field('코인 심볼','btSymbolInput','text','maxlength="32" placeholder="BTCUSDT"')+'</div>'+select('타임프레임','btTimeframeSelect',Object.entries(M.labels))+'<div class="bt-quick-coins"><span>종목 입력 예시</span><button type="button" data-coin="IOSTUSDT">IOST</button><button type="button" data-coin="ARKUSDT">ARK</button><button type="button" data-coin="ERAUSDT">ERA</button></div>'+select('펀딩 주기 판단 기준','btIntervalBasis',[['known','당시 확인된 정산 간격 · 기본'],['chart','과거 차트 관측 간격 · 사후 비교']])+'<small>사후 비교는 뒤에 발생한 정산 기록으로 과거 간격을 확인합니다. 당시 알 수 없던 주기 정보가 포함되므로 실전 성과로 해석하지 마세요.</small><div class="research-field-row">'+select('RSI 신호 시점의 펀딩 주기','btIntervalHours',[[0,'모든 주기'],[1,'1시간'],[2,'2시간'],[4,'4시간'],[8,'8시간'],[12,'12시간'],[24,'24시간']])+field('정산 후 신호 유효 · 분','btFundingWindow','number','min="0" max="14400" step="1" required')+'</div><small>기준을 충족한 음펀딩은 설정한 유효시간 동안 유지합니다. 그 안에서 RSI 마감 시점까지 확인된 펀딩 주기를 검사합니다. 0분은 해당 음펀딩 정산 간격만큼 유효합니다.</small><div class="research-field-row">'+field('펀딩비 진입 기준 · % 이하','btMinFunding','number','min="-100" max="0" step="any" required')+field('RSI 과매도선','btRsiOversold','number','min="1" max="99" step="1" required')+'</div><div class="research-field-row">'+field('RSI 기간','btRsiPeriod','number','min="2" max="200" step="1" required')+select('첫 진입 신호','btEntryTrigger',[['rsi_cross_up','과매도선 상향 돌파 마감'],['rsi_oversold','과매도 이하 마감']])+'</div><div class="research-field-row">'+select('총 분할 진입 수','btSplitCount',Array.from({length:11},(_,i)=>[i,i===0?'0분할 · 1회 진입':i===1?'1회 진입':i+'분할 · '+i+'회 진입']))+select('분할 금액 배분','btDcaMethod',[['equal','균등 배분'],['martingale','마틴게일 · 1, 1, 2, 4…'],['cumulative','회차별 배수']])+'</div>'+select('추가 진입 신호','btSplitTrigger',[['step_pct','직전 진입가 대비 추가 하락'],['rsi_cross_up','현재 주기 RSI 과매도선 상향 돌파 마감'],['rsi_cross_up_1m','1분봉 고정 RSI 과매도선 상향 돌파 마감'],['rsi_oversold','과매도 이하 마감마다'],['bar','완성된 봉마다']])+'<small id="btSplitHelp"></small>'+field('추가 하락 간격 · %','btSplitStepPct','number','min="0.01" max="99" step="any" required')+select('진입 금액 기준','btSizing',[['budget','거래당 자본 비중으로 자동 배분'],['first_entry','첫 진입 금액 고정']])+field('첫 진입 금액 · USDT','btFirstAmount','number','min="0.01" max="1000000000000" step="any" required')+'<p id="btAllocationPreview" class="bt-allocation-preview" role="status"></p>'+select('손절 감시 시작','btStopLossMode',[['immediate','첫 진입 체결 직후부터'],['after_all_dca','모든 분할 진입 체결 후부터']])+'<div class="research-field-row">'+field('평단 대비 익절 · %','btTakeProfit','number','min="0" max="10000" step="any" required')+field('평단 대비 손절 · %','btStopLoss','number','min="0" max="99.99" step="any" required')+'</div><small>0%는 해당 기준을 사용하지 않습니다. 익절은 매 체결 후의 수량 가중평단을 따릅니다.</small>'+select('청산 방식','btExitType',[['tp_sl','익절 + 손절'],['rsi_rebound','RSI 반등 + 손절'],['settle_exit','정산 후 양봉 + 손절'],['composite','익절 또는 RSI 반등 + 손절']])+'<div class="research-field-row">'+field('청산 RSI','btRsiExit','number','min="1" max="99" step="1" required')+field('최대 보유 봉 · 0은 제한 없음','btMaxHold','number','min="0" max="1000000" step="1" required')+'</div><label class="bt-check"><input id="btIncludeFunding" type="checkbox">보유 중 모든 실제 정산의 수취·지급 반영</label>';
   body.append(extra);
+  const I=root.BacktestIndicators,picker=doc.createElement('fieldset');picker.className='bt-indicator-picker';
+  picker.innerHTML='<legend>지표 선택</legend><div class="bt-indicator-row"><button id="btIndicatorButton" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="btIndicatorList"><span></span><i aria-hidden="true">▾</i></button><small>한 번에 지표 1개만 · 지표마다 전용 설정</small></div><ul id="btIndicatorList" class="bt-indicator-list" role="listbox" aria-label="지표 선택" hidden></ul>';
+  body.insertBefore(picker,extra);
+  const indicatorButton=picker.querySelector('#btIndicatorButton'),indicatorList=picker.querySelector('#btIndicatorList');
+  function renderIndicators(){
+   indicatorButton.firstElementChild.textContent=I.find(indicator).name;
+   indicatorList.innerHTML=I.list.map(item=>'<li role="option" tabindex="'+(item.ready?'0':'-1')+'" data-indicator="'+item.id+'" aria-selected="'+(item.id===indicator)+'"'+(item.ready?'':' aria-disabled="true"')+'><span>'+escape(item.name)+' <small>'+escape(item.category)+'</small></span><b>'+(item.id===indicator?'✓':(item.ready?'':'준비 중'))+'</b></li>').join('');
+   extra.hidden=indicator!=='funding_rsi';
+  }
+  function setIndicatorMenu(open){indicatorList.hidden=!open;indicatorButton.setAttribute('aria-expanded',String(open));}
+  function chooseIndicator(id){
+   const item=I.find(id);if(!item||!item.ready)return;
+   indicator=item.id;persistStrategy();renderIndicators();setIndicatorMenu(false);indicatorButton.focus();
+  }
+  indicatorButton.onclick=()=>setIndicatorMenu(indicatorList.hidden);
+  indicatorList.onclick=e=>{const li=e.target.closest('li');if(li)chooseIndicator(li.dataset.indicator);};
+  indicatorList.onkeydown=e=>{const li=e.target.closest('li');if(li&&(e.key==='Enter'||e.key===' ')){e.preventDefault();chooseIndicator(li.dataset.indicator);}if(e.key==='Escape'){setIndicatorMenu(false);indicatorButton.focus();}};
+  doc.addEventListener('click',e=>{if(!indicatorList.hidden&&!picker.contains(e.target))setIndicatorMenu(false);});
+  renderIndicators();
   const dcaOptions=Array.from({length:10},(_,i)=>[i+1,(i+1)+'배']);
   const dcaPlan=doc.createElement('section');dcaPlan.className='bt-dca-plan';dcaPlan.hidden=true;dcaPlan.setAttribute('aria-labelledby','btDcaTitle');
   dcaPlan.innerHTML=`<div class="bt-dca-heading"><strong id="btDcaTitle">회차별 진입 계획</strong>
@@ -41,7 +60,7 @@
   const multiplierValue=value=>Number.isInteger(value)&&value>=1&&value<=10?value:1;
   let dcaDraft=dcaInputs.map((_,i)=>multiplierValue(saved.dcaMultiplierDraft?.[i]??strategy.dcaMultipliers?.[i]));
   const readMultipliers=()=>dcaInputs.map(input=>Number(input.value));
-  const persistStrategy=()=>{try{root.localStorage.setItem(key,JSON.stringify({...strategy,dcaMultiplierDraft:dcaDraft,target:custom,follow,followTimeframe}));}catch{}};
+  const persistStrategy=()=>{try{root.localStorage.setItem(key,JSON.stringify({...strategy,dcaMultiplierDraft:dcaDraft,target:custom,follow,followTimeframe,indicator}));}catch{}};
   const tinyAllocation=new Intl.NumberFormat('en-US',{maximumSignificantDigits:4});
   const dcaPattern=$('btDcaPattern'),activeDcaCount=()=>Math.max(0,Number($('btSplitCount').value)-1);
   let dcaUndo=null;
