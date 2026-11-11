@@ -337,7 +337,7 @@ function canPageSwipe(touch){
 }
 function rulerInteraction(){
  const measuring=rulerWheelActive(),active=measuring||Boolean(chartDrawings?.capturesChart()),host=$('unified-chart');
- chart.applyOptions({handleScroll:active?false:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:!pageTouchScroll},handleScale:{mouseWheel:measuring||!active,pinch:!active,axisPressedMouseMove:{time:!active,price:true},axisDoubleClickReset:{time:!active,price:false}}});
+ chart.applyOptions({handleScroll:active?false:{mouseWheel:false,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:true},handleScale:{mouseWheel:measuring||!active,pinch:!active,axisPressedMouseMove:{time:!active,price:true},axisDoubleClickReset:{time:!active,price:false}}});
  host.style.cursor=active?'crosshair':'';
 }
 function applyTouchLayout({pageScroll,overview}){
