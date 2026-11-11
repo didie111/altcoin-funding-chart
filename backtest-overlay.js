@@ -83,12 +83,12 @@
     // the loaded chart window, but its visible part still has exact coordinates.
     const a=x(Math.max(from,entry.time)),b=x(Math.min(to,until));if(!Number.isFinite(a)||!Number.isFinite(b))continue;
     const x1=Math.max(0,a);let x2=Math.min(width,b);if(x2<x1)continue;
-    // A phase that ends quickly still gets a readable average line (at least 24px).
-    if(next&&x2-x1<24)x2=Math.min(width,x1+24);
+    // A phase that ends quickly still gets a readable average line: at least 20 candles long.
+    const minLength=Math.max(24,20*spacing);if(next&&x2-x1<minLength)x2=Math.min(width,x1+minLength);
     // The muted tail is a display aid after the actual exit. Never extend a
     // previous average or TP/SL into the next DCA phase or the next trade.
     const following=trades[index+1]?.entryTime,followingX=Number.isFinite(following)&&following<to?x(following):null;
-    const tailEnd=display?.tails!==false&&!next&&until<to&&x2-x1<42?Math.max(x2,Math.min(width,x1+42,Number.isFinite(followingX)?followingX-3:width)):x2;
+    const tailEnd=display?.tails!==false&&!next&&until<to&&x2-x1<minLength?Math.max(x2,Math.min(width,x1+minLength,Number.isFinite(followingX)?followingX-3:width)):x2;
     const group={tradeId,step:entry.step??j+1,lines:[]};
     for(const [key,label,color]of levels){
      const value=entry[key];if(display?.[key]===false||!Number.isFinite(value)||value<=0)continue;const y=series.priceToCoordinate(value);if(!Number.isFinite(y)||y<0||y>height)continue;
@@ -143,7 +143,7 @@
    }
    // A label that would sit on candles is dropped for prior phases and fill notes; the line itself stays visible.
    // Entry notes may cover a little of a candle (never most of it); earlier-average labels never do.
-   if(best&&(best.cost<1||!group.prior&&(!line.compact||best.cost<best.box.width*best.box.height*.3)))labels.push({...best.box,text,color:line.color,anchorX,anchorY,tradeId:group.tradeId,key:line.key,big:!!line.big,fillStep:line.fillStep});
+   if(best&&(best.cost<1||(group.prior?best.cost<best.box.width*best.box.height*.15:!line.compact||best.cost<best.box.width*best.box.height*.3)))labels.push({...best.box,text,color:line.color,anchorX,anchorY,tradeId:group.tradeId,key:line.key,big:!!line.big,fillStep:line.fillStep});
   }return labels;
  }
  function draw(ctx,result,options){
@@ -154,11 +154,11 @@
    const dot=(p,color,r)=>{ctx.fillStyle=color;ctx.beginPath();ctx.arc(p.x,p.y,r,0,2*Math.PI);ctx.fill();};
    for(const s of scene.segments){
     if(s.prior&&s.key!=='avgPrice')continue;// replaced TP/SL levels are no longer active; hiding them keeps the chart clear
-    // Earlier averages are thin, dashed and faint so the current phase stands out.
+    // Earlier averages are thin and slightly faint so the current phase stands out.
     const weight=s.prior?1:1.5;
-    if(s.tailEnd>s.x2){ctx.globalAlpha=.5;stroke(s.x2,s.y,s.tailEnd,s.y,s.color,weight);ctx.globalAlpha=1;}
+    if(s.tailEnd>s.x2){ctx.globalAlpha=s.prior?.8:.75;stroke(s.x2,s.y,s.tailEnd,s.y,s.color,weight);ctx.globalAlpha=1;}
     if(s.tailEnd>s.x2||s.x2===s.x1)dot({x:s.x2,y:s.y},s.color,1.8);
-    if(s.x2>s.x1){if(s.prior){ctx.globalAlpha=.6;ctx.setLineDash([5,4]);}stroke(s.x1,s.y,s.x2,s.y,s.color,weight);ctx.setLineDash([]);ctx.globalAlpha=1;}
+    if(s.x2>s.x1){if(s.prior)ctx.globalAlpha=.8;stroke(s.x1,s.y,s.x2,s.y,s.color,weight);ctx.globalAlpha=1;}
    }
    for(const e of scene.entries){
     const {fill,signal,color}=e;
