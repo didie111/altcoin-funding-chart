@@ -149,7 +149,8 @@ test('a mobile page keeps horizontal pan and pinch while returning vertical swip
   assert.equal(h.options().handleScroll.vertTouchDrag,true);
   assert.equal(h.options().handleScale.axisPressedMouseMove.price,true);
   assert.equal(h.options().handleScale.pinch,true);
-  assert.equal(h.pageSwipe(550,280),true);
+  // Touches on the plot belong to the chart; they never scroll the page.
+  assert.equal(h.pageSwipe(550,280),false);
   assert.equal(h.pageSwipe(1120,280),false);
   assert.equal(h.pageSwipe(550,585),false);
   h.ruler(true);assert.equal(h.options().handleScroll,false);assert.equal(h.options().handleScale.mouseWheel,true);
