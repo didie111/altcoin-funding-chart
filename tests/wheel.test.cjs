@@ -145,7 +145,9 @@ test('other drawing tools still reserve plot input', () => {
 test('a mobile page keeps horizontal pan and pinch while returning vertical swipes to the page',()=>{
   const h=wheelHarness();h.interaction({pageTouchScroll:true});
   assert.equal(h.options().handleScroll.horzTouchDrag,true);
-  assert.equal(h.options().handleScroll.vertTouchDrag,false);
+  // Price axes need vertTouchDrag; plot swipes reach the page through canPageSwipe.
+  assert.equal(h.options().handleScroll.vertTouchDrag,true);
+  assert.equal(h.options().handleScale.axisPressedMouseMove.price,true);
   assert.equal(h.options().handleScale.pinch,true);
   assert.equal(h.pageSwipe(550,280),true);
   assert.equal(h.pageSwipe(1120,280),false);
