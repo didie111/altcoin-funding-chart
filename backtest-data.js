@@ -98,7 +98,20 @@
    const rawBounds=Number.isFinite(minuteCheckedFrom)&&minuteCheckedFrom<rawTo&&fundFrom<rawTo&&fundTo>=rawTo&&!fundingCoverage.startMissing&&!fundingCoverage.endMissing?{from:minuteCheckedFrom,to:rawTo,fundingFrom:fundFrom,fundingTo:fundTo}:undefined;
    return {symbol,exchange:ex,startTime:start,endTime:end,fundingRecords,timeframeCandles,coverage,gaps,gapsCount,...(options.verifyLatest?{oldestProvided}:{}),source:archiveFiles||seed?.source?.includes('binance-public-archive')?'official-exchange-api+binance-public-archive':'official-exchange-api',fundingCoverage,...(rawBounds?{rawBounds}:{})};
   }
-  return {loadBacktestDataset};
+  // 다이버전스 지지 확인용: 신호 주기보다 큰 주기의 완성 캔들만 따로 불러온다(펀딩·1분봉 없이). 시작 전 bars개 봉까지 거슬러 올라간다.
+  async function loadContextCandles(symbol,options={}){
+   const ex=options.exchange||'BINANCE',tf=options.timeframe,signal=options.signal||new AbortController().signal,end=Math.min(options.endTime??Date.now()/1000,Date.now()/1000),start=options.startTime;
+   if(!Object.hasOwn(T.seconds,tf)||!Number.isFinite(start)||!Number.isFinite(end)||start>=end)throw Error('지지 확인용 캔들의 주기·기간을 확인하세요.');
+   symbol=String(symbol).trim().toUpperCase().replace(/[-_]/g,'').replace(/USDT$/,'')+'USDT';if(!/^[A-Z0-9]{1,28}USDT$/.test(symbol))throw Error('코인 심볼을 확인하세요.');T.plan(ex,tf);
+   const warmupStart=Math.max(0,T.shift(T.start(start,tf),tf,-Math.max(1,Math.floor(options.bars)||1))),map=new Map();let edge=Math.floor(end*1000)-1;
+   for(;;){
+    signal.throwIfAborted();const rows=T.sorted(await candles(ex,symbol,tf,edge,signal,false)).filter(b=>b.time*1000<=edge);if(!rows.length)break;
+    for(const b of rows)if(b.time>=warmupStart&&T.end(b.time,tf)<=end)map.set(b.time,b);
+    if(rows[0].time<=warmupStart)break;const next=rows[0].time*1000-1;if(next>=edge)throw Error(tf+' 캔들 API의 과거 커서가 진행되지 않습니다.');edge=next;
+   }
+   const values=[...map.values()].sort((a,b)=>a.time-b.time);return options.packed===false?values:B.pack(values);
+  }
+  return {loadBacktestDataset,loadContextCandles};
  }
  async function fetchBinanceFundingHistory(symbol,limit=1000,signal=new AbortController().signal){const request=F.historyRequest('BINANCE',symbol,Date.now()-90*86400000,1);request.params.limit=Math.min(1000,limit);return F.normalizeHistory('BINANCE',await API.json(request.url,request.params,signal),symbol);}
  async function fetchBinanceKlines(symbol,interval='5m',startTime=null,endTime=null,limit=1000,signal=new AbortController().signal){const params={symbol:String(symbol).toUpperCase().replace(/USDT$/,'')+'USDT',interval,limit:Math.min(1500,limit)};if(startTime)params.startTime=startTime>=1e11?startTime:startTime*1000;if(endTime)params.endTime=endTime>=1e11?endTime:endTime*1000;const data=await API.json('https://fapi.binance.com/fapi/v1/klines',params,signal);return T.sorted(data.map(API.candle));}

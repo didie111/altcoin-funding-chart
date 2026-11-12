@@ -7,33 +7,57 @@
 
  // ===== 다이버전스 지표 (지표 선택: divergence) =====
  // 4시간·일·주·월봉 전용. 상승 다이버전스(진입 신호) + 하락 다이버전스(롱 청산 신호). 신호 위치는 차트의 RSI Div 지표 Bull/Bear 와 같다.
- // 상승 다이버전스는 "바닥 지지" 필터를 통과해야만 신호가 된다(지지 없는 낭떠러지 구간은 제외).
- const divergenceDefaults=Object.freeze({divPivot:5,divMinGap:5,divMaxGap:60,divMode:'both',divMinRsiDiff:0,divWickRatio:.3,divBearishExit:true,supportLookback:80,supportTolerancePct:1.5,supportMinTouches:2,supportMinVolMult:1.2,supportMinVolTouches:1});
+ // 상승 다이버전스는 "지지 확인"(신호보다 큰 주기 캔들)을 통과해야만 신호가 된다(지지 없는 낭떠러지 구간은 제외).
+ const divergenceDefaults=Object.freeze({divPivot:5,divMinGap:5,divMaxGap:60,divMode:'both',divMinRsiDiff:0,divWickRatio:.3,divBearishExit:true,divConfirm:'off',supportBars:150,supportExcludeRecent:10,supportZonePct:3,supportMinBars:10,supportMinVolRatio:1,supportGradeMin:'normal',supportBoxMinBars:20,supportBoxMaxRangePct:15,supportBoxPumpPct:20});
  const divergenceTimeframes=Object.freeze(['4h','1d','1w','1M']);
- function computeDivergence(bars,rsi,c,from,to){
-  const n=bars.length,o=new Float64Array(n),h=new Float64Array(n),l=new Float64Array(n),k=new Float64Array(n),v=new Float64Array(n),scratch={};
-  for(let i=0;i<n;i++){const b=B.get(bars,i,scratch);o[i]=b.open;h[i]=b.high;l[i]=b.low;k[i]=b.close;v[i]=b.volume;}
-  const cum=new Float64Array(n+1);for(let i=0;i<n;i++)cum[i+1]=cum[i]+v[i];
-  const L=c.divPivot,tol=c.supportTolerancePct/100;
+ // 지지는 신호 주기보다 한 단계 큰 주기(4시간→일, 일→주, 주→월)로 본다. 월봉은 자기 자신.
+ const supportTimeframes=Object.freeze({'4h':'1d','1d':'1w','1w':'1M','1M':'1M'});
+ function supportPlan(options={}){
+  if(options.indicator!=='divergence')return null;
+  const timeframe=supportTimeframes[options.timeframe];if(!timeframe)return null;
+  const bars=(Number(options.supportBars)||divergenceDefaults.supportBars)+(Number.isFinite(Number(options.supportExcludeRecent))?Number(options.supportExcludeRecent):divergenceDefaults.supportExcludeRecent)+10;
+  return {timeframe,bars};
+ }
+ function computeDivergence(bars,rsi,c,from,to,sup){
+  const n=bars.length,o=new Float64Array(n),h=new Float64Array(n),l=new Float64Array(n),k=new Float64Array(n),scratch={};
+  for(let i=0;i<n;i++){const b=B.get(bars,i,scratch);o[i]=b.open;h[i]=b.high;l[i]=b.low;k[i]=b.close;}
+  const L=c.divPivot,zonePct=c.supportZonePct/100;
   const bull=new Array(n),bear=new Array(n);
-  const stats={bullish:0,wick:0,regular:0,supportRejected:0,cliffRejected:0,bearish:0};
+  const stats={detected:0,bullish:0,wick:0,regular:0,gradeBox:0,gradeNormal:0,supportRejected:0,cliffRejected:0,boxRejected:0,confirmRejected:0,bearish:0,supportTimeframe:sup?.timeframe||null};
   const inRange=q=>{const t=B.time(bars,q);return t>=from&&T.end(t,c.timeframe)<=to;};
-  const avgVolume=j=>{const a=Math.max(0,j-20),count=j-a;return count>=5?(cum[j]-cum[a])/count:NaN;};
-  // 지지 판정: 저점 주변 가격대(±허용 %)를 이전 구간에서 몇 번 받쳤는지(연속된 캔들은 1회) + 그중 거래량이 받쳐준 횟수.
+  // 지지 데이터: 신호보다 큰 주기의 완성 캔들. 저점이 생기기 전에 이미 끝난 캔들만 쓴다.
+  const sn=sup?.bars?sup.bars.length:0,so=new Float64Array(sn),sh=new Float64Array(sn),sl=new Float64Array(sn),sk=new Float64Array(sn),sv=new Float64Array(sn),se=new Float64Array(sn),st=new Float64Array(sn),sscratch={};
+  for(let i=0;i<sn;i++){const b=B.get(sup.bars,i,sscratch);so[i]=b.open;sh[i]=b.high;sl[i]=b.low;sk[i]=b.close;sv[i]=b.volume;st[i]=b.time;se[i]=T.end(b.time,sup.timeframe);}
+  const supportOff=c.supportMinBars===0;
+  // 지지 판정. 저점 가격대(±supportZonePct) 안에서 마감한 과거 캔들이 몇 개 쌓였는지, 그 캔들의 거래량이 평균 이상인지 본다.
+  // 최근 supportExcludeRecent개 캔들(지금 떨어지며 지나온 구간)은 제외한다.
+  // 박스권 복귀: 같은 조회 구간에 오래 횡보한 박스가 있고, 그 박스 위로 펌핑한 뒤 다시 박스 가격대에서 저점이 나온 경우.
   function support(p,low){
-   const zLow=low*(1-tol),zHigh=low*(1+tol),start=Math.max(0,p-c.supportLookback);
-   let clusters=0,volClusters=0,lastTouch=-Infinity,clusterVol=false;
-   for(let j=start;j<p;j++){
-    if(l[j]<zLow||l[j]>zHigh)continue;
-    if(j-lastTouch>2){if(clusters>0&&clusterVol)volClusters++;clusters++;clusterVol=false;}
-    const avg=avgVolume(j);if(Number.isFinite(avg)&&avg>0&&v[j]>=avg*c.supportMinVolMult)clusterVol=true;
-    lastTouch=j;
+   const zLow=low*(1-zonePct),zHigh=low*(1+zonePct),pivotTime=B.time(bars,p);
+   let lo=0,hi=sn;while(lo<hi){const mid=(lo+hi)>>>1;if(se[mid]<=pivotTime)lo=mid+1;else hi=mid;}
+   const last=lo-1-c.supportExcludeRecent,first=Math.max(0,last-c.supportBars+1);
+   const result={zLow,zHigh,stay:0,volRatio:0,grade:'none',ok:supportOff,box:null,bars:Math.max(0,last-first+1)};
+   if(last<first)return result;
+   let stay=0,stayVol=0,allVol=0;
+   for(let j=first;j<=last;j++){allVol+=sv[j];if(sk[j]>=zLow&&sk[j]<=zHigh){stay++;stayVol+=sv[j];}}
+   const avgAll=allVol/(last-first+1);
+   result.stay=stay;result.volRatio=stay>0&&avgAll>0?(stayVol/stay)/avgAll:0;
+   if(!supportOff)result.ok=stay>=c.supportMinBars&&result.volRatio>=c.supportMinVolRatio;
+   // 박스 찾기(캔들 몸통 기준). 박스는 supportBoxMinBars개 이상, 몸통 고저 폭이 supportBoxMaxRangePct 이내이고,
+   // 저점이 박스 가격대(허용 오차 포함)에 있으며, 박스가 끝난 뒤 조회 구간 안에서 박스 위로 supportBoxPumpPct 이상 올랐어야 한다.
+   const sufMax=new Float64Array(last-first+2);sufMax[last-first+1]=-Infinity;for(let j=last;j>=first;j--)sufMax[j-first]=Math.max(sh[j],sufMax[j-first+1]);
+   for(let s0=first;s0<=last&&!result.box;s0++){
+    let bhi=-Infinity,blo=Infinity;
+    for(let e=s0;e<=last;e++){
+     const nh=Math.max(bhi,Math.max(so[e],sk[e])),nl=Math.min(blo,Math.min(so[e],sk[e]));
+     if((nh/nl-1)*100>c.supportBoxMaxRangePct)break;bhi=nh;blo=nl;
+     if(e-s0+1>=c.supportBoxMinBars&&e<last&&low>=blo*(1-zonePct)&&low<=bhi*(1+zonePct)&&sufMax[e+1-first]>=bhi*(1+c.supportBoxPumpPct/100)){result.box={low:blo,high:bhi,from:st[s0],to:se[e],bars:e-s0+1};break;}
+    }
    }
-   if(clusters>0&&clusterVol)volClusters++;
-   const off=c.supportMinTouches===0&&c.supportMinVolTouches===0;
-   return {zLow,zHigh,touches:clusters,volTouches:volClusters,ok:off||(clusters>=c.supportMinTouches&&volClusters>=c.supportMinVolTouches)};
+   result.grade=result.box?'box':result.ok&&!supportOff?'normal':'none';
+   return result;
   }
-  // 차트의 "RSI Div" 지표(indicators.js)와 같은 규칙: RSI 저점·고점(좌우 L캔들)을 잡고 바로 이전 저점·고점과만 비교한다.
+ // 차트의 "RSI Div" 지표(indicators.js)와 같은 규칙: RSI 저점·고점(좌우 L캔들)을 잡고 바로 이전 저점·고점과만 비교한다.
   // 상승: RSI 저점이 높아지고 가격 저점은 낮아지며, 둘 중 하나가 과매도선 이하. 하락은 반대(과매수선 = 100 - 과매도선).
   const oversold=c.rsiOversold,overbought=100-c.rsiOversold;
   let prevLow=null,prevHigh=null;
@@ -54,9 +78,12 @@
       const bodyLow2=Math.min(o[p],k[p]),bodyLow1=Math.min(o[p1],k[p1]),wickRatio=range>0?(bodyLow2-l[p])/range:0;
       const wick=bodyLow2>=bodyLow1&&wickRatio>=c.divWickRatio;
       if(wick||c.divMode!=='wick'){
-       const sup=support(p,l[p]);
-       if(!sup.ok){if(inRange(q)){if(sup.touches===0)stats.cliffRejected++;stats.supportRejected++;}}
-       else if(!bull[q]){if(inRange(q)){stats.bullish++;stats[wick?'wick':'regular']++;}bull[q]={kind:wick?'div_wick':'div_regular',p,p1,rsi2:value,rsi1:prev.value,low2:l[p],low1:l[p1],wickRatio,touches:sup.touches,volTouches:sup.volTouches,zLow:sup.zLow,zHigh:sup.zHigh};}
+       const sp=support(p,l[p]),counted=inRange(q);
+       if(counted)stats.detected++;
+       if(!sp.ok&&!sp.box){if(counted){if(sp.stay===0)stats.cliffRejected++;stats.supportRejected++;}}
+       else if(c.supportGradeMin==='box'&&!sp.box){if(counted)stats.boxRejected++;}
+       else if(c.divConfirm==='bull_candle'&&!(k[q]>o[q])||c.divConfirm==='break_pivot_high'&&!(k[q]>h[p])){if(counted)stats.confirmRejected++;}
+       else if(!bull[q]){if(counted){stats.bullish++;stats[wick?'wick':'regular']++;stats[sp.box?'gradeBox':'gradeNormal']++;}bull[q]={kind:wick?'div_wick':'div_regular',p,p1,rsi2:value,rsi1:prev.value,low2:l[p],low1:l[p1],wickRatio,grade:sp.box?'box':sp.grade,stay:sp.stay,volRatio:sp.volRatio,zLow:sp.zLow,zHigh:sp.zHigh,box:sp.box};}
       }
      }
     }
@@ -93,9 +120,12 @@
    // 다이버전스 전용 설정은 이 지표를 고를 때만 키가 생긴다.
    for(const [key,value]of Object.entries(divergenceDefaults))if(c[key]===undefined)c[key]=value;
    if(!divergenceTimeframes.includes(c.timeframe))throw Error('다이버전스 지표는 4시간·일·주·월봉만 지원합니다.');
-   for(const [key,min,max,int]of [['divPivot',1,20,true],['divMinGap',2,500,true],['divMaxGap',3,1000,true],['divMinRsiDiff',0,50],['divWickRatio',0,1],['supportLookback',5,2000,true],['supportTolerancePct',.1,20],['supportMinTouches',0,50,true],['supportMinVolMult',0,50],['supportMinVolTouches',0,50,true]])number(key,min,max,int);
+   for(const [key,min,max,int]of [['divPivot',1,20,true],['divMinGap',2,500,true],['divMaxGap',3,1000,true],['divMinRsiDiff',0,50],['divWickRatio',0,1],['supportBars',5,1000,true],['supportExcludeRecent',0,500,true],['supportZonePct',.1,30],['supportMinBars',0,500,true],['supportMinVolRatio',0,50],['supportBoxMinBars',2,500,true],['supportBoxMaxRangePct',1,200],['supportBoxPumpPct',1,1000]])number(key,min,max,int);
    if(c.divMinGap>c.divMaxGap)throw Error('다이버전스 두 저점 간격의 최소·최대 순서를 확인하세요.');
    if(!['both','wick'].includes(c.divMode))throw Error('divMode 옵션이 올바르지 않습니다.');
+   if(!['normal','box'].includes(c.supportGradeMin))throw Error('supportGradeMin 옵션이 올바르지 않습니다.');
+   if(!['off','bull_candle','break_pivot_high'].includes(c.divConfirm))throw Error('divConfirm 옵션이 올바르지 않습니다.');
+   for(const old of ['supportLookback','supportTolerancePct','supportMinTouches','supportMinVolMult','supportMinVolTouches'])delete c[old];
    c.divBearishExit=c.divBearishExit!==false;
   }else for(const key of Object.keys(divergenceDefaults))delete c[key];
   c.oneEntryPerFunding=c.oneEntryPerFunding===true;c.requireFreshFundingAfterCooldown=c.requireFreshFundingAfterCooldown===true;
@@ -227,8 +257,10 @@
  function runBacktest(candles,fundingRecords,options={},context={}){
   const c=normalizeConfig(options),data=prepareExecution(candles,c,context),{bars,signalBars,rsi,minuteRsi,mtf,executionTimeframe}=data;
   const records=normalizeFunding(fundingRecords),weights=getStepWeights(c.splitCount,c.dcaMethod,c.dcaMultipliers),weightSum=weights.reduce((a,b)=>a+b,0),splitCount=weights.length;
-  const noFunding=c.indicator==='rsi'||c.indicator==='divergence',divergence=c.indicator==='divergence'?computeDivergence(signalBars,rsi,c,data.rangeStart,data.rangeEnd):null;
-  const divDetails=d=>({rsi:d.rsi2,previousRsi:d.rsi1,low:d.low2,previousLow:d.low1,wickRatio:d.wickRatio,pivotTime:B.time(signalBars,d.p),previousPivotTime:B.time(signalBars,d.p1),supportTouches:d.touches,supportVolumeTouches:d.volTouches,supportZoneLow:d.zLow,supportZoneHigh:d.zHigh});
+  const noFunding=c.indicator==='rsi'||c.indicator==='divergence',sp=c.indicator==='divergence'?supportPlan(c):null,supportBars=sp?(context.supportCandles?.length?context.supportCandles:sp.timeframe===c.timeframe?signalBars:null):null;
+  if(sp&&!supportBars&&(c.supportMinBars>0||c.supportGradeMin==='box'))throw Object.assign(Error('지지 확인용 '+sp.timeframe+' 캔들 데이터가 없습니다. 지지 확인에는 신호 주기보다 큰 주기의 데이터가 필요합니다.'),{code:'SUPPORT_MISSING'});
+  const divergence=sp?computeDivergence(signalBars,rsi,c,data.rangeStart,data.rangeEnd,{bars:supportBars,timeframe:sp.timeframe}):null;
+  const divDetails=d=>({rsi:d.rsi2,previousRsi:d.rsi1,low:d.low2,previousLow:d.low1,wickRatio:d.wickRatio,pivotTime:B.time(signalBars,d.p),previousPivotTime:B.time(signalBars,d.p1),supportGrade:d.grade,supportStayBars:d.stay,supportVolRatio:d.volRatio,supportTimeframe:supportTimeframes[c.timeframe],supportZoneLow:d.zLow,supportZoneHigh:d.zHigh,...(d.box?{supportBoxLow:d.box.low,supportBoxHigh:d.box.high,supportBoxFrom:d.box.from,supportBoxTo:d.box.to,supportBoxBars:d.box.bars}:{})});
   const trades=[],signals=[],equityCurve=[],warnings={ambiguousBars:0,fundingPriceEstimates:0,fundingTimingAmbiguities:0,dataGaps:0,skippedInsufficientCapital:0};
   const from=data.rangeStart,to=data.rangeEnd,fee=c.feePct/100,slip=c.slippagePct/100;
   const fundingSessions=identifyFundingSessions(records,c),rateSessions=c.fundingIntervalHours?identifyFundingSessions(records,{...c,fundingIntervalHours:0}):fundingSessions;
@@ -340,9 +372,9 @@
   const wins=trades.filter(t=>t.netPnl>1e-9),losses=trades.filter(t=>t.netPnl< -1e-9),grossProfit=wins.reduce((s,t)=>s+t.netPnl,0),grossLoss=-losses.reduce((s,t)=>s+t.netPnl,0),netPnl=trades.reduce((s,t)=>s+t.netPnl,0),avg=rows=>rows.length?rows.reduce((s,t)=>s+t.returnPct,0)/rows.length:0;
   return {totalTrades:trades.length,winTrades:wins.length,lossTrades:losses.length,breakevenTrades:trades.length-wins.length-losses.length,winRatePct:trades.length?wins.length/trades.length*100:0,initialCapital:c.initialCapital,finalCapital:c.initialCapital+netPnl,netPnl,grossProfit,grossLoss,totalReturnPct:netPnl/c.initialCapital*100,profitFactor:grossLoss?grossProfit/grossLoss:grossProfit?null:0,profitFactorInfinite:!grossLoss&&grossProfit>0,maxDrawdownPct:mdd,avgTradeReturnPct:avg(trades),avgWinReturnPct:avg(wins),avgLossReturnPct:Math.abs(avg(losses)),riskRewardRatio:losses.length?avg(wins)/Math.abs(avg(losses)):null,avgDcaSteps:trades.length?trades.reduce((s,t)=>s+t.dcaSteps,0)/trades.length:0,avgHoldBars:trades.length?trades.reduce((s,t)=>s+t.holdBars,0)/trades.length:0,totalFundingEarned:trades.reduce((s,t)=>s+t.fundingEarned,0),totalFees:trades.reduce((s,t)=>s+t.entryFees+t.exitFee,0),eligibleSessionsCount};
  }
- function runAllTimeframes(map,records,options={},controls={}){const results={},comparison=[],context={minuteCandles:map['1m'],prepared:new Map(),summaryOnly:controls.summaryOnly===true,equityMaxPoints:controls.equityMaxPoints,onProgress:controls.onProgress},frames=Object.keys(T.seconds).filter(tf=>map[tf]?.length&&(options.indicator!=='divergence'||divergenceTimeframes.includes(tf)));for(const [index,tf]of frames.entries()){controls.onProgress?.({phase:'compare',timeframe:tf,count:index+1,total:frames.length});const res=runBacktest(map[tf],records,{...options,timeframe:tf},context);results[tf]=res;comparison.push({timeframe:tf,...res.summary,trades:res.summary.totalTrades,fundingEarned:res.summary.totalFundingEarned});}const valid=comparison.filter(r=>r.totalTrades>0),best=key=>[...valid].sort((a,b)=>(b[key]??Infinity)-(a[key]??Infinity))[0]||null;return {results,comparison,bestByWinRate:best('winRatePct'),bestByProfitFactor:best('profitFactor'),bestByTotalReturn:best('totalReturnPct')};}
+ function runAllTimeframes(map,records,options={},controls={}){const results={},comparison=[],context={minuteCandles:map['1m'],prepared:new Map(),summaryOnly:controls.summaryOnly===true,equityMaxPoints:controls.equityMaxPoints,onProgress:controls.onProgress},frames=Object.keys(T.seconds).filter(tf=>map[tf]?.length&&(options.indicator!=='divergence'||divergenceTimeframes.includes(tf)));for(const [index,tf]of frames.entries()){context.supportCandles=controls.supportCandles?.[supportTimeframes[tf]]||(supportTimeframes[tf]===tf?undefined:map[supportTimeframes[tf]]);controls.onProgress?.({phase:'compare',timeframe:tf,count:index+1,total:frames.length});let res;try{res=runBacktest(map[tf],records,{...options,timeframe:tf},context);}catch(error){if(error.code==='SUPPORT_MISSING')continue;throw error;}results[tf]=res;comparison.push({timeframe:tf,...res.summary,trades:res.summary.totalTrades,fundingEarned:res.summary.totalFundingEarned});}const valid=comparison.filter(r=>r.totalTrades>0),best=key=>[...valid].sort((a,b)=>(b[key]??Infinity)-(a[key]??Infinity))[0]||null;return {results,comparison,bestByWinRate:best('winRatePct'),bestByProfitFactor:best('profitFactor'),bestByTotalReturn:best('totalReturnPct')};}
  function optimizeStrategy(candles,records,grid={}){
-  const combinations=[],context={minuteCandles:grid.minuteCandles,prepared:new Map(),summaryOnly:true},splits=grid.baseConfig?.dcaMethod==='cumulative'?[grid.baseConfig.splitCount??defaultStrategyConfig.splitCount]:grid.splitCounts||[0,3,5,10],oversolds=grid.rsiOversolds||[20,25,30],targets=grid.takeProfitPcts||[1,2,3],stops=grid.stopLossPcts||[2,3,5],triggers=grid.splitTriggers||(grid.minuteCandles?.length?['step_pct','rsi_cross_up','rsi_cross_up_1m']:['step_pct','rsi_cross_up']),total=splits.length*oversolds.length*targets.length*stops.length*triggers.length;let tested=0;
+  const combinations=[],context={minuteCandles:grid.minuteCandles,supportCandles:grid.supportCandles,prepared:new Map(),summaryOnly:true},splits=grid.baseConfig?.dcaMethod==='cumulative'?[grid.baseConfig.splitCount??defaultStrategyConfig.splitCount]:grid.splitCounts||[0,3,5,10],oversolds=grid.rsiOversolds||[20,25,30],targets=grid.takeProfitPcts||[1,2,3],stops=grid.stopLossPcts||[2,3,5],triggers=grid.splitTriggers||(grid.minuteCandles?.length?['step_pct','rsi_cross_up','rsi_cross_up_1m']:['step_pct','rsi_cross_up']),total=splits.length*oversolds.length*targets.length*stops.length*triggers.length;let tested=0;
   for(const splitCount of splits)for(const rsiOversold of oversolds)for(const takeProfitPct of targets)for(const stopLossPct of stops)for(const splitTrigger of triggers){
    const params={splitCount,rsiOversold,takeProfitPct,stopLossPct,splitTrigger};tested++;if(tested>1000)throw Error('최적화 조합은 1,000개까지 지원합니다.');
    grid.onProgress?.({phase:'optimize',timeframe:grid.baseConfig?.timeframe,count:tested,total});
@@ -353,5 +385,5 @@
   return {totalEvaluated:tested,eligibleEvaluated:combinations.length,bestWinRate:best('winRatePct'),bestProfitFactor:best('profitFactor'),bestTotalReturn:best('totalReturnPct'),bestBalanced:[...combinations].sort((a,b)=>b.score-a.score)[0]||null,topRankings:combinations.sort((a,b)=>b.score-a.score).slice(0,20)};
  }
  function signalLabel(signal){if(signal.type==='BUY_INITIAL')return 'BUY 1';if(signal.type==='DCA_BUY')return 'DCA '+signal.step;return reasons[signal.reason]||'청산';}
- return {defaultStrategyConfig,divergenceDefaults,divergenceTimeframes,normalizeConfig,getStepWeights,getAllocationPlan,normalizeFunding,identifyFundingSessions,fundingSessionAt,computeRSI,runBacktest,runAllTimeframes,optimizeStrategy,signalLabel,reasons};
+ return {defaultStrategyConfig,divergenceDefaults,divergenceTimeframes,supportTimeframes,supportPlan,normalizeConfig,getStepWeights,getAllocationPlan,normalizeFunding,identifyFundingSessions,fundingSessionAt,computeRSI,runBacktest,runAllTimeframes,optimizeStrategy,signalLabel,reasons};
 });

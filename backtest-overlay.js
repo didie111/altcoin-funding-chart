@@ -28,7 +28,8 @@
   const referencePrice=signal?.referencePrice??(kind==='step_pct'&&Number.isFinite(config.splitStepPct)&&Number.isFinite(trade.entries[index-1]?.price)?trade.entries[index-1].price*(1-config.splitStepPct/100):null);
   const threshold=signal?.threshold??(kind?.startsWith('rsi_')?config.rsiOversold:null);
   const rsiName=kind==='rsi_cross_up_1m'?'1분 RSI':kind==='rsi_cross_up'&&timeframe==='1m'?'1분 RSI':'RSI';
-  const short=kind==='div_wick'?'꼬리 다이버전스':kind==='div_regular'?'일반 다이버전스':kind==='step_pct'?(Number.isFinite(config.splitStepPct)?'하락 '+config.splitStepPct+'%':'추가 하락'):kind==='bar'?'매 봉':kind==='rsi_oversold'?'RSI ≤ '+(threshold??'설정선'):kind?.startsWith('rsi_')?rsiName+' '+(threshold??'설정선')+'↑':'';
+  const gradeNote=signal?.supportGrade==='box'?' · 박스권 복귀':signal?.supportGrade==='normal'?' · 일반 지지':'';
+  const short=kind==='div_wick'?'꼬리 다이버전스'+gradeNote:kind==='div_regular'?'일반 다이버전스'+gradeNote:kind==='step_pct'?(Number.isFinite(config.splitStepPct)?'하락 '+config.splitStepPct+'%':'추가 하락'):kind==='bar'?'매 봉':kind==='rsi_oversold'?'RSI ≤ '+(threshold??'설정선'):kind?.startsWith('rsi_')?rsiName+' '+(threshold??'설정선')+'↑':'';
   const label=first?'첫 BUY'+(short?' · '+short:''):(entry.step??index+1)+'차 · '+short;
   return {key,kind,label,color:entryTypes[key][1],timeframe,time,barTime,referencePrice,threshold,rsi:signal?.rsi,previousRsi:signal?.previousRsi,low:signal?.low,close:signal?.close};
  }
@@ -85,7 +86,15 @@
       let div=null;const ds=entry.signal;
       if(ds&&String(ds.kind).startsWith('div_')&&Number.isFinite(ds.pivotTime)&&Number.isFinite(ds.previousPivotTime)&&Number.isFinite(ds.low)&&Number.isFinite(ds.previousLow)){
        const x1=x(ds.previousPivotTime),x2=x(ds.pivotTime),y1=series.priceToCoordinate(ds.previousLow),y2=series.priceToCoordinate(ds.low);
-       if([x1,x2,y1,y2].every(Number.isFinite))div={x1,y1,x2,y2,wick:ds.kind==='div_wick'};
+       if([x1,x2,y1,y2].every(Number.isFinite)){
+        div={x1,y1,x2,y2,wick:ds.kind==='div_wick',grade:ds.supportGrade,zone:null,box:null};
+        // 지지로 본 가격대(저점 ±허용 폭)와, 박스권 복귀 등급이면 그 박스를 같이 그려 어디를 지지로 판단했는지 보이게 한다.
+        const zh=Number.isFinite(ds.supportZoneHigh)?series.priceToCoordinate(ds.supportZoneHigh):null,zl=Number.isFinite(ds.supportZoneLow)?series.priceToCoordinate(ds.supportZoneLow):null;
+        const bx1=Number.isFinite(ds.supportBoxFrom)?x(ds.supportBoxFrom):null,bx2=Number.isFinite(ds.supportBoxTo)?x(ds.supportBoxTo):null;
+        if(Number.isFinite(zh)&&Number.isFinite(zl)&&ds.supportGrade!=='none')div.zone={x1:Math.max(0,Number.isFinite(bx1)?bx1:x1-60),y1:Math.min(zh,zl),y2:Math.max(zh,zl)};
+        const bh=Number.isFinite(ds.supportBoxHigh)?series.priceToCoordinate(ds.supportBoxHigh):null,bl=Number.isFinite(ds.supportBoxLow)?series.priceToCoordinate(ds.supportBoxLow):null;
+        if(ds.supportGrade==='box'&&Number.isFinite(bh)&&Number.isFinite(bl)&&Number.isFinite(bx2))div.box={x1:Math.max(0,Number.isFinite(bx1)?bx1:0),x2:bx2,y1:Math.min(bh,bl),y2:Math.max(bh,bl)};
+       }
       }
       if(fill||signal)scene.entries.push({fill,signal,div,tradeId,step:entry.step??j+1,value:entry.price,...trace});
      }
@@ -185,6 +194,8 @@
     if(s.x2>s.x1){if(s.prior)ctx.globalAlpha=.8;stroke(s.x1,s.y,s.x2,s.y,s.color,weight);ctx.globalAlpha=1;}
    }
    for(const e of scene.entries){
+    if(e.div?.zone){const z=e.div.zone,green=e.div.grade==='box';ctx.save();ctx.globalAlpha=.12;ctx.fillStyle=green?'#34d399':'#9ca3af';ctx.fillRect(z.x1,z.y1,Math.max(1,e.div.x2-z.x1),Math.max(1,z.y2-z.y1));ctx.globalAlpha=.7;ctx.font='10px sans-serif';ctx.textAlign='left';ctx.textBaseline='bottom';ctx.fillStyle=green?'#34d399':'#9ca3af';ctx.fillText('지지 구간',z.x1+3,z.y1-2);ctx.restore();}
+    if(e.div?.box){const b=e.div.box;ctx.save();ctx.globalAlpha=.9;ctx.setLineDash([4,3]);const bx2=Math.max(b.x1+1,b.x2),by2=Math.max(b.y1+1,b.y2);stroke(b.x1,b.y1,bx2,b.y1,'#34d399',1);stroke(bx2,b.y1,bx2,by2,'#34d399',1);stroke(bx2,by2,b.x1,by2,'#34d399',1);stroke(b.x1,by2,b.x1,b.y1,'#34d399',1);ctx.setLineDash([]);ctx.font='bold 10px sans-serif';ctx.textAlign='left';ctx.textBaseline='top';ctx.fillStyle='#34d399';ctx.fillText('박스권',b.x1+3,b.y2+3);ctx.restore();}
     if(e.div){const d=e.div,tone=d.wick?'#fbbf24':'#60a5fa';ctx.save();ctx.globalAlpha=.95;ctx.setLineDash([5,3]);stroke(d.x1,d.y1,d.x2,d.y2,tone,1.5);ctx.setLineDash([]);dot({x:d.x1,y:d.y1},tone,3.2);dot({x:d.x2,y:d.y2},tone,3.8);
      ctx.font='bold 10px sans-serif';ctx.textAlign='center';ctx.textBaseline='top';ctx.fillStyle=tone;ctx.fillText('저점1',d.x1,d.y1+6);ctx.fillText('저점2',d.x2,d.y2+6);ctx.restore();}
     const {fill,signal,color}=e;

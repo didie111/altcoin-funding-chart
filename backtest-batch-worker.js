@@ -1,5 +1,5 @@
 'use strict';
-importScripts('relay-config.js?v=20261013-relay-1','market-shared.js?v=20261025-mtf-1','market-api.js?v=20261026-context-data-ruler-1','funding.js?v=20261027-funding-cursor-1','timeframes.js?v=20261107-result-reuse-1','indicators.js?v=20261025-backtest-1','backtest-bars.js?v=20261107-research-1','backtest-engine.js?v=20261112-divergence-2','backtest-data.js?v=20261109-verified-backtest-1','backtest-cache.js?v=20261108-current-batch-settings-1','backtest-archive.js?v=20261107-responsive-backup-1','dashboard-model.js?v=20261108-restore-raw-first-1','backtest-results.js?v=20261112-divergence-2','backtest-research-store.js?v=20261109-verified-backtest-1','backtest-research.js?v=20261109-verified-backtest-1');
+importScripts('relay-config.js?v=20261013-relay-1','market-shared.js?v=20261025-mtf-1','market-api.js?v=20261026-context-data-ruler-1','funding.js?v=20261027-funding-cursor-1','timeframes.js?v=20261107-result-reuse-1','indicators.js?v=20261025-backtest-1','backtest-bars.js?v=20261107-research-1','backtest-engine.js?v=20261112-support-grade-1','backtest-data.js?v=20261112-support-grade-1','backtest-cache.js?v=20261108-current-batch-settings-1','backtest-archive.js?v=20261107-responsive-backup-1','dashboard-model.js?v=20261108-restore-raw-first-1','backtest-results.js?v=20261112-support-grade-1','backtest-research-store.js?v=20261109-verified-backtest-1','backtest-research.js?v=20261109-verified-backtest-1');
 const coverageError=reason=>Object.assign(Error('원본 확인 보류 · '+reason),{name:'DataCoverageError'});
 let active=false,requestNumber=0,retainedDataset=null,temporaryStore;const pendingRequests=new Map();
 onmessage=async event=>{
@@ -136,9 +136,17 @@ onmessage=async event=>{
    try{retention=await research.retainDataset(history,market,dataset,{signal,onProgress:progress});}
    catch(error){retentionWarning=error.name==='QuotaExceededError'?'브라우저 공간 부족으로 이번 원본을 모두 저장하지 못했습니다.':error.message;}
   }
+  // 다이버전스: 신호보다 큰 주기(4시간→일봉 등)의 캔들을 따로 불러와 지지 확인에 쓴다. 보관 원본·계산 결과와 무관하게 거래소(또는 캐시)에서 가져온다.
+  const supportCache=new Map(),supportMap={};
+  async function supportFor(tf,data){
+   const plan=BacktestEngine.supportPlan({...config,timeframe:tf});if(!plan||plan.timeframe===tf)return undefined;
+   const key=[plan.timeframe,plan.bars,data.startTime,data.endTime].join('|');
+   if(!supportCache.has(key)){progress({phase:'support',text:'지지 확인용 '+plan.timeframe+' 캔들 불러오는 중'});supportCache.set(key,await source.loadContextCandles(m.symbol,{exchange:m.ex,timeframe:plan.timeframe,startTime:data.startTime,endTime:data.endTime,bars:plan.bars,signal}));}
+   supportMap[plan.timeframe]=supportCache.get(key);return supportMap[plan.timeframe];
+  }
   async function calculate(tf,data){
    progress({phase:'prepare',timeframe:tf});
-   const controls={...calculationContext,minuteCandles:data.timeframeCandles['1m'],equityMaxPoints:typeof BacktestResults==='undefined'?5000:BacktestResults.equityPoints,onProgress:progress};
+   const controls={...calculationContext,minuteCandles:data.timeframeCandles['1m'],supportCandles:await supportFor(tf,data),equityMaxPoints:typeof BacktestResults==='undefined'?5000:BacktestResults.equityPoints,onProgress:progress};
    const result=BacktestEngine.runBacktest(data.timeframeCandles[tf],data.fundingRecords,{...config,timeframe:tf,endTime:data.endTime},controls);if(calculationContext)calculationContext.minutePrepared=controls.minutePrepared;
    if(typeof BacktestResults!=='undefined'&&!BacktestResults.matchesExecution(result,config,tf,{strictTrades:true}))throw Error('실행한 전략과 '+tf+' 계산 결과의 전략 또는 분할 수가 일치하지 않습니다.');
    const meta={market:{...m,int:tf},coverage:{[tf]:{...data.coverage[tf],...(!result.success?{error:result.reason}:{})}},fundingCoverage:data.fundingCoverage,gaps:data.gapsCount,startTime:data.startTime,endTime:data.endTime,source:data.source,...(verification?{verification}:{}),...(data.research?{research:{...data.research,...(extend?{tailRefreshed:true}:fillGaps||gapsRepaired?{gapsFilled:true}:{})}}:{}),...(retention?{retainedSource:retention}:{}),...(retentionWarning?{retentionWarning}:{}),...(archive?{archive:archive.info()}:{}),config:result.config};
@@ -169,7 +177,7 @@ onmessage=async event=>{
     if(unverifiedFrames.length)output.meta.unverifiedFrames=unverifiedFrames;
     output.cache=outputs.find(o=>o.result.config.timeframe===output.summary.bestTimeframe)?.cache||outputs[0]?.cache;
    }else{
-    const comparisonResult=BacktestEngine.runAllTimeframes(dataset.timeframeCandles,dataset.fundingRecords,config,{summaryOnly:true}),best=comparisonResult.bestByTotalReturn||comparisonResult.bestByWinRate||comparisonResult.comparison[0];
+    const comparisonResult=BacktestEngine.runAllTimeframes(dataset.timeframeCandles,dataset.fundingRecords,config,{summaryOnly:true,supportCandles:supportMap}),best=comparisonResult.bestByTotalReturn||comparisonResult.bestByWinRate||comparisonResult.comparison[0];
     if(!best)throw Error('선택한 기간에 계산을 완료할 수 있는 주기가 없습니다.');
     const selected=outputs.find(o=>o.result.config.timeframe===best.timeframe)||outputs[0];
     output={summary:{...best,timeframe:'all',bestTimeframe:best.timeframe},meta:{...selected.meta,market:m,coverage:dataset.coverage,config:{...config,timeframe:'all'}},comparison:comparisonResult.comparison,comparisonResult:detail?comparisonResult:undefined,cache:selected.cache};
