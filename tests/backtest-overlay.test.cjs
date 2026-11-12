@@ -131,3 +131,15 @@ test('applying and clearing results invalidate the native series overlay without
  const r=harness().result;ctx.setChartBacktest(r);assert.equal(ctx.chartBacktestResult,r);ctx.setChartBacktest(null);assert.equal(ctx.chartBacktestResult,null);
  assert.equal(invalidations,2);assert.equal(markers,2);assert.equal(scheduled,2);assert.doesNotMatch(source,/BacktestOverlay\.draw\(ctx/);
 });
+
+test('다이버전스로 진입한 거래는 두 저점을 잇는 선 좌표를 장면에 담는다',()=>{
+ const h=harness({trade:{entries:[{...entry(0),price:.1,signal:{kind:'div_wick',barTime:base,time:base+60,timeframe:'1m',close:.1,pivotTime:base+5*60,previousPivotTime:base+2*60,low:.09,previousLow:.095}}]}}),scene=h.scene(),e=scene.entries.find(v=>v.div);
+ assert.ok(e,'장면에 다이버전스 선이 없습니다');
+ assert.equal(e.div.wick,true);
+ assert.ok([e.div.x1,e.div.y1,e.div.x2,e.div.y2].every(Number.isFinite));
+ assert.ok(e.div.x2>e.div.x1);
+ const plain=harness().scene();assert.equal(plain.entries.every(v=>!v.div),true);
+ const c=canvas();O.draw(c.ctx,h.result,h.options);
+ assert.ok(c.fills.some(f=>f.text==='저점1')&&c.fills.some(f=>f.text==='저점2'),'저점 표시 글자가 그려지지 않았습니다');
+ assert.equal(c.depth(),0);
+});

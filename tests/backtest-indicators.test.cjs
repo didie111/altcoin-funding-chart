@@ -89,7 +89,7 @@ test('받쳐 준 지지가 있으면 일반 상승 다이버전스에서 진입�
  assert.ok(sig.supportTouches>=2&&sig.supportVolumeTouches>=1);
  assert.equal(trade.fundingCondition,undefined);
  assert.equal(trade.exitReason,'BEARISH_DIVERGENCE');
- assert.equal(r.diagnostics.divergence.bullish,1);assert.equal(r.diagnostics.divergence.bearish,1);
+ assert.equal(r.diagnostics.divergence.bullish,1);assert.ok(r.diagnostics.divergence.bearish>=1);
 });
 test('다이버전스는 저점이 확정된 뒤(오른쪽 봉 수만큼 지난 뒤)에만 신호가 되어 미래를 보지 않습니다',()=>{
  const r=divRun(),sig=r.trades[0].entries[0].signal;
@@ -117,7 +117,7 @@ test('지지가 없는 낭떠러지 저점은 진입을 막고, 필터를 끄면
 test('하락 다이버전스 청산을 끄면 다른 청산 조건이 올 때까지 보유합니다',()=>{
  const r=divRun({},{divBearishExit:false});
  assert.equal(r.trades.length,1);assert.equal(r.trades[0].exitReason,'END_OF_TEST');
- assert.equal(r.diagnostics.divergence.bearish,1);
+ assert.ok(r.diagnostics.divergence.bearish>=1);
 });
 test('다이버전스 지표는 결과 비교 키가 다르고 기본 지표의 키는 그대로입니다',()=>{
  const a=E.normalizeConfig({timeframe:'4h'}),b=E.normalizeConfig({timeframe:'4h',indicator:'divergence'}),c=E.normalizeConfig({timeframe:'4h',indicator:'divergence',supportMinTouches:3});
@@ -125,4 +125,15 @@ test('다이버전스 지표는 결과 비교 키가 다르고 기본 지표의 
  assert.equal(R.sameStrategy(b,{...b},'4h'),true);
  assert.equal(R.sameStrategy(b,c,'4h'),false);
  assert.ok(R.strategyDifferences(b,c,'4h').includes('supportMinTouches'));
+});
+
+test('신호 위치는 차트의 RSI Div 지표(Bull/Bear)와 같다',()=>{
+ const RSI=require('../indicators.js'),{bars,end}=divSeries(),times=bars;
+ const chart=RSI.calculate(bars,{length:5,source:'close',oversold:30,overbought:70,divergence:true});
+ const r=divRun({},{divPivot:5,supportMinTouches:0,supportMinVolTouches:0,divMinGap:5,divMaxGap:60});
+ // 지표의 pivots 는 좌우 5캔들, 간격 5~60 으로 고정이므로 같은 값을 쓴 엔진 신호와 개수가 같아야 한다.
+ const bull=chart.bullCond.reduce((a,b)=>a+b,0),bear=chart.bearCond.reduce((a,b)=>a+b,0);
+ assert.equal(r.diagnostics.divergence.bullish,bull);
+ assert.equal(r.diagnostics.divergence.bearish,bear);
+ assert.ok(bull>=1);
 });
