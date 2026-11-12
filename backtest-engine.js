@@ -3,7 +3,78 @@
 })(typeof globalThis!=='undefined'?globalThis:this,function(RSI,T,F,B){
  'use strict';
  const defaultStrategyConfig=Object.freeze({timeframe:'5m',fundingIntervalHours:1,fundingIntervalBasis:'known',minFundingRate:-.5,maxFundingRate:null,fundingWindowSeconds:3600,fundingTransitionLookbackSeconds:3600,oneEntryPerFunding:false,entryCooldownBars:0,requireFreshFundingAfterCooldown:true,rsiPeriod:14,rsiOversold:30,rsiSource:'close',entryTrigger:'rsi_cross_up',splitCount:5,splitTrigger:'rsi_cross_up',splitStepPct:1,dcaMethod:'equal',stopLossMode:'immediate',exitType:'tp_sl',takeProfitPct:2,stopLossPct:3,rsiExitLevel:50,maxHoldBars:300,feePct:.05,slippagePct:.03,includeFundingPayment:true,initialCapital:10000,allocationPerTradePct:100,positionSizing:'budget',firstEntryAmount:10});
- const reasons=Object.freeze({TAKE_PROFIT:'TP · 익절',STOP_LOSS:'SL · 손절',RSI_REBOUND:'RSI 청산',SETTLE_EXIT:'정산 후 청산',TIMEOUT:'보유 기간 종료',END_OF_TEST:'테스트 기간 종료',DATA_GAP:'데이터 공백 전 종료'});
+ const reasons=Object.freeze({TAKE_PROFIT:'TP · 익절',STOP_LOSS:'SL · 손절',RSI_REBOUND:'RSI 청산',SETTLE_EXIT:'정산 후 청산',TIMEOUT:'보유 기간 종료',END_OF_TEST:'테스트 기간 종료',DATA_GAP:'데이터 공백 전 종료',BEARISH_DIVERGENCE:'하락 다이버전스 청산'});
+
+ // ===== 다이버전스 지표 (지표 선택: divergence) =====
+ // 4시간·일·주·월봉 전용. 상승 다이버전스(진입 신호) + 하락 다이버전스(롱 청산 신호).
+ // 상승 다이버전스는 "바닥 지지" 필터를 통과해야만 신호가 된다(지지 없는 낭떠러지 구간은 제외).
+ const divergenceDefaults=Object.freeze({divPivot:3,divMinGap:5,divMaxGap:60,divMode:'both',divMinRsiDiff:1,divWickRatio:.3,divBearishExit:true,supportLookback:80,supportTolerancePct:1.5,supportMinTouches:2,supportMinVolMult:1.2,supportMinVolTouches:1});
+ const divergenceTimeframes=Object.freeze(['4h','1d','1w','1M']);
+ function computeDivergence(bars,rsi,c,from,to){
+  const n=bars.length,o=new Float64Array(n),h=new Float64Array(n),l=new Float64Array(n),k=new Float64Array(n),v=new Float64Array(n),scratch={};
+  for(let i=0;i<n;i++){const b=B.get(bars,i,scratch);o[i]=b.open;h[i]=b.high;l[i]=b.low;k[i]=b.close;v[i]=b.volume;}
+  const cum=new Float64Array(n+1);for(let i=0;i<n;i++)cum[i+1]=cum[i]+v[i];
+  const L=c.divPivot,tol=c.supportTolerancePct/100;
+  const bull=new Array(n),bear=new Array(n),lows=[],highs=[];
+  const stats={bullish:0,wick:0,regular:0,supportRejected:0,cliffRejected:0,bearish:0};
+  const inRange=q=>{const t=B.time(bars,q);return t>=from&&T.end(t,c.timeframe)<=to;};
+  const avgVolume=j=>{const a=Math.max(0,j-20),count=j-a;return count>=5?(cum[j]-cum[a])/count:NaN;};
+  // 지지 판정: 저점 주변 가격대(±허용 %)를 이전 구간에서 몇 번 받쳤는지(연속된 캔들은 1회) + 그중 거래량이 받쳐준 횟수.
+  function support(p,low){
+   const zLow=low*(1-tol),zHigh=low*(1+tol),start=Math.max(0,p-c.supportLookback);
+   let clusters=0,volClusters=0,lastTouch=-Infinity,clusterVol=false;
+   for(let j=start;j<p;j++){
+    if(l[j]<zLow||l[j]>zHigh)continue;
+    if(j-lastTouch>2){if(clusters>0&&clusterVol)volClusters++;clusters++;clusterVol=false;}
+    const avg=avgVolume(j);if(Number.isFinite(avg)&&avg>0&&v[j]>=avg*c.supportMinVolMult)clusterVol=true;
+    lastTouch=j;
+   }
+   if(clusters>0&&clusterVol)volClusters++;
+   const off=c.supportMinTouches===0&&c.supportMinVolTouches===0;
+   return {zLow,zHigh,touches:clusters,volTouches:volClusters,ok:off||(clusters>=c.supportMinTouches&&volClusters>=c.supportMinVolTouches)};
+  }
+  for(let p=L;p<n-L;p++){
+   if(!Number.isFinite(rsi[p]))continue;
+   let isLow=true,isHigh=true;
+   for(let j=1;j<=L&&(isLow||isHigh);j++){
+    if(!(l[p]<=l[p-j]&&l[p]<l[p+j]))isLow=false;
+    if(!(h[p]>=h[p-j]&&h[p]>h[p+j]))isHigh=false;
+   }
+   const q=p+L,range=h[p]-l[p];
+   if(isLow){
+    for(let a=lows.length-1;a>=0;a--){
+     const p1=lows[a],gap=p-p1;if(gap>c.divMaxGap)break;
+     let lowest=Infinity;for(let j=p1+1;j<p;j++)if(l[j]<lowest)lowest=l[j];
+     if(lowest<l[p])break; // 두 저점 사이에 더 낮은 저점이 있으면 더 오래된 저점과 비교하지 않는다
+     if(gap<c.divMinGap||!Number.isFinite(rsi[p1])||!(l[p]<l[p1])||!(rsi[p]>rsi[p1]+c.divMinRsiDiff))continue;
+     const bodyLow2=Math.min(o[p],k[p]),bodyLow1=Math.min(o[p1],k[p1]),wickRatio=range>0?(bodyLow2-l[p])/range:0;
+     const wick=bodyLow2>=bodyLow1&&wickRatio>=c.divWickRatio;
+     if(!wick&&c.divMode==='wick')continue;
+     const sup=support(p,l[p]);
+     if(!sup.ok){if(inRange(q)){if(sup.touches===0)stats.cliffRejected++;stats.supportRejected++;}break;}
+     const found={kind:wick?'div_wick':'div_regular',p,p1,rsi2:rsi[p],rsi1:rsi[p1],low2:l[p],low1:l[p1],wickRatio,touches:sup.touches,volTouches:sup.volTouches,zLow:sup.zLow,zHigh:sup.zHigh};
+     if(!bull[q]||(wick&&bull[q].kind!=='div_wick')){if(inRange(q)&&!bull[q]){stats.bullish++;stats[wick?'wick':'regular']++;}bull[q]=found;}
+     break;
+    }
+    lows.push(p);
+   }
+   if(isHigh){
+    for(let a=highs.length-1;a>=0;a--){
+     const p1=highs[a],gap=p-p1;if(gap>c.divMaxGap)break;
+     let highest=-Infinity;for(let j=p1+1;j<p;j++)if(h[j]>highest)highest=h[j];
+     if(highest>h[p])break;
+     if(gap<c.divMinGap||!Number.isFinite(rsi[p1])||!(h[p]>h[p1])||!(rsi[p]<rsi[p1]-c.divMinRsiDiff))continue;
+     const bodyHigh2=Math.max(o[p],k[p]),bodyHigh1=Math.max(o[p1],k[p1]),wickRatio=range>0?(h[p]-bodyHigh2)/range:0;
+     const wick=bodyHigh2<=bodyHigh1&&wickRatio>=c.divWickRatio;
+     if(!wick&&c.divMode==='wick')continue;
+     if(!bear[q]){if(inRange(q))stats.bearish++;bear[q]={kind:wick?'div_wick':'div_regular',p,p1,rsi2:rsi[p],rsi1:rsi[p1],high2:h[p],high1:h[p1],wickRatio};}
+     break;
+    }
+    highs.push(p);
+   }
+  }
+  return {bull,bear,stats};
+ }
  function normalizeConfig(input={}){
   const c={...defaultStrategyConfig,...input};
   const number=(key,min,max,integer=false)=>{const value=Number(c[key]);if(!Number.isFinite(value)||value<min||value>max||(integer&&!Number.isInteger(value)))throw Error(key+' 설정 범위를 확인하세요.');c[key]=value;};
@@ -13,9 +84,18 @@
   for(const [key,choices]of Object.entries({fundingIntervalBasis:['known','chart'],entryTrigger:['rsi_cross_up','rsi_oversold'],splitTrigger:['rsi_cross_up','rsi_cross_up_1m','rsi_oversold','step_pct','bar'],dcaMethod:['equal','martingale','cumulative'],stopLossMode:['immediate','after_all_dca'],exitType:['tp_sl','rsi_rebound','settle_exit','composite'],positionSizing:['budget','first_entry'],rsiSource:['close','open','high','low','hl2','hlc3','ohlc4','hlcc4']}))if(!choices.includes(c[key]))throw Error(key+' 옵션이 올바르지 않습니다.');
   c.includeFundingPayment=c.includeFundingPayment!==false;
   // 지표: 'funding_rsi'(음펀비 + RSI, 기본) 또는 'rsi'(RSI 단독). 지표는 합치지 않고 하나만 쓴다.
-  if(c.indicator!==undefined&&!['funding_rsi','rsi'].includes(c.indicator))throw Error('indicator 옵션이 올바르지 않습니다.');
+  if(c.indicator!==undefined&&!['funding_rsi','rsi','divergence'].includes(c.indicator))throw Error('indicator 옵션이 올바르지 않습니다.');
   // 기본 지표는 키를 만들지 않아 이전 결과·백업의 설정 객체와 그대로 같다.
-  if(c.indicator==='rsi')c.indicator='rsi';else delete c.indicator;
+  if(c.indicator==='rsi'||c.indicator==='divergence'){}else delete c.indicator;
+  if(c.indicator==='divergence'){
+   // 다이버전스 전용 설정은 이 지표를 고를 때만 키가 생긴다.
+   for(const [key,value]of Object.entries(divergenceDefaults))if(c[key]===undefined)c[key]=value;
+   if(!divergenceTimeframes.includes(c.timeframe))throw Error('다이버전스 지표는 4시간·일·주·월봉만 지원합니다.');
+   for(const [key,min,max,int]of [['divPivot',1,20,true],['divMinGap',2,500,true],['divMaxGap',3,1000,true],['divMinRsiDiff',0,50],['divWickRatio',0,1],['supportLookback',5,2000,true],['supportTolerancePct',.1,20],['supportMinTouches',0,50,true],['supportMinVolMult',0,50],['supportMinVolTouches',0,50,true]])number(key,min,max,int);
+   if(c.divMinGap>c.divMaxGap)throw Error('다이버전스 두 저점 간격의 최소·최대 순서를 확인하세요.');
+   if(!['both','wick'].includes(c.divMode))throw Error('divMode 옵션이 올바르지 않습니다.');
+   c.divBearishExit=c.divBearishExit!==false;
+  }else for(const key of Object.keys(divergenceDefaults))delete c[key];
   c.oneEntryPerFunding=c.oneEntryPerFunding===true;c.requireFreshFundingAfterCooldown=c.requireFreshFundingAfterCooldown===true;
   for(const key of ['startTime','endTime'])if(c[key]!==undefined&&!Number.isFinite(c[key]))throw Error('기간을 확인하세요.');
   if(c.startTime!==undefined&&c.endTime!==undefined&&c.startTime>=c.endTime)throw Error('테스트 기간을 확인하세요.');
@@ -145,12 +225,15 @@
  function runBacktest(candles,fundingRecords,options={},context={}){
   const c=normalizeConfig(options),data=prepareExecution(candles,c,context),{bars,signalBars,rsi,minuteRsi,mtf,executionTimeframe}=data;
   const records=normalizeFunding(fundingRecords),weights=getStepWeights(c.splitCount,c.dcaMethod,c.dcaMultipliers),weightSum=weights.reduce((a,b)=>a+b,0),splitCount=weights.length;
+  const noFunding=c.indicator==='rsi'||c.indicator==='divergence',divergence=c.indicator==='divergence'?computeDivergence(signalBars,rsi,c,data.rangeStart,data.rangeEnd):null;
+  const divDetails=d=>({rsi:d.rsi2,previousRsi:d.rsi1,low:d.low2,previousLow:d.low1,wickRatio:d.wickRatio,pivotTime:B.time(signalBars,d.p),previousPivotTime:B.time(signalBars,d.p1),supportTouches:d.touches,supportVolumeTouches:d.volTouches,supportZoneLow:d.zLow,supportZoneHigh:d.zHigh});
   const trades=[],signals=[],equityCurve=[],warnings={ambiguousBars:0,fundingPriceEstimates:0,fundingTimingAmbiguities:0,dataGaps:0,skippedInsufficientCapital:0};
   const from=data.rangeStart,to=data.rangeEnd,fee=c.feePct/100,slip=c.slippagePct/100;
   const fundingSessions=identifyFundingSessions(records,c),rateSessions=c.fundingIntervalHours?identifyFundingSessions(records,{...c,fundingIntervalHours:0}):fundingSessions;
   const intervals=intervalObservations(records,c.fundingIntervalBasis);
   const negativeRecords=records.filter(r=>rateQualifies(r,c)),eligible=fundingSessions.filter(s=>s.endTime>from&&s.startTime<to);
   const diagnostics={fundingRecords:records.filter(r=>r.time>=from&&r.time<to).length,rateQualifiedRecords:new Set([...negativeRecords.filter(r=>r.time<to&&r.time+(c.fundingWindowSeconds||r.intervalHours*3600||0)>from).map(r=>r.time),...rateSessions.filter(s=>s.transitionTime&&s.endTime>from&&s.startTime<to).map(s=>s.settleTime)]).size,eligibleFundingWindows:eligible.length,rsiSignals:0,entrySignals:0,rejected:{funding_window:0,funding_cycle:0,funding_reuse:0,entry_cooldown:0,funding_before_cooldown:0,position:0,capital:0},samples:[]};
+  if(divergence)diagnostics.divergence={...divergence.stats};
   let capital=c.initialCapital,pos=null,pending=null,fundingIndex=0,peak=c.initialCapital,mdd=0,lastIndex=-1,equityCount=0,equityStride=1,equityLastTime=null,equityLastValue=null,equitySampled=false;
   // Keep the last actually filled initial entry across exits and data gaps.
   // Older overlapping windows must not rearm entry when a newer window expires.
@@ -216,19 +299,20 @@
    }
    settle(end,bar,false); // Only positions that survived the bar can receive intrabar settlements.
    if(c.entryCooldownBars>0&&checkpoint>lastEntrySignalIndex&&checkpoint-lastEntrySignalIndex<=c.entryCooldownBars)lastCooldownClose=end;
-   const entryRsi=rsi[checkpoint],entryPrev=rsi[checkpoint-1],entryTrigger=signalBar&&(c.entryTrigger==='rsi_cross_up'?Number.isFinite(entryPrev)&&entryPrev<=c.rsiOversold&&entryRsi>c.rsiOversold:Number.isFinite(entryRsi)&&entryRsi<=c.rsiOversold);
+   const entryRsi=rsi[checkpoint],entryPrev=rsi[checkpoint-1],entryDiv=divergence&&signalBar?divergence.bull[checkpoint]:null,entryTrigger=divergence?Boolean(entryDiv):signalBar&&(c.entryTrigger==='rsi_cross_up'?Number.isFinite(entryPrev)&&entryPrev<=c.rsiOversold&&entryRsi>c.rsiOversold:Number.isFinite(entryRsi)&&entryRsi<=c.rsiOversold);
    let entrySession=null;
    if(entryTrigger){
     diagnostics.rsiSignals++;const rateWindow=fundingSessionAt(rateSessions,end),matched=fundingSessionAt(fundingSessions,end),interval=knownFunding(intervals,end),negative=rateWindow?.rawRecord??knownFunding(negativeRecords,end);
     // Count test-timeframe candles, even when DCA executes on 1m candles.
     // Suppressed signals do not extend the wait or consume a new settlement.
-    const rsiOnly=c.indicator==='rsi',reason=rsiOnly?(pos?'position':capital<=0?'capital':'match'):pos?'position':!rateWindow?'funding_window':!matched?'funding_cycle':c.entryCooldownBars>0&&checkpoint-lastEntrySignalIndex<=c.entryCooldownBars?'entry_cooldown':c.entryCooldownBars>0&&c.requireFreshFundingAfterCooldown&&matched.settleTime<lastCooldownClose?'funding_before_cooldown':c.oneEntryPerFunding&&matched.settleTime<=lastUsedFundingTime?'funding_reuse':capital<=0?'capital':'match';
+    const rsiOnly=noFunding,reason=rsiOnly?(pos?'position':capital<=0?'capital':'match'):pos?'position':!rateWindow?'funding_window':!matched?'funding_cycle':c.entryCooldownBars>0&&checkpoint-lastEntrySignalIndex<=c.entryCooldownBars?'entry_cooldown':c.entryCooldownBars>0&&c.requireFreshFundingAfterCooldown&&matched.settleTime<lastCooldownClose?'funding_before_cooldown':c.oneEntryPerFunding&&matched.settleTime<=lastUsedFundingTime?'funding_reuse':capital<=0?'capital':'match';
     if(reason==='match'){entrySession=rsiOnly?{settleTime:end,rate:null,intervalHours:null}:matched;diagnostics.entrySignals++;}else diagnostics.rejected[reason]++;
     if(!context.summaryOnly){diagnostics.samples.push({time:end,rsi:entryRsi,previousRsi:Number.isFinite(entryPrev)?entryPrev:null,reason,intervalHours:interval?.hours??null,intervalSource:interval?.source??'unknown',fundingTime:negative?.time??null,fundingRate:negative?.rate??null,validUntil:matched?.transitionTime?matched.validUntil:negative?negative.time+(c.fundingWindowSeconds||negative.intervalHours*3600||0):null,...(matched?.transitionTime?{transitionTime:matched.transitionTime}:{})});if(diagnostics.samples.length>30)diagnostics.samples.shift();}
    }
    if(pos){
     const r=rsi[checkpoint],prev=rsi[checkpoint-1],cross=Number.isFinite(prev)&&prev<=c.rsiOversold&&r>c.rsiOversold,minuteCross=Number.isFinite(minuteRsi[i-1])&&minuteRsi[i-1]<=c.rsiOversold&&minuteRsi[i]>c.rsiOversold,kind=c.splitTrigger;
-    if(signalBar&&['rsi_rebound','composite'].includes(c.exitType)&&Number.isFinite(r)&&r>=c.rsiExitLevel)pending={kind:'exit',reason:'RSI_REBOUND'};
+    if(signalBar&&divergence&&c.divBearishExit&&divergence.bear[checkpoint])pending={kind:'exit',reason:'BEARISH_DIVERGENCE',signal:entrySignal(divergence.bear[checkpoint].kind,signalBar,end,c.timeframe,{rsi:divergence.bear[checkpoint].rsi2,previousRsi:divergence.bear[checkpoint].rsi1})};
+    else if(signalBar&&['rsi_rebound','composite'].includes(c.exitType)&&Number.isFinite(r)&&r>=c.rsiExitLevel)pending={kind:'exit',reason:'RSI_REBOUND'};
     else if(signalBar&&c.exitType==='settle_exit'&&pos.fundingEvents.length&&signalBar.close>signalBar.open)pending={kind:'exit',reason:'SETTLE_EXIT'};
     else if(signalBar&&c.maxHoldBars>0&&pos.holdBars>=c.maxHoldBars)pending={kind:'exit',reason:'TIMEOUT'};
     else if(pos.entries.length<splitCount){
@@ -242,7 +326,7 @@
     }
     equity(capital-pos.totalCost+pos.totalQty*bar.close*(1-slip)*(1-fee)+pos.fundingEarned,bar.time);
    }else{
-    if(entrySession)pending={kind:'entry',signalIndex:checkpoint,signal:entrySignal(c.entryTrigger,signalBar,end,c.timeframe,{threshold:c.rsiOversold,rsi:entryRsi,previousRsi:entryPrev??null}),fundingCondition:c.indicator==='rsi'?undefined:{signalTime:end,settleTime:entrySession.settleTime,rate:entrySession.rate,intervalHours:entrySession.intervalHours,intervalSource:entrySession.intervalSource,validUntil:entrySession.validUntil,...(entrySession.transitionTime?{transitionTime:entrySession.transitionTime}:{})}};
+    if(entrySession)pending={kind:'entry',signalIndex:checkpoint,signal:entryDiv?entrySignal(entryDiv.kind,signalBar,end,c.timeframe,divDetails(entryDiv)):entrySignal(c.entryTrigger,signalBar,end,c.timeframe,{threshold:c.rsiOversold,rsi:entryRsi,previousRsi:entryPrev??null}),fundingCondition:noFunding?undefined:{signalTime:end,settleTime:entrySession.settleTime,rate:entrySession.rate,intervalHours:entrySession.intervalHours,intervalSource:entrySession.intervalSource,validUntil:entrySession.validUntil,...(entrySession.transitionTime?{transitionTime:entrySession.transitionTime}:{})}};
    }
   }
   if(pos&&lastIndex>=0){const last=B.get(bars,lastIndex,previousBar);close(last,last.close,'END_OF_TEST');}
@@ -254,7 +338,7 @@
   const wins=trades.filter(t=>t.netPnl>1e-9),losses=trades.filter(t=>t.netPnl< -1e-9),grossProfit=wins.reduce((s,t)=>s+t.netPnl,0),grossLoss=-losses.reduce((s,t)=>s+t.netPnl,0),netPnl=trades.reduce((s,t)=>s+t.netPnl,0),avg=rows=>rows.length?rows.reduce((s,t)=>s+t.returnPct,0)/rows.length:0;
   return {totalTrades:trades.length,winTrades:wins.length,lossTrades:losses.length,breakevenTrades:trades.length-wins.length-losses.length,winRatePct:trades.length?wins.length/trades.length*100:0,initialCapital:c.initialCapital,finalCapital:c.initialCapital+netPnl,netPnl,grossProfit,grossLoss,totalReturnPct:netPnl/c.initialCapital*100,profitFactor:grossLoss?grossProfit/grossLoss:grossProfit?null:0,profitFactorInfinite:!grossLoss&&grossProfit>0,maxDrawdownPct:mdd,avgTradeReturnPct:avg(trades),avgWinReturnPct:avg(wins),avgLossReturnPct:Math.abs(avg(losses)),riskRewardRatio:losses.length?avg(wins)/Math.abs(avg(losses)):null,avgDcaSteps:trades.length?trades.reduce((s,t)=>s+t.dcaSteps,0)/trades.length:0,avgHoldBars:trades.length?trades.reduce((s,t)=>s+t.holdBars,0)/trades.length:0,totalFundingEarned:trades.reduce((s,t)=>s+t.fundingEarned,0),totalFees:trades.reduce((s,t)=>s+t.entryFees+t.exitFee,0),eligibleSessionsCount};
  }
- function runAllTimeframes(map,records,options={},controls={}){const results={},comparison=[],context={minuteCandles:map['1m'],prepared:new Map(),summaryOnly:controls.summaryOnly===true,equityMaxPoints:controls.equityMaxPoints,onProgress:controls.onProgress},frames=Object.keys(T.seconds).filter(tf=>map[tf]?.length);for(const [index,tf]of frames.entries()){controls.onProgress?.({phase:'compare',timeframe:tf,count:index+1,total:frames.length});const res=runBacktest(map[tf],records,{...options,timeframe:tf},context);results[tf]=res;comparison.push({timeframe:tf,...res.summary,trades:res.summary.totalTrades,fundingEarned:res.summary.totalFundingEarned});}const valid=comparison.filter(r=>r.totalTrades>0),best=key=>[...valid].sort((a,b)=>(b[key]??Infinity)-(a[key]??Infinity))[0]||null;return {results,comparison,bestByWinRate:best('winRatePct'),bestByProfitFactor:best('profitFactor'),bestByTotalReturn:best('totalReturnPct')};}
+ function runAllTimeframes(map,records,options={},controls={}){const results={},comparison=[],context={minuteCandles:map['1m'],prepared:new Map(),summaryOnly:controls.summaryOnly===true,equityMaxPoints:controls.equityMaxPoints,onProgress:controls.onProgress},frames=Object.keys(T.seconds).filter(tf=>map[tf]?.length&&(options.indicator!=='divergence'||divergenceTimeframes.includes(tf)));for(const [index,tf]of frames.entries()){controls.onProgress?.({phase:'compare',timeframe:tf,count:index+1,total:frames.length});const res=runBacktest(map[tf],records,{...options,timeframe:tf},context);results[tf]=res;comparison.push({timeframe:tf,...res.summary,trades:res.summary.totalTrades,fundingEarned:res.summary.totalFundingEarned});}const valid=comparison.filter(r=>r.totalTrades>0),best=key=>[...valid].sort((a,b)=>(b[key]??Infinity)-(a[key]??Infinity))[0]||null;return {results,comparison,bestByWinRate:best('winRatePct'),bestByProfitFactor:best('profitFactor'),bestByTotalReturn:best('totalReturnPct')};}
  function optimizeStrategy(candles,records,grid={}){
   const combinations=[],context={minuteCandles:grid.minuteCandles,prepared:new Map(),summaryOnly:true},splits=grid.baseConfig?.dcaMethod==='cumulative'?[grid.baseConfig.splitCount??defaultStrategyConfig.splitCount]:grid.splitCounts||[0,3,5,10],oversolds=grid.rsiOversolds||[20,25,30],targets=grid.takeProfitPcts||[1,2,3],stops=grid.stopLossPcts||[2,3,5],triggers=grid.splitTriggers||(grid.minuteCandles?.length?['step_pct','rsi_cross_up','rsi_cross_up_1m']:['step_pct','rsi_cross_up']),total=splits.length*oversolds.length*targets.length*stops.length*triggers.length;let tested=0;
   for(const splitCount of splits)for(const rsiOversold of oversolds)for(const takeProfitPct of targets)for(const stopLossPct of stops)for(const splitTrigger of triggers){
@@ -267,5 +351,5 @@
   return {totalEvaluated:tested,eligibleEvaluated:combinations.length,bestWinRate:best('winRatePct'),bestProfitFactor:best('profitFactor'),bestTotalReturn:best('totalReturnPct'),bestBalanced:[...combinations].sort((a,b)=>b.score-a.score)[0]||null,topRankings:combinations.sort((a,b)=>b.score-a.score).slice(0,20)};
  }
  function signalLabel(signal){if(signal.type==='BUY_INITIAL')return 'BUY 1';if(signal.type==='DCA_BUY')return 'DCA '+signal.step;return reasons[signal.reason]||'청산';}
- return {defaultStrategyConfig,normalizeConfig,getStepWeights,getAllocationPlan,normalizeFunding,identifyFundingSessions,fundingSessionAt,computeRSI,runBacktest,runAllTimeframes,optimizeStrategy,signalLabel,reasons};
+ return {defaultStrategyConfig,divergenceDefaults,divergenceTimeframes,normalizeConfig,getStepWeights,getAllocationPlan,normalizeFunding,identifyFundingSessions,fundingSessionAt,computeRSI,runBacktest,runAllTimeframes,optimizeStrategy,signalLabel,reasons};
 });

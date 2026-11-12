@@ -9,6 +9,8 @@
   if(normalized.dcaMethod==='cumulative')values.push(['dcaMultipliers',normalized.dcaMultipliers.join(',')]);
   // 기본 지표(음펀비 + RSI)는 키를 추가하지 않아 이전 결과·백업과 그대로 호환된다. 다른 지표만 구분 키를 더한다.
   if(normalized.indicator==='rsi')values.push(['indicator',normalized.indicator]);
+  // 다이버전스 지표는 전용 설정(div*, support*)까지 결과 구분 키에 넣는다.
+  if(normalized.indicator==='divergence'){values.push(['indicator',normalized.indicator]);for(const key of Object.keys(normalized).filter(k=>/^(div|support)[A-Z]/.test(k)).sort())values.push([key,normalized[key]]);}
   return values;
  }
  // The engine gives 0 and 1 the same single entry. Preserve both legacy file keys.

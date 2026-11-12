@@ -28,7 +28,7 @@
   const referencePrice=signal?.referencePrice??(kind==='step_pct'&&Number.isFinite(config.splitStepPct)&&Number.isFinite(trade.entries[index-1]?.price)?trade.entries[index-1].price*(1-config.splitStepPct/100):null);
   const threshold=signal?.threshold??(kind?.startsWith('rsi_')?config.rsiOversold:null);
   const rsiName=kind==='rsi_cross_up_1m'?'1분 RSI':kind==='rsi_cross_up'&&timeframe==='1m'?'1분 RSI':'RSI';
-  const short=kind==='step_pct'?(Number.isFinite(config.splitStepPct)?'하락 '+config.splitStepPct+'%':'추가 하락'):kind==='bar'?'매 봉':kind==='rsi_oversold'?'RSI ≤ '+(threshold??'설정선'):kind?.startsWith('rsi_')?rsiName+' '+(threshold??'설정선')+'↑':'';
+  const short=kind==='div_wick'?'꼬리 다이버전스':kind==='div_regular'?'일반 다이버전스':kind==='step_pct'?(Number.isFinite(config.splitStepPct)?'하락 '+config.splitStepPct+'%':'추가 하락'):kind==='bar'?'매 봉':kind==='rsi_oversold'?'RSI ≤ '+(threshold??'설정선'):kind?.startsWith('rsi_')?rsiName+' '+(threshold??'설정선')+'↑':'';
   const label=first?'첫 BUY'+(short?' · '+short:''):(entry.step??index+1)+'차 · '+short;
   return {key,kind,label,color:entryTypes[key][1],timeframe,time,barTime,referencePrice,threshold,rsi:signal?.rsi,previousRsi:signal?.previousRsi,low:signal?.low,close:signal?.close};
  }

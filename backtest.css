@@ -168,3 +168,5 @@
 .bt-indicator-list li b{font-size:11px;font-weight:700}
 .bt-settings-right{display:grid;gap:14px;min-width:0;align-content:start}
 .bt-settings-strategy [hidden]{display:none!important}
+.bt-settings-divergence[hidden]{display:none!important}
+.bt-div-sub{display:block;margin:10px 0 2px;color:#9fc2ff;font-size:12px;font-weight:700}
