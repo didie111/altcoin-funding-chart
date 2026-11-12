@@ -143,3 +143,16 @@ test('다이버전스로 진입한 거래는 두 저점을 잇는 선 좌표를 
  assert.ok(c.fills.some(f=>f.text==='저점1')&&c.fills.some(f=>f.text==='저점2'),'저점 표시 글자가 그려지지 않았습니다');
  assert.equal(c.depth(),0);
 });
+
+test('박스권 복귀 지지는 지지 구간·박스를 장면에 담고 진입 라벨에 등급을 붙인다',()=>{
+ const sig={kind:'div_regular',barTime:base,time:base+60,timeframe:'1m',close:.1,pivotTime:base+5*60,previousPivotTime:base+2*60,low:.09,previousLow:.095,supportGrade:'box',supportZoneLow:.0875,supportZoneHigh:.0925,supportBoxLow:.086,supportBoxHigh:.094,supportBoxFrom:base,supportBoxTo:base+3*60};
+ const h=harness({trade:{entries:[{...entry(0),price:.1,signal:sig}]}}),scene=h.scene(),e=scene.entries.find(v=>v.div);
+ assert.ok(e&&e.div.zone&&e.div.box,'지지 구간·박스가 장면에 없습니다');
+ assert.ok(e.div.zone.y2>e.div.zone.y1&&e.div.box.y2>e.div.box.y1&&e.div.box.x2>e.div.box.x1);
+ assert.match(e.label,/박스권 복귀/);
+ const c=canvas();O.draw(c.ctx,h.result,h.options);
+ assert.ok(c.fills.some(f=>f.text==='지지 구간')&&c.fills.some(f=>f.text==='박스권'));
+ assert.equal(c.depth(),0);
+ const normal=harness({trade:{entries:[{...entry(0),price:.1,signal:{...sig,supportGrade:'normal',supportBoxLow:undefined,supportBoxHigh:undefined,supportBoxFrom:undefined,supportBoxTo:undefined}}]}}).scene().entries.find(v=>v.div);
+ assert.ok(normal.div.zone&&!normal.div.box);assert.match(normal.label,/일반 지지/);
+});

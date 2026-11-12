@@ -44,3 +44,16 @@ test('a configured long funding window loads its full pre-test lookback instead 
  const d=await api.loadBacktestDataset('BTCUSDT',{exchange:'BINANCE',intervals:['1m'],startTime:start,endTime:start+60,fundingWindowSeconds:7*86400});
  assert.equal(cursors[0],start-7*86400);assert.ok(d.fundingRecords.some(r=>r.time===old.time));
 });
+
+test('지지 확인용 큰 주기 캔들은 펀딩·1분봉 없이 시작 전 지정한 봉 수만큼 거슬러 불러온다',async()=>{
+ const day=86400,t0=Math.floor(start/day)*day,history=Array.from({length:400},(_,i)=>bar(t0-390*day+i*day)),calls=[];
+ const api=Data.create({fundingPage:async()=>{throw Error('펀딩을 불러오면 안 됩니다');},candlePage:async(ex,symbol,tf,end)=>{calls.push({ex,symbol,tf});return history.filter(b=>b.time*1000<=end).slice(-200);}});
+ const rows=await api.loadContextCandles('BTCUSDT',{exchange:'BINANCE',timeframe:'1d',startTime:start,endTime:start+3*day,bars:150,packed:false});
+ assert.ok(calls.length>=1&&calls.every(c=>c.tf==='1d'&&c.symbol==='BTCUSDT'));
+ assert.ok(rows.length>=150,'시작 전 150봉 이상을 불러와야 합니다');
+ assert.ok(rows[0].time<=t0-150*day);assert.ok(rows.every((b,i)=>i===0||b.time>rows[i-1].time));
+ assert.ok(rows.every(b=>b.time+day<=start+3*day),'아직 끝나지 않은 캔들은 쓰면 안 됩니다');
+ const packed=await api.loadContextCandles('BTCUSDT',{exchange:'BINANCE',timeframe:'1d',startTime:start,endTime:start+3*day,bars:30});
+ assert.ok(packed.kind&&packed.length>=30);
+ await assert.rejects(api.loadContextCandles('BTCUSDT',{exchange:'BINANCE',timeframe:'7x',startTime:start,endTime:start+day,bars:10}),/주기·기간/);
+});
