@@ -81,7 +81,13 @@
        if(Number.isFinite(sx)&&sx>=0&&sx<=width&&Number.isFinite(sy)&&sy>=0&&sy<=height)signal={x:sx,y:sy};
       }
       const fill=entry.time<to&&Number.isFinite(px)&&Number.isFinite(py)&&px>=0&&px<=width&&py>=0&&py<=height?{x:px,y:py}:null;
-      if(fill||signal)scene.entries.push({fill,signal,tradeId,step:entry.step??j+1,value:entry.price,...trace});
+      // 다이버전스 진입: 두 번째 저점과 직전 저점을 잇는 선을 가격 차트에 그려 어디서 발생했는지 보이게 한다.
+      let div=null;const ds=entry.signal;
+      if(ds&&String(ds.kind).startsWith('div_')&&Number.isFinite(ds.pivotTime)&&Number.isFinite(ds.previousPivotTime)&&Number.isFinite(ds.low)&&Number.isFinite(ds.previousLow)){
+       const x1=x(ds.previousPivotTime),x2=x(ds.pivotTime),y1=series.priceToCoordinate(ds.previousLow),y2=series.priceToCoordinate(ds.low);
+       if([x1,x2,y1,y2].every(Number.isFinite))div={x1,y1,x2,y2,wick:ds.kind==='div_wick'};
+      }
+      if(fill||signal)scene.entries.push({fill,signal,div,tradeId,step:entry.step??j+1,value:entry.price,...trace});
      }
     }
     if(until<from||entry.time>=to)continue;
@@ -179,6 +185,8 @@
     if(s.x2>s.x1){if(s.prior)ctx.globalAlpha=.8;stroke(s.x1,s.y,s.x2,s.y,s.color,weight);ctx.globalAlpha=1;}
    }
    for(const e of scene.entries){
+    if(e.div){const d=e.div,tone=d.wick?'#fbbf24':'#60a5fa';ctx.save();ctx.globalAlpha=.95;ctx.setLineDash([5,3]);stroke(d.x1,d.y1,d.x2,d.y2,tone,1.5);ctx.setLineDash([]);dot({x:d.x1,y:d.y1},tone,3.2);dot({x:d.x2,y:d.y2},tone,3.8);
+     ctx.font='bold 10px sans-serif';ctx.textAlign='center';ctx.textBaseline='top';ctx.fillStyle=tone;ctx.fillText('저점1',d.x1,d.y1+6);ctx.fillText('저점2',d.x2,d.y2+6);ctx.restore();}
     const {fill,signal,color}=e;
     if(signal&&fill&&fill.x-signal.x>=5){ctx.globalAlpha=.44;stroke(signal.x,signal.y,fill.x,signal.y,color,1);stroke(fill.x,signal.y,fill.x,fill.y,color,1);ctx.globalAlpha=1;}
     if(signal&&(!fill||Math.hypot(fill.x-signal.x,fill.y-signal.y)>=5)){

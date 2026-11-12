@@ -6,16 +6,16 @@
  const reasons=Object.freeze({TAKE_PROFIT:'TP · 익절',STOP_LOSS:'SL · 손절',RSI_REBOUND:'RSI 청산',SETTLE_EXIT:'정산 후 청산',TIMEOUT:'보유 기간 종료',END_OF_TEST:'테스트 기간 종료',DATA_GAP:'데이터 공백 전 종료',BEARISH_DIVERGENCE:'하락 다이버전스 청산'});
 
  // ===== 다이버전스 지표 (지표 선택: divergence) =====
- // 4시간·일·주·월봉 전용. 상승 다이버전스(진입 신호) + 하락 다이버전스(롱 청산 신호).
+ // 4시간·일·주·월봉 전용. 상승 다이버전스(진입 신호) + 하락 다이버전스(롱 청산 신호). 신호 위치는 차트의 RSI Div 지표 Bull/Bear 와 같다.
  // 상승 다이버전스는 "바닥 지지" 필터를 통과해야만 신호가 된다(지지 없는 낭떠러지 구간은 제외).
- const divergenceDefaults=Object.freeze({divPivot:3,divMinGap:5,divMaxGap:60,divMode:'both',divMinRsiDiff:1,divWickRatio:.3,divBearishExit:true,supportLookback:80,supportTolerancePct:1.5,supportMinTouches:2,supportMinVolMult:1.2,supportMinVolTouches:1});
+ const divergenceDefaults=Object.freeze({divPivot:5,divMinGap:5,divMaxGap:60,divMode:'both',divMinRsiDiff:0,divWickRatio:.3,divBearishExit:true,supportLookback:80,supportTolerancePct:1.5,supportMinTouches:2,supportMinVolMult:1.2,supportMinVolTouches:1});
  const divergenceTimeframes=Object.freeze(['4h','1d','1w','1M']);
  function computeDivergence(bars,rsi,c,from,to){
   const n=bars.length,o=new Float64Array(n),h=new Float64Array(n),l=new Float64Array(n),k=new Float64Array(n),v=new Float64Array(n),scratch={};
   for(let i=0;i<n;i++){const b=B.get(bars,i,scratch);o[i]=b.open;h[i]=b.high;l[i]=b.low;k[i]=b.close;v[i]=b.volume;}
   const cum=new Float64Array(n+1);for(let i=0;i<n;i++)cum[i+1]=cum[i]+v[i];
   const L=c.divPivot,tol=c.supportTolerancePct/100;
-  const bull=new Array(n),bear=new Array(n),lows=[],highs=[];
+  const bull=new Array(n),bear=new Array(n);
   const stats={bullish:0,wick:0,regular:0,supportRejected:0,cliffRejected:0,bearish:0};
   const inRange=q=>{const t=B.time(bars,q);return t>=from&&T.end(t,c.timeframe)<=to;};
   const avgVolume=j=>{const a=Math.max(0,j-20),count=j-a;return count>=5?(cum[j]-cum[a])/count:NaN;};
@@ -33,44 +33,46 @@
    const off=c.supportMinTouches===0&&c.supportMinVolTouches===0;
    return {zLow,zHigh,touches:clusters,volTouches:volClusters,ok:off||(clusters>=c.supportMinTouches&&volClusters>=c.supportMinVolTouches)};
   }
-  for(let p=L;p<n-L;p++){
-   if(!Number.isFinite(rsi[p]))continue;
+  // 차트의 "RSI Div" 지표(indicators.js)와 같은 규칙: RSI 저점·고점(좌우 L캔들)을 잡고 바로 이전 저점·고점과만 비교한다.
+  // 상승: RSI 저점이 높아지고 가격 저점은 낮아지며, 둘 중 하나가 과매도선 이하. 하락은 반대(과매수선 = 100 - 과매도선).
+  const oversold=c.rsiOversold,overbought=100-c.rsiOversold;
+  let prevLow=null,prevHigh=null;
+  for(let p=L;p+L<n;p++){
+   const value=rsi[p];if(!Number.isFinite(value))continue;
    let isLow=true,isHigh=true;
-   for(let j=1;j<=L&&(isLow||isHigh);j++){
-    if(!(l[p]<=l[p-j]&&l[p]<l[p+j]))isLow=false;
-    if(!(h[p]>=h[p-j]&&h[p]>h[p+j]))isHigh=false;
+   for(let j=p-L;j<=p+L;j++){
+    if(j===p||!Number.isFinite(rsi[j]))continue;
+    if(j<p?rsi[j]<value:rsi[j]<=value)isLow=false;
+    if(j<p?rsi[j]>value:rsi[j]>=value)isHigh=false;
    }
    const q=p+L,range=h[p]-l[p];
    if(isLow){
-    for(let a=lows.length-1;a>=0;a--){
-     const p1=lows[a],gap=p-p1;if(gap>c.divMaxGap)break;
-     let lowest=Infinity;for(let j=p1+1;j<p;j++)if(l[j]<lowest)lowest=l[j];
-     if(lowest<l[p])break; // 두 저점 사이에 더 낮은 저점이 있으면 더 오래된 저점과 비교하지 않는다
-     if(gap<c.divMinGap||!Number.isFinite(rsi[p1])||!(l[p]<l[p1])||!(rsi[p]>rsi[p1]+c.divMinRsiDiff))continue;
-     const bodyLow2=Math.min(o[p],k[p]),bodyLow1=Math.min(o[p1],k[p1]),wickRatio=range>0?(bodyLow2-l[p])/range:0;
-     const wick=bodyLow2>=bodyLow1&&wickRatio>=c.divWickRatio;
-     if(!wick&&c.divMode==='wick')continue;
-     const sup=support(p,l[p]);
-     if(!sup.ok){if(inRange(q)){if(sup.touches===0)stats.cliffRejected++;stats.supportRejected++;}break;}
-     const found={kind:wick?'div_wick':'div_regular',p,p1,rsi2:rsi[p],rsi1:rsi[p1],low2:l[p],low1:l[p1],wickRatio,touches:sup.touches,volTouches:sup.volTouches,zLow:sup.zLow,zHigh:sup.zHigh};
-     if(!bull[q]||(wick&&bull[q].kind!=='div_wick')){if(inRange(q)&&!bull[q]){stats.bullish++;stats[wick?'wick':'regular']++;}bull[q]=found;}
-     break;
+    const prev=prevLow;
+    if(prev){
+     const p1=prev.p,gap=p-p1-1;
+     if(gap>=c.divMinGap&&gap<=c.divMaxGap&&value>prev.value+c.divMinRsiDiff&&l[p]<l[p1]&&(value<=oversold||prev.value<=oversold)){
+      const bodyLow2=Math.min(o[p],k[p]),bodyLow1=Math.min(o[p1],k[p1]),wickRatio=range>0?(bodyLow2-l[p])/range:0;
+      const wick=bodyLow2>=bodyLow1&&wickRatio>=c.divWickRatio;
+      if(wick||c.divMode!=='wick'){
+       const sup=support(p,l[p]);
+       if(!sup.ok){if(inRange(q)){if(sup.touches===0)stats.cliffRejected++;stats.supportRejected++;}}
+       else if(!bull[q]){if(inRange(q)){stats.bullish++;stats[wick?'wick':'regular']++;}bull[q]={kind:wick?'div_wick':'div_regular',p,p1,rsi2:value,rsi1:prev.value,low2:l[p],low1:l[p1],wickRatio,touches:sup.touches,volTouches:sup.volTouches,zLow:sup.zLow,zHigh:sup.zHigh};}
+      }
+     }
     }
-    lows.push(p);
+    prevLow={p,value};
    }
    if(isHigh){
-    for(let a=highs.length-1;a>=0;a--){
-     const p1=highs[a],gap=p-p1;if(gap>c.divMaxGap)break;
-     let highest=-Infinity;for(let j=p1+1;j<p;j++)if(h[j]>highest)highest=h[j];
-     if(highest>h[p])break;
-     if(gap<c.divMinGap||!Number.isFinite(rsi[p1])||!(h[p]>h[p1])||!(rsi[p]<rsi[p1]-c.divMinRsiDiff))continue;
-     const bodyHigh2=Math.max(o[p],k[p]),bodyHigh1=Math.max(o[p1],k[p1]),wickRatio=range>0?(h[p]-bodyHigh2)/range:0;
-     const wick=bodyHigh2<=bodyHigh1&&wickRatio>=c.divWickRatio;
-     if(!wick&&c.divMode==='wick')continue;
-     if(!bear[q]){if(inRange(q))stats.bearish++;bear[q]={kind:wick?'div_wick':'div_regular',p,p1,rsi2:rsi[p],rsi1:rsi[p1],high2:h[p],high1:h[p1],wickRatio};}
-     break;
+    const prev=prevHigh;
+    if(prev){
+     const p1=prev.p,gap=p-p1-1;
+     if(gap>=c.divMinGap&&gap<=c.divMaxGap&&value<prev.value-c.divMinRsiDiff&&h[p]>h[p1]&&(value>=overbought||prev.value>=overbought)){
+      const bodyHigh2=Math.max(o[p],k[p]),bodyHigh1=Math.max(o[p1],k[p1]),wickRatio=range>0?(h[p]-bodyHigh2)/range:0;
+      const wick=bodyHigh2<=bodyHigh1&&wickRatio>=c.divWickRatio;
+      if((wick||c.divMode!=='wick')&&!bear[q]){if(inRange(q))stats.bearish++;bear[q]={kind:wick?'div_wick':'div_regular',p,p1,rsi2:value,rsi1:prev.value,high2:h[p],high1:h[p1],wickRatio};}
+     }
     }
-    highs.push(p);
+    prevHigh={p,value};
    }
   }
   return {bull,bear,stats};
